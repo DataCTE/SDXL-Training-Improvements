@@ -146,13 +146,19 @@ class NovelAIDataset(Dataset):
                     min_image_size=self.config.min_image_size,
                     vae_batch_size=self.config.batch_size,
                     num_workers=self.config.batch_processor_config.num_workers,
-                    prefetch_factor=self.config.prefetch_factor
+                    prefetch_factor=self.config.prefetch_factor,
+                    normalize_mean=[0.5, 0.5, 0.5],
+                    normalize_std=[0.5, 0.5, 0.5]
                 ),
                 bucket_manager=self.bucket_manager,
                 vae=self.vae
             )
 
-            # BatchProcessor with updated config
+            # Align config values with BatchProcessor
+            self.config.batch_processor_config.device = str(self.device)
+            self.config.batch_processor_config.batch_size = self.config.batch_size
+            self.config.batch_processor_config.prefetch_factor = self.config.prefetch_factor
+
             self.batch_processor = BatchProcessor(
                 config=self.config.batch_processor_config,
                 image_processor=self.image_processor,

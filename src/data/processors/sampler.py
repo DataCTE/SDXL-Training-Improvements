@@ -35,7 +35,7 @@ class AspectBatchSampler(Sampler[List[int]]):
 
     def __init__(
         self,
-        dataset,  # e.g. NovelAIDataset
+        dataset,  # e.g., NovelAIDataset
         batch_size: int,
         shuffle: bool = True,
         drop_last: bool = False,
@@ -46,12 +46,11 @@ class AspectBatchSampler(Sampler[List[int]]):
         bucket_manager: Optional[BucketManager] = None,
         config: Optional['NovelAIDatasetConfig'] = None
     ):
-        import logging
-        import traceback
-        from torch.utils.data import Sampler
+        """
+        Initialize the batch sampler. Make sure that `dataset` has a `bucket_manager`,
+        `items`, and references to the pipeline (image/text processors, etc.).
+        """
         from weakref import proxy
-        from src.data.processors.batch_processor import BatchProcessor
-
         self.logger = logging.getLogger(__name__)
         self.dataset = proxy(dataset)
         self.batch_size = batch_size
@@ -64,27 +63,26 @@ class AspectBatchSampler(Sampler[List[int]]):
         self.config = config
 
         if bucket_manager is None:
-            if not hasattr(dataset, 'bucket_manager') or not isinstance(dataset.bucket_manager, BucketManager):
-                raise ValueError("Dataset must have a valid BucketManager")
+            if not hasattr(dataset, "bucket_manager") or not isinstance(dataset.bucket_manager, BucketManager):
+                raise ValueError("Dataset must have a valid BucketManager to use AspectBatchSampler.")
             self.bucket_manager = dataset.bucket_manager
         else:
             self.bucket_manager = bucket_manager
 
-        # BatchProcessor instance for batch-level parallel
+        # Create a batch processor for the sampler if needed
         try:
             self.batch_processor = BatchProcessor(
-                config=dataset.config.batch_processor_config,
-                image_processor=dataset.image_processor,
-                text_processor=dataset.text_processor,
-                cache_manager=dataset.cache_manager,
-                vae=dataset.vae
+                config=self.dataset.config.batch_processor_config,
+                image_processor=self.dataset.image_processor,
+                text_processor=self.dataset.text_processor,
+                cache_manager=self.dataset.cache_manager,
+                vae=self.dataset.vae
             )
         except Exception as e:
             self.logger.error(f"Failed to initialize BatchProcessor: {str(e)}")
-            self.logger.error(traceback.format_exc())
             raise
 
-        # Validate
+        # Quick validations
         if batch_size < 1:
             raise ValueError(f"Batch size must be positive, got {batch_size}")
         if max_consecutive_batch_samples < 1:
@@ -92,12 +90,8 @@ class AspectBatchSampler(Sampler[List[int]]):
         if min_bucket_length < 1:
             raise ValueError(f"min_bucket_length must be positive, got {min_bucket_length}")
 
-        # Sampler state
         self.epoch = 0
         self.total_batches = 0
-
-        # Possibly shuffle or set random seed
-        # ...
 
     async def __aiter__(self) -> AsyncIterator[List[int]]:
         """

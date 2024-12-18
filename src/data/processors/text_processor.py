@@ -25,7 +25,7 @@ class TextProcessor:
     def __init__(
         self,
         config: TextProcessorConfig,
-        text_embedder: TextEmbedder,
+        text_embedder: Optional[TextEmbedder] = None,
         tag_weighter: Optional[TagWeighter] = None
     ):
         """Initialize text processor with tag weighting support."""

@@ -318,14 +318,19 @@ class BucketConfig:
 
 @dataclass
 class TextProcessorConfig(DeviceConfig, CacheConfig):
+    """
+    Configuration for text processing, including concurrency and caching options.
+    """
     num_workers: int = DEFAULT_NUM_WORKERS
     batch_size: int = DEFAULT_BATCH_SIZE
     max_token_length: int = DEFAULT_MAX_TOKEN_LENGTH
-    
-    # Tag weighting settings
+
     enable_tag_weighting: bool = True
     tag_frequency_threshold: int = 5
     tag_weight_smoothing: float = 0.1
+
+    # Add this attribute so text_processor.py can reference self.config.use_caching
+    use_caching: bool = False
 
     # Add this attribute to allow passing 'prefetch_factor' from your YAML
     prefetch_factor: int = DEFAULT_PREFETCH_FACTOR
