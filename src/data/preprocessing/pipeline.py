@@ -50,6 +50,19 @@ class PreprocessingPipeline:
         """Initialize preprocessing pipeline.
         
         Args:
+            config: Training configuration
+            num_gpu_workers: Number of GPU workers for encoding
+            num_cpu_workers: Number of CPU workers for transforms
+            num_io_workers: Number of I/O workers for disk ops
+            prefetch_factor: Number of batches to prefetch
+            device_ids: List of GPU device IDs to use
+            cache_dir: Directory for caching
+            use_pinned_memory: Whether to use pinned memory
+            compression: Cache compression algorithm
+        """
+        """Initialize preprocessing pipeline.
+        
+        Args:
             num_gpu_workers: Number of GPU workers for encoding
             num_cpu_workers: Number of CPU workers for transforms
             num_io_workers: Number of I/O workers for disk ops
@@ -177,17 +190,25 @@ class PreprocessingPipeline:
             self.stop_event.set()
 
     def _process_item(self, item: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Process single item with GPU acceleration."""
+        """Process single item with GPU acceleration and memory optimizations."""
         try:
-            # Pre-allocate CUDA stream
+            # Setup memory optimizations
+            if torch.cuda.is_available():
+                verify_memory_optimizations(
+                    model=None,
+                    config=self.config,
+                    device=torch.device("cuda"),
+                    logger=logger
+                )
+            
+            # Pre-allocate CUDA stream with proper synchronization
             stream = torch.cuda.Stream() if torch.cuda.is_available() else None
             
             with autocast(enabled=True):
-                # Optimize memory format before transfer
+                # Optimize memory format and pin memory
                 item = item.to(memory_format=torch.channels_last, non_blocking=True)
-                
-                if self.use_pinned_memory and not item.is_pinned():
-                    item = item.pin_memory()
+                if self.use_pinned_memory:
+                    pin_tensor_(item)
                 
                 if stream:
                     with torch.cuda.stream(stream):

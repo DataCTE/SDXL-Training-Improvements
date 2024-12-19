@@ -46,6 +46,24 @@ class SDXLDataset(Dataset):
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True
     ):
+        """Initialize SDXL dataset with memory optimizations.
+        
+        Args:
+            config: Configuration object
+            image_paths: List of paths to images
+            captions: List of captions/prompts
+            latent_preprocessor: Optional latent preprocessor
+            tag_weighter: Optional tag weighter
+            is_train: Whether this is training data
+        """
+        # Setup memory optimizations first
+        if torch.cuda.is_available():
+            setup_memory_optimizations(
+                model=None,
+                config=config,
+                device=torch.device("cuda"),
+                batch_size=config.training.batch_size
+            )
         # Convert Windows paths if needed
         image_paths = [str(convert_windows_path(p, make_absolute=True)) for p in image_paths]
         # Verify all paths exist after conversion
@@ -203,12 +221,19 @@ class SDXLDataset(Dataset):
         }
 
     def collate_fn(self, examples: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Custom collate function for batching.
+        """Custom collate function for batching with memory optimizations.
         
         Handles different image sizes within batch by using bucketing.
+        Optimizes memory usage during batch construction.
         """
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
-        loss_weights = torch.tensor([example["loss_weight"] for example in examples], dtype=torch.float32)
+        # Stack tensors with memory optimizations
+        with create_stream_context(torch.cuda.current_stream() if torch.cuda.is_available() else None):
+            pixel_values = torch.stack([example["pixel_values"] for example in examples])
+            pixel_values = pixel_values.to(memory_format=torch.channels_last)
+            if torch.cuda.is_available():
+                pin_tensor_(pixel_values)
+                
+            loss_weights = torch.tensor([example["loss_weight"] for example in examples], dtype=torch.float32)
         
         # If using latent preprocessor, get cached embeddings
         if self.latent_preprocessor is not None:
