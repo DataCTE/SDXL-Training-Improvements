@@ -51,7 +51,7 @@ class SDXLTrainer:
         
         # Initialize validator
         if is_main_process():
-            from ..utils.text_to_image_validation import TextToImageValidator
+            from ..core.validation.text_to_image import TextToImageValidator
             self.validator = TextToImageValidator(
                 base_model_path=config.model.pretrained_model_name,
                 device=device,
