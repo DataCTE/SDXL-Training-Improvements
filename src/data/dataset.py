@@ -246,9 +246,9 @@ class SDXLDataset(Dataset):
         with create_stream_context(transfer_stream):
             # Skip if no pinned buffer
             if pinned_buffer is not None:
-            # Copy to pinned buffer
-            for i, example in enumerate(examples):
-                pinned_buffer[i].copy_(example["pixel_values"], non_blocking=True)
+                # Copy to pinned buffer
+                for i, example in enumerate(examples):
+                    pinned_buffer[i].copy_(example["pixel_values"], non_blocking=True)
             
             # Move to GPU with channels-last optimization if using CUDA
             if pinned_buffer is not None:
