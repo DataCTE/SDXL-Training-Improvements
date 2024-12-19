@@ -15,6 +15,7 @@ from ..core.memory.tensor import (
     torch_gc
 )
 from ..core.types import DataType, ModelWeightDtypes
+from ..core.validation.types import ValidationConfig, ValidationMode, ValidationMetric
 from ..config import Config
 from ..core.distributed import is_main_process, get_world_size
 from ..core.logging import log_metrics
