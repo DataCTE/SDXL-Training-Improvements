@@ -1,10 +1,178 @@
 """Noise scheduler and related functions for SDXL training."""
 import logging
+import math
 import torch
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 from ..data.config import Config
 
 logger = logging.getLogger(__name__)
+
+class DDPMScheduler:
+    """Denoising Diffusion Probabilistic Models scheduler."""
+    
+    def __init__(
+        self,
+        num_train_timesteps: int = 1000,
+        beta_start: float = 0.00085,
+        beta_end: float = 0.012,
+        beta_schedule: str = "scaled_linear",
+        clip_sample: bool = True,
+        prediction_type: str = "epsilon",
+        set_alpha_to_one: bool = True,
+        steps_offset: int = 0,
+        timestep_spacing: str = "leading",
+        thresholding: bool = False,
+        dynamic_thresholding_ratio: float = 0.995,
+        sample_max_value: float = 1.0,
+        clip_sample_range: float = 1.0,
+    ):
+        """Initialize DDPM scheduler.
+        
+        Args:
+            num_train_timesteps: Number of diffusion steps
+            beta_start: Starting beta value
+            beta_end: Final beta value
+            beta_schedule: Type of beta schedule
+            clip_sample: Whether to clip samples
+            prediction_type: Type of prediction (epsilon/sample/v)
+            set_alpha_to_one: Whether to force alpha=1
+            steps_offset: Offset for step indices
+            timestep_spacing: How to space timesteps
+            thresholding: Whether to use dynamic thresholding
+            dynamic_thresholding_ratio: Ratio for dynamic thresholding
+            sample_max_value: Maximum sample value
+            clip_sample_range: Sample clipping range
+        """
+        self.num_train_timesteps = num_train_timesteps
+        self.beta_start = beta_start
+        self.beta_end = beta_end
+        self.beta_schedule = beta_schedule
+        self.clip_sample = clip_sample
+        self.prediction_type = prediction_type
+        self.set_alpha_to_one = set_alpha_to_one
+        self.steps_offset = steps_offset
+        self.timestep_spacing = timestep_spacing
+        self.thresholding = thresholding
+        self.dynamic_thresholding_ratio = dynamic_thresholding_ratio
+        self.sample_max_value = sample_max_value
+        self.clip_sample_range = clip_sample_range
+
+        # Initialize betas and alphas
+        self.betas = self._get_beta_schedule()
+        self.alphas = 1.0 - self.betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+        
+        # Set final alpha if needed
+        if self.set_alpha_to_one:
+            self.alphas_cumprod[-1] = 1.0
+            
+        # Compute derived values
+        self.sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod) ** 0.5
+        self.init_noise_sigma = self.sigmas.max()
+
+    def _get_beta_schedule(self) -> torch.Tensor:
+        """Get beta schedule tensor."""
+        if self.beta_schedule == "linear":
+            betas = torch.linspace(self.beta_start, self.beta_end, self.num_train_timesteps)
+        elif self.beta_schedule == "scaled_linear":
+            # Glide paper schedule
+            betas = torch.linspace(self.beta_start ** 0.5, self.beta_end ** 0.5, self.num_train_timesteps) ** 2
+        elif self.beta_schedule == "squaredcos_cap_v2":
+            # Stable Diffusion schedule
+            t = torch.linspace(0, self.num_train_timesteps - 1, self.num_train_timesteps)
+            betas = 0.999 * (torch.cos((t / self.num_train_timesteps + 0.008) / 1.008 * math.pi / 2) ** 2)
+        else:
+            raise ValueError(f"Unknown beta schedule: {self.beta_schedule}")
+        return betas
+
+    def scale_model_input(self, sample: torch.Tensor, timestep: int) -> torch.Tensor:
+        """Scale input sample based on timestep."""
+        return sample
+
+    def set_timesteps(self, num_inference_steps: int) -> None:
+        """Set timesteps for inference."""
+        self.num_inference_steps = num_inference_steps
+
+    def step(
+        self,
+        model_output: torch.Tensor,
+        timestep: int,
+        sample: torch.Tensor,
+        return_dict: bool = True
+    ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, ...]]:
+        """Predict previous mean and variance."""
+        prev_timestep = timestep - self.num_train_timesteps // self.num_inference_steps
+
+        # Get alpha values
+        alpha_prod_t = self.alphas_cumprod[timestep]
+        alpha_prod_t_prev = self.alphas_cumprod[prev_timestep] if prev_timestep >= 0 else 1.0
+        beta_prod_t = 1 - alpha_prod_t
+        beta_prod_t_prev = 1 - alpha_prod_t_prev
+
+        # Compute predicted original sample
+        if self.prediction_type == "epsilon":
+            pred_original_sample = (sample - beta_prod_t ** 0.5 * model_output) / alpha_prod_t ** 0.5
+        elif self.prediction_type == "sample":
+            pred_original_sample = model_output
+        elif self.prediction_type == "v_prediction":
+            pred_original_sample = alpha_prod_t ** 0.5 * sample - beta_prod_t ** 0.5 * model_output
+        else:
+            raise ValueError(f"Unknown prediction type {self.prediction_type}")
+
+        # Clip predicted sample if needed
+        if self.clip_sample:
+            pred_original_sample = torch.clamp(pred_original_sample, -self.clip_sample_range, self.clip_sample_range)
+
+        # Get previous sample
+        prev_sample = alpha_prod_t_prev ** 0.5 * pred_original_sample + beta_prod_t_prev ** 0.5 * model_output
+
+        if not return_dict:
+            return (prev_sample,)
+
+        return {"prev_sample": prev_sample}
+
+    def add_noise(
+        self,
+        original_samples: torch.Tensor,
+        noise: torch.Tensor,
+        timesteps: torch.Tensor
+    ) -> torch.Tensor:
+        """Add noise to samples."""
+        sqrt_alpha_prod = self.alphas_cumprod[timesteps] ** 0.5
+        sqrt_one_minus_alpha_prod = (1 - self.alphas_cumprod[timesteps]) ** 0.5
+        
+        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+        while len(sqrt_alpha_prod.shape) < len(original_samples.shape):
+            sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+            
+        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+        while len(sqrt_one_minus_alpha_prod.shape) < len(original_samples.shape):
+            sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+
+        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
+        return noisy_samples
+
+    def get_velocity(
+        self,
+        sample: torch.Tensor,
+        noise: torch.Tensor,
+        timesteps: torch.Tensor
+    ) -> torch.Tensor:
+        """Get velocity for v-prediction."""
+        sqrt_alpha_prod = self.alphas_cumprod[timesteps] ** 0.5
+        sqrt_one_minus_alpha_prod = (1 - self.alphas_cumprod[timesteps]) ** 0.5
+        
+        # Reshape for broadcasting
+        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+        while len(sqrt_alpha_prod.shape) < len(sample.shape):
+            sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+            
+        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+        while len(sqrt_one_minus_alpha_prod.shape) < len(sample.shape):
+            sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+
+        velocity = sqrt_alpha_prod * noise - sqrt_one_minus_alpha_prod * sample
+        return velocity
 
 def get_karras_scalings(sigmas: torch.Tensor, timestep_indices: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Get Karras noise schedule scalings for given timesteps."""
