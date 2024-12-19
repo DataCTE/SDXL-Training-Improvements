@@ -263,10 +263,10 @@ class CacheManager:
             if tensors:
                 if self._save_chunk(chunk_id, tensors, metadata):
                     # Update main index
-                    for img_path in metadata:
+                    for img_path, meta in metadata.items():
                         self.cache_index["files"][img_path] = {
                             "chunk_id": chunk_id,
-                            "metadata": metadata[img_path]
+                            "metadata": meta
                         }
                         
             # Save index periodically
@@ -326,11 +326,11 @@ class CacheManager:
     def clear_cache(self):
         """Clear all cached files."""
         # Remove chunk files
-        for chunk_info in self.cache_index["chunks"].values():
+        for chunk_id, chunk_info in self.cache_index["chunks"].items():
             try:
                 Path(chunk_info["path"]).unlink()
             except FileNotFoundError:
-                pass
+                logger.warning(f"Cache chunk {chunk_id} already missing")
                 
         # Clear index
         self.cache_index = {"files": {}, "chunks": {}}
