@@ -1,12 +1,35 @@
 """Common type definitions."""
 from enum import Enum, auto
 import inspect
+from typing import Dict, List, Optional, Union
 
 class DataType(Enum):
     """Data types for model components."""
     FLOAT_32 = auto()
     FLOAT_16 = auto()
     BFLOAT_16 = auto()
+
+    @classmethod
+    def from_str(cls, dtype_str: str) -> "DataType":
+        """Convert string to DataType."""
+        mapping = {
+            "float32": cls.FLOAT_32,
+            "float16": cls.FLOAT_16,
+            "bfloat16": cls.BFLOAT_16
+        }
+        if dtype_str not in mapping:
+            raise ValueError(f"Unknown dtype string: {dtype_str}")
+        return mapping[dtype_str]
+
+    def to_torch_dtype(self) -> torch.dtype:
+        """Convert to torch dtype."""
+        import torch
+        mapping = {
+            self.FLOAT_32: torch.float32,
+            self.FLOAT_16: torch.float16,
+            self.BFLOAT_16: torch.bfloat16
+        }
+        return mapping[self]
 
 class ModelWeightDtypes:
     """Data type configuration for model components."""
