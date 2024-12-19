@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 from ...models import StableDiffusionXLModel, ModelType
 from ...config import Config
+from .types import ValidationMode, ValidationMetric, ValidationConfig
 
 logger = logging.getLogger(__name__)
 

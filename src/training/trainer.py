@@ -62,11 +62,20 @@ class SDXLTrainer:
         # Initialize validator
         if is_main_process():
             from ..core.validation.text_to_image import TextToImageValidator
+            validation_config = ValidationConfig(
+                mode=ValidationMode.TEXT_TO_IMAGE,
+                metrics=[ValidationMetric.FID, ValidationMetric.CLIP_SCORE],
+                num_samples=config.training.validation_samples,
+                guidance_scale=config.training.validation_guidance_scale,
+                num_inference_steps=config.training.validation_inference_steps,
+                seed=config.global_config.seed
+            )
             self.validator = TextToImageValidator(
-                base_model_path=config.model.pretrained_model_name,
+                config=config,
                 device=device,
                 output_dir=config.global_config.output_dir,
-                validation_prompts=validation_prompts
+                validation_prompts=validation_prompts,
+                validation_config=validation_config
             )
         
         # Move model and optimizer to device efficiently

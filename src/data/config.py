@@ -79,6 +79,9 @@ class TrainingConfig:
     log_steps: int = 10
     eval_steps: int = 100,
     validation_steps: int = 1000
+    validation_samples: int = 4
+    validation_guidance_scale: float = 7.5
+    validation_inference_steps: int = 30
     max_train_steps: Optional[int] = None
     lr_scheduler: str = "cosine"
     optimizer_betas: Tuple[float, float] = (0.9, 0.999)
