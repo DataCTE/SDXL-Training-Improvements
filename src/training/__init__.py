@@ -7,7 +7,6 @@ from .scheduler import (
     get_scheduler_parameters
 )
 from .noise import generate_noise, get_add_time_ids
-from .metrics import log_metrics
 from .flow_matching import (
     sample_logit_normal,
     optimal_transport_path,

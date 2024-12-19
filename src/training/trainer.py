@@ -19,8 +19,7 @@ from ..core.memory.tensor import (
 from ..core.types import DataType, ModelWeightDtypes
 from ..data.config import Config
 from ..core.distributed import is_main_process, get_world_size
-from ..core.logging.wandb import WandbLogger
-from ..core.logging.metrics import log_metrics
+from ..core.logging import WandbLogger, log_metrics
 from ..models import StableDiffusionXLModel
 from .noise import generate_noise, get_add_time_ids
 
