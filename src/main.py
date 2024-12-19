@@ -15,7 +15,7 @@ from models import UNetWrapper
 from utils.distributed import setup_distributed, cleanup_distributed, is_main_process
 from utils.logging import setup_logging
 from utils.memory import setup_memory_optimizations, verify_memory_optimizations
-from training import configure_noise_scheduler
+from training import configure_noise_scheduler, SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
