@@ -86,8 +86,22 @@ class DDPMScheduler:
         return betas
 
     def scale_model_input(self, sample: torch.Tensor, timestep: int) -> torch.Tensor:
-        """Scale input sample based on timestep."""
-        return sample
+        """Scale input sample based on timestep.
+        
+        Args:
+            sample: Input tensor to scale
+            timestep: Current timestep
+            
+        Returns:
+            Scaled input tensor
+        """
+        # Get sigma for timestep
+        step_index = (self.sigmas == timestep).nonzero().item()
+        sigma = self.sigmas[step_index]
+        
+        # Scale input
+        scaled = sample / ((sigma ** 2 + 1) ** 0.5)
+        return scaled
 
     def set_timesteps(self, num_inference_steps: int) -> None:
         """Set timesteps for inference."""
