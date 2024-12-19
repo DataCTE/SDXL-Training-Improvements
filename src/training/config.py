@@ -11,11 +11,20 @@ class GlobalConfig:
     class ImageConfig:
         """Image processing configuration."""
         target_size: Tuple[int, int] = (1024, 1024)
-        max_size: Tuple[int, int] = (2048, 2048)
-        min_size: Tuple[int, int] = (256, 256)
-        bucket_step: int = 64
-        max_aspect_ratio: float = 2.0
-        max_dim: int = 2048 * 2048  # Max total pixels
+        supported_dims: List[Tuple[int, int]] = field(default_factory=lambda: [
+            (1024, 1024),
+            (1152, 896),
+            (896, 1152),
+            (1216, 832),
+            (832, 1216),
+            (1344, 768),
+            (768, 1344),
+            (1536, 640),
+            (640, 1536)
+        ])
+        max_size: Tuple[int, int] = (1536, 1536)
+        min_size: Tuple[int, int] = (640, 640)
+        max_dim: int = 1536 * 1536  # Max total pixels
         
     @dataclass 
     class CacheConfig:

@@ -539,24 +539,11 @@ class SDXLDataset(Dataset):
             self.tag_weighter = create_tag_weighter(config, captions)
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
-        """Create resolution buckets based on config settings."""
-        buckets = []
-        min_dim = min(self.min_size)
-        max_dim = max(self.max_size)
-        
-        # Generate dimensions
-        for h in range(min_dim, max_dim + 1, self.bucket_step):
-            for w in range(min_dim, max_dim + 1, self.bucket_step):
-                # Check if dimensions are valid
-                if h * w <= self.config.global_config.image.max_dim:
-                    aspect_ratio = w / h
-                    if 1/self.max_aspect_ratio <= aspect_ratio <= self.max_aspect_ratio:
-                        buckets.append((h, w))
-        
-        return sorted(buckets)
+        """Get supported SDXL dimensions as buckets."""
+        return self.config.global_config.image.supported_dims
 
     def _assign_buckets(self) -> List[int]:
-        """Assign each image to closest bucket based on aspect ratio."""
+        """Assign each image to closest supported SDXL dimension."""
         bucket_indices = []
         
         for img_path in self.image_paths:
@@ -564,16 +551,21 @@ class SDXLDataset(Dataset):
             w, h = img.size
             aspect_ratio = w / h
             
-            # Find closest bucket
+            # Find closest supported dimension
             min_diff = float('inf')
             best_bucket_idx = 0
             
             for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
+                # Compare aspect ratios and total area difference
                 bucket_ratio = bucket_w / bucket_h
-                diff = abs(aspect_ratio - bucket_ratio)
+                ratio_diff = abs(aspect_ratio - bucket_ratio)
+                area_diff = abs((w * h) - (bucket_w * bucket_h))
                 
-                if diff < min_diff:
-                    min_diff = diff
+                # Weighted combination of ratio and area differences
+                total_diff = ratio_diff + area_diff / (1536 * 1536)  # Normalize area diff
+                
+                if total_diff < min_diff:
+                    min_diff = total_diff
                     best_bucket_idx = idx
             
             bucket_indices.append(best_bucket_idx)
