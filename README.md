@@ -1,4 +1,4 @@
-# SDXL Training Improvements 🚀
+# SDXL Training Improvements
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -6,30 +6,30 @@
 
 A comprehensive collection of state-of-the-art training improvements for Stable Diffusion XL models, combining research advances from multiple papers into a single high-performance framework.
 
-## 🌟 Features & Implemented Papers
+## Features & Implemented Papers
 
-### 🧠 Memory Optimization
+### Memory Optimization
 - Gradient checkpointing and layer offloading [[1]](#references)
 - Mixed precision training with dynamic scaling [[2]](#references)
 - Efficient tensor memory management [[3]](#references)
 
-### 🔧 Training Methods
+### Training Methods
 - Flow matching with logit-normal sampling from nyaflow-xl [[4]](#references)
 - Dynamic tag-based loss weighting [[5]](#references)
 - Advanced noise scheduling with Karras sigmas [[6]](#references)
 - NovelAI V3 training improvements [[7]](#references)
 
-### 📊 Data Processing
+### Data Processing
 - High-throughput preprocessing pipeline
 - Aspect ratio bucketing for SDXL [[8]](#references)
 - Advanced caption preprocessing [[9]](#references)
 
-### 🏗️ Architecture
+### Architecture
 - Distributed training support
 - CUDA-optimized operations
 - Weights & Biases integration for experiment tracking
 
-## 📋 Requirements
+## Requirements
 
 | Component | Version |
 |-----------|---------|
@@ -38,7 +38,7 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 | Python    | 3.8+ |
 | VRAM      | 24GB+ recommended |
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -76,7 +76,7 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
    python src/main.py --config my_config.yaml
    ```
 
-## ⚙️ Configuration
+## Configuration
 
 The framework uses a hierarchical YAML configuration system:
 
@@ -90,26 +90,26 @@ The framework uses a hierarchical YAML configuration system:
 
 See [`src/config.yaml`](src/config.yaml) for a complete example.
 
-## 💾 Memory Optimization
+## Memory Optimization
 
 Advanced memory features include:
 
-- ♻️ Layer offloading to CPU
-- 🔄 Gradient checkpointing
-- 🎯 Mixed precision training
-- 📊 Activation offloading
-- ⚡ Efficient tensor management
+- Layer offloading to CPU
+- Gradient checkpointing
+- Mixed precision training
+- Activation offloading
+- Efficient tensor management
 
 Configure in `training.memory` section of config file.
 
-## 🔄 Distributed Training
+## Distributed Training
 
 For multi-GPU setups:
 ```bash
 torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
 ```
 
-## 📚 References
+## References
 
 1. Gradient Checkpointing paper citation
 2. Mixed Precision Training paper citation
@@ -121,10 +121,10 @@ torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
 8. Aspect Ratio Bucketing paper citation
 9. Caption Processing paper citation
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
