@@ -16,6 +16,7 @@ from .tensor import (
     pin_tensor_,
     unpin_tensor_
 )
+from .optimizations import setup_memory_optimizations, verify_memory_optimizations
 
 __all__ = [
     "LayerOffloader",
@@ -34,7 +35,9 @@ __all__ = [
     "torch_sync",
     "create_stream_context",
     "pin_tensor_",
-    "unpin_tensor_"
+    "unpin_tensor_",
+    "setup_memory_optimizations",
+    "verify_memory_optimizations"
 ]
 from .tensor import (
     default_device,
