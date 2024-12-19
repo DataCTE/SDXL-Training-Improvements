@@ -153,8 +153,7 @@ def torch_gc() -> None:
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        if torch_version > Version("2.6.0"):
-            torch._C._host_emptyCache()
+        # Host memory cleanup handled by Python's GC
 
     if torch.backends.mps.is_available():
         torch.mps.empty_cache()
