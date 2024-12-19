@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 from diffusers import DDPMScheduler
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from ...data.config import Config
+from src.data.config import Config
 
 logger = logging.getLogger(__name__)
 

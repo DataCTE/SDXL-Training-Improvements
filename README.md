@@ -42,16 +42,6 @@ A research-focused SDXL training framework implementing cutting-edge advances in
   - Better handling of perspective and depth
   - More consistent object proportions
 
-## Model Architecture Features
-
-- Dual Text Encoder Integration
-  - Combined CLIP text embeddings for richer semantic understanding
-  - Enhanced prompt interpretation accuracy
-
-- Advanced UNet Design
-  - Cross-attention optimization for better feature extraction
-  - Improved skip connections for detail preservation
-  - Enhanced downsampling/upsampling paths
 
 ## Requirements
 
