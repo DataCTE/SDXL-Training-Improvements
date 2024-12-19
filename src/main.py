@@ -14,6 +14,7 @@ from data import create_dataset, LatentPreprocessor
 from models import UNetWrapper
 from utils.distributed import setup_distributed, cleanup_distributed, is_main_process
 from utils.logging import setup_logging
+from utils.wandb_logger import WandbLogger
 from utils.memory import setup_memory_optimizations, verify_memory_optimizations
 from training import configure_noise_scheduler, SDXLTrainer
 
@@ -157,6 +158,19 @@ def main():
             device_ids=[device] if device.type == "cuda" else None
         )
 
+    # Initialize W&B logger
+    wandb_logger = None
+    if config.training.use_wandb and is_main_process():
+        wandb_logger = WandbLogger(
+            project="sdxl-training",
+            name=Path(config.global_config.output_dir).name,
+            config=config.__dict__,
+            dir=config.global_config.output_dir,
+            tags=["sdxl", "fine-tuning"]
+        )
+        # Log initial model architecture
+        wandb_logger.log_model(models["unet"])
+    
     # Create trainer
     trainer = SDXLTrainer(
         config=config,
@@ -164,7 +178,8 @@ def main():
         optimizer=optimizer,
         scheduler=noise_scheduler_config["scheduler"],
         train_dataloader=train_dataloader,
-        device=device
+        device=device,
+        wandb_logger=wandb_logger
     )
     
     # Execute training

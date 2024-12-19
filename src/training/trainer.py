@@ -11,6 +11,7 @@ from tqdm.auto import tqdm
 from ..config import Config
 from ..utils.distributed import is_main_process, get_world_size
 from ..utils.logging import log_metrics
+from ..utils.wandb_logger import WandbLogger
 from .noise import generate_noise, get_add_time_ids
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,8 @@ class SDXLTrainer:
         optimizer: torch.optim.Optimizer,
         scheduler: DDPMScheduler,
         train_dataloader: torch.utils.data.DataLoader,
-        device: Union[str, torch.device]
+        device: Union[str, torch.device],
+        wandb_logger: Optional[WandbLogger] = None
     ):
         """Initialize trainer.
         
@@ -44,6 +46,7 @@ class SDXLTrainer:
         self.noise_scheduler = scheduler
         self.train_dataloader = train_dataloader
         self.device = device
+        self.wandb_logger = wandb_logger
         
         # Move model to device
         self.unet = self.unet.to(device)
@@ -180,8 +183,14 @@ class SDXLTrainer:
                     step_metrics,
                     self.global_step,
                     is_main_process=is_main_process(),
-                    use_wandb=self.config.training.use_wandb
+                    use_wandb=False  # Handled by WandbLogger
                 )
+                
+                if self.wandb_logger is not None and is_main_process():
+                    self.wandb_logger.log_metrics(
+                        step_metrics,
+                        step=self.global_step
+                    )
                 
             # Save checkpoint
             if (
