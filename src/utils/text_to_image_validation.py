@@ -111,7 +111,7 @@ class TextToImageValidator:
             # Save comparison
             comparison_path = step_dir / f"{prompt[:50]}.png"
             plt.savefig(comparison_path)
-            plt.close()
+            plt.close(fig)
             
             # Save individual images
             self.base_images[prompt].save(step_dir / f"{prompt[:50]}_base.png")
