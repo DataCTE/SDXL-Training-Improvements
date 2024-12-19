@@ -26,6 +26,7 @@ from core.memory import (
     create_stream_context,
     torch_gc
 )
+from core.types import DataType, ModelWeightDtypes
 from training import configure_noise_scheduler, SDXLTrainer
 
 logger = logging.getLogger(__name__)

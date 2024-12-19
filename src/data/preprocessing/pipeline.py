@@ -14,6 +14,7 @@ from ...core.memory.tensor import (
     tensors_record_stream,
     torch_gc
 )
+from ...core.types import DataType, ModelWeightDtypes
 import nvidia.dali as dali
 import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline
