@@ -21,7 +21,7 @@ from src.models import StableDiffusionXLModel
 from src.training.trainers.base import TrainingMethod
 from src.training.methods.ddpm_trainer import DDPMTrainer 
 from src.training.methods.flow_matching_trainer import FlowMatchingTrainer
-from src.training.trainers.SDXLTrainer import SDXLTrainer
+from src.training.trainers.sdxl_trainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ def create_trainer(
         model=model,
         optimizer=optimizer,
         train_dataloader=train_dataloader,
+        training_method=training_method,
         device=device,
         wandb_logger=wandb_logger,
         validation_prompts=validation_prompts
