@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+# Third-party imports
 import torch
 from PIL import Image
 from PIL.Image import BILINEAR, FLIP_LEFT_RIGHT
@@ -10,8 +11,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import crop
 
-from src.core.memory.tensor import create_stream_context, tensors_record_stream
-
+# Local imports
+from ..core.memory import create_stream_context, tensors_record_stream
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 

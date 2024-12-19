@@ -1,33 +1,46 @@
-"""Main training script for SDXL fine-tuning.
-
-Note: utils/ directory has been removed and its contents reorganized into core/ and other modules.
-"""
+"""Main training script for SDXL fine-tuning."""
 import argparse
 import logging
 import os
 from pathlib import Path
 
+# Third-party imports
 import torch
 from diffusers import AutoencoderKL
 from transformers import CLIPTokenizer, CLIPTextModel
 
-from src.data.config import Config
-from src.data import create_dataset, LatentPreprocessor
-from src.models import StableDiffusionXLModel
-from src.models.base import ModelType
-from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from src.core.logging.logging import setup_logging
-from src.core.logging.wandb import WandbLogger
-from src.core.memory import (
-    setup_memory_optimizations, 
+# Local imports
+from .core import (
+    setup_distributed,
+    cleanup_distributed,
+    is_main_process,
+    setup_logging,
+    WandbLogger,
+    setup_memory_optimizations,
     verify_memory_optimizations,
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
-    torch_gc
+    torch_gc,
+    DataType,
+    ModelWeightDtypes
 )
-from core.types import DataType, ModelWeightDtypes
-from training import configure_noise_scheduler, SDXLTrainer
+
+from .data import (
+    Config,
+    create_dataset,
+    LatentPreprocessor
+)
+
+from .models import (
+    StableDiffusionXLModel,
+    ModelType
+)
+
+from .training import (
+    configure_noise_scheduler,
+    SDXLTrainer
+)
 
 logger = logging.getLogger(__name__)
 
