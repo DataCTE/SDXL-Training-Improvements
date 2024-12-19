@@ -153,8 +153,8 @@ def main():
     
     # Initialize distributed training if needed
     if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-        self.model.unet = torch.nn.parallel.DistributedDataParallel(
-            self.model.unet,
+        models["unet"] = torch.nn.parallel.DistributedDataParallel(
+            models["unet"],
             device_ids=[device] if device.type == "cuda" else None
         )
 
@@ -169,7 +169,7 @@ def main():
             tags=["sdxl", "fine-tuning"]
         )
         # Log initial model architecture
-        wandb_logger.log_model(self.model.unet)
+        wandb_logger.log_model(models["unet"])
     
     # Create trainer
     trainer = SDXLTrainer(
