@@ -221,17 +221,38 @@ class SDXLDataset(Dataset):
         }
 
     def collate_fn(self, examples: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Custom collate function for batching with memory optimizations.
+        """Custom collate function with optimized memory handling and CUDA streams.
         
-        Handles different image sizes within batch by using bucketing.
-        Optimizes memory usage during batch construction.
+        Uses:
+        - Multiple CUDA streams for pipelined transfers
+        - Pinned memory for faster host-device transfers
+        - Channels-last memory format for better throughput
+        - Bucketing for efficient batch construction
         """
-        # Stack tensors with memory optimizations
-        with create_stream_context(torch.cuda.current_stream() if torch.cuda.is_available() else None):
-            pixel_values = torch.stack([example["pixel_values"] for example in examples])
-            pixel_values = pixel_values.to(memory_format=torch.channels_last)
+        # Create streams for pipelined operations
+        transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+        compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+        
+        # Pre-allocate pinned memory buffer
+        if torch.cuda.is_available():
+            buffer_shape = (len(examples),) + examples[0]["pixel_values"].shape
+            pinned_buffer = torch.empty(buffer_shape, pin_memory=True)
+            
+        # Stack tensors with optimized memory handling
+        with create_stream_context(transfer_stream):
+            # Copy to pinned buffer
+            for i, example in enumerate(examples):
+                pinned_buffer[i].copy_(example["pixel_values"], non_blocking=True)
+            
+            # Move to GPU with channels-last optimization
+            pixel_values = pinned_buffer.to(
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                memory_format=torch.channels_last,
+                non_blocking=True
+            )
+            
             if torch.cuda.is_available():
-                pin_tensor_(pixel_values)
+                tensors_record_stream(transfer_stream, pixel_values)
                 
             loss_weights = torch.tensor([example["loss_weight"] for example in examples], dtype=torch.float32)
         

@@ -83,12 +83,38 @@ class CacheManager:
         return hasher.hexdigest()
         
     def _process_image(self, image_path: Path) -> Optional[torch.Tensor]:
-        """Process single image with error handling and memory optimization."""
+        """Process single image with optimized memory handling and CUDA streams."""
         try:
-            image = Image.open(image_path).convert('RGB')
-            # Convert to tensor and normalize with memory optimizations
-            tensor = torch.from_numpy(np.array(image)).float() / 255.0
-            tensor = tensor.permute(2, 0, 1)  # CHW format
+            # Use NVIDIA DALI for faster image loading if available
+            try:
+                import nvidia.dali as dali
+                import nvidia.dali.fn as fn
+                use_dali = True
+            except ImportError:
+                use_dali = False
+                
+            if use_dali:
+                pipe = dali.Pipeline(batch_size=1, num_threads=1, device_id=0)
+                with pipe:
+                    images = fn.readers.file(name="Reader", files=[str(image_path)])
+                    decoded = fn.decoders.image(images, device="mixed")
+                    normalized = fn.crop_mirror_normalize(
+                        decoded,
+                        dtype=dali.types.FLOAT,
+                        mean=[0.5 * 255] * 3,
+                        std=[0.5 * 255] * 3,
+                        output_layout="CHW"
+                    )
+                    pipe.set_outputs(normalized)
+                pipe.build()
+                tensor = pipe.run()[0].as_tensor()
+            else:
+                # Fallback to PIL with optimizations
+                image = Image.open(image_path).convert('RGB')
+                tensor = torch.from_numpy(np.array(image)).float() / 255.0
+                tensor = tensor.permute(2, 0, 1)  # CHW format
+                
+            # Optimize memory format
             tensor = tensor.contiguous(memory_format=torch.channels_last)
             
             # Pin memory if CUDA is available

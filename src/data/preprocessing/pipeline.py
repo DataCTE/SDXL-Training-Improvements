@@ -201,8 +201,13 @@ class PreprocessingPipeline:
                     logger=logger
                 )
             
-            # Pre-allocate CUDA stream with proper synchronization
-            stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            # Use multiple streams for pipelining
+            compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            
+            # Pre-allocate pinned memory buffer
+            if self.use_pinned_memory and torch.cuda.is_available():
+                pinned_buffer = torch.empty_like(item, pin_memory=True)
             
             with autocast(enabled=True):
                 # Optimize memory format and pin memory

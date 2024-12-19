@@ -146,12 +146,18 @@ class LatentPreprocessor:
         pixel_values: torch.Tensor,
         batch_size: int = 8
     ) -> Dict[str, torch.Tensor]:
-        """Encode images to VAE latents."""
+        """Encode images to VAE latents with optimized memory handling."""
         if not isinstance(pixel_values, torch.Tensor):
             pixel_values = torch.stack(list(pixel_values))
             
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        pixel_values = pixel_values.to(self.device)
+        # Optimize memory format and pin memory
+        pixel_values = pixel_values.to(memory_format=torch.channels_last).float()
+        if torch.cuda.is_available():
+            pixel_values = pixel_values.pin_memory()
+            
+        # Create streams for pipelined transfer and compute
+        transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+        compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
 
         latents = []
         for idx in range(0, len(pixel_values), batch_size):
