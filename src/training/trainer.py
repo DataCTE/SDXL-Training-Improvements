@@ -1,31 +1,76 @@
 """SDXL trainer implementation."""
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Type
 
 import torch
-import torch.nn.functional as F
 from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
 from ..core.types import DataType, ModelWeightDtypes
-
 from ..core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
     torch_gc
 )
-from ..core.types import DataType, ModelWeightDtypes
 from ..data.config import Config
 from ..core.distributed import is_main_process, get_world_size
 from ..core.logging import WandbLogger, log_metrics
 from ..models import StableDiffusionXLModel
-from .noise import generate_noise, get_add_time_ids
+from .methods.base import BaseSDXLTrainer
+from .methods.ddpm_trainer import DDPMTrainer
+from .methods.flow_matching_trainer import FlowMatchingTrainer
 
 logger = logging.getLogger(__name__)
 
-class SDXLTrainer:
+def create_trainer(
+    config: Config,
+    model: StableDiffusionXLModel,
+    optimizer: torch.optim.Optimizer,
+    train_dataloader: torch.utils.data.DataLoader,
+    device: Union[str, torch.device],
+    wandb_logger: Optional[WandbLogger] = None,
+    validation_prompts: Optional[List[str]] = None
+) -> BaseSDXLTrainer:
+    """Create appropriate trainer based on config.
+    
+    Args:
+        config: Training configuration
+        model: SDXL model
+        optimizer: Optimizer
+        train_dataloader: Training data loader
+        device: Target device
+        wandb_logger: Optional W&B logger
+        validation_prompts: Optional validation prompts
+        
+    Returns:
+        Configured trainer instance
+    """
+    # Map method names to trainer classes
+    trainer_map = {
+        "ddpm": DDPMTrainer,
+        "flow_matching": FlowMatchingTrainer
+    }
+    
+    # Get trainer class
+    method = config.training.method.lower()
+    if method not in trainer_map:
+        raise ValueError(f"Unknown training method: {method}")
+    
+    trainer_cls = trainer_map[method]
+    logger.info(f"Using {trainer_cls.__name__} for training")
+    
+    # Create trainer instance
+    return trainer_cls(
+        config=config,
+        model=model,
+        optimizer=optimizer,
+        train_dataloader=train_dataloader,
+        device=device,
+        wandb_logger=wandb_logger,
+        validation_prompts=validation_prompts
+    )
     """Trainer for SDXL fine-tuning with advanced features."""
     
     def __init__(

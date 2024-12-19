@@ -256,12 +256,11 @@ def main():
         # Log initial model architecture
         wandb_logger.log_model(models["unet"])
     
-    # Create trainer
-    trainer = SDXLTrainer(
+    # Create appropriate trainer based on method
+    trainer = create_trainer(
         config=config,
         model=sdxl_model,
         optimizer=optimizer,
-        scheduler=noise_scheduler_config["scheduler"],
         train_dataloader=train_dataloader,
         device=device,
         wandb_logger=wandb_logger
