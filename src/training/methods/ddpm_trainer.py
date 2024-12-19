@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Optional
 
 import torch
+from torch import Tensor
 import torch.nn.functional as F
 
 from ...core.distributed import is_main_process
@@ -12,9 +13,7 @@ from ...training.schedulers import (
     get_sigmas,
     get_add_time_ids
 )
-from ..trainer import SDXLTrainer
-from ...data.config import Config
-from ...models import StableDiffusionXLModel
+from ..trainer import BaseSDXLTrainer
 
 logger = logging.getLogger(__name__)
 
