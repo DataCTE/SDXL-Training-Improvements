@@ -39,10 +39,8 @@ from src.models import (
     ModelType
 )
 
-from src.training import (
-    configure_noise_scheduler,
-    create_trainer
-)
+from src.training.schedulers import configure_noise_scheduler
+from src.training import create_trainer
 
 logger = logging.getLogger(__name__)
 

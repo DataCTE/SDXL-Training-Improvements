@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from src.core.distributed import is_main_process
 from src.core.logging import log_metrics
-from src.training.noise import generate_noise, get_add_time_ids
+from ...training.schedulers import get_scheduler_parameters, get_sigmas
 from src.training.trainers.SDXLTrainer import BaseSDXLTrainer
 
 logger = logging.getLogger(__name__)
@@ -38,13 +38,12 @@ class DDPMTrainer(BaseSDXLTrainer):
         prompt_embeds = batch["prompt_embeds"]
         pooled_prompt_embeds = batch["pooled_prompt_embeds"]
         
-        # Add noise
-        noise = generate_noise(
+        # Add noise using scheduler
+        noise = torch.randn(
             latents.shape,
             device=latents.device,
             dtype=latents.dtype,
-            generator=generator,
-            layout=latents
+            generator=generator
         )
         timesteps = torch.randint(
             0,
