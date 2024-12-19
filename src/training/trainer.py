@@ -62,8 +62,10 @@ class SDXLTrainer:
                 validation_prompts=validation_prompts
             )
         
-        # Move model to device
-        self.model.to(device)
+        # Move model to device efficiently
+        if not tensors_match_device(self.model.state_dict(), device):
+            tensors_to_device_(self.model.state_dict(), device)
+            torch_gc()
         
         # Training state
         self.global_step = 0

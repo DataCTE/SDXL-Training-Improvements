@@ -11,7 +11,10 @@ from ..core.types import DataType
 from ..core.memory.tensor import (
     tensors_to_device_,
     device_equals,
-    torch_gc
+    torch_gc,
+    tensors_match_device,
+    tensors_record_stream,
+    create_stream_context
 )
 from .base import BaseModel, BaseModelEmbedding, ModelType
 from diffusers import (
@@ -106,7 +109,8 @@ class StableDiffusionXLModel(BaseModel):
 
     def vae_to(self, device: torch.device) -> None:
         """Move VAE to device."""
-        self.vae.to(device=device)
+        if not tensors_match_device(self.vae.state_dict(), device):
+            tensors_to_device_(self.vae.state_dict(), device)
 
     def text_encoder_to(self, device: torch.device) -> None:
         """Move both text encoders to device."""
@@ -260,7 +264,9 @@ class StableDiffusionXLModel(BaseModel):
                 [rand.random() > text_encoder_1_dropout_probability for _ in range(batch_size)],
                 device=train_device
             ).float()
-            text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
+            with create_stream_context(torch.cuda.current_stream()):
+                text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
+                tensors_record_stream(torch.cuda.current_stream(), text_encoder_1_output)
 
         if text_encoder_2_dropout_probability is not None:
             dropout_text_encoder_2_mask = torch.tensor(

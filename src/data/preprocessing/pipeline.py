@@ -8,6 +8,12 @@ from typing import Dict, List, Optional, Union, Any
 import torch
 import torch.cuda
 from torch.cuda.amp import autocast
+from ...core.memory.tensor import (
+    tensors_to_device_,
+    create_stream_context,
+    tensors_record_stream,
+    torch_gc
+)
 import nvidia.dali as dali
 import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline
@@ -151,9 +157,9 @@ class PreprocessingPipeline:
                 if self.use_pinned_memory:
                     item = item.pin_memory()
                 
-                item = item.to(
+                tensors_to_device_(
+                    item, 
                     device=self.device_ids[0],
-                    memory_format=torch.channels_last,
                     non_blocking=True
                 )
 

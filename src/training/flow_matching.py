@@ -21,7 +21,9 @@ def sample_logit_normal(
     Returns:
         Sampled tensor in [0,1]
     """
-    normal = torch.randn(shape, device=device, dtype=dtype)
+    with create_stream_context(torch.cuda.current_stream()):
+        normal = torch.randn(shape, device=device, dtype=dtype)
+        tensors_record_stream(torch.cuda.current_stream(), normal)
     return torch.sigmoid(normal)
 
 def optimal_transport_path(
