@@ -1,117 +1,130 @@
-# SDXL Training Improvements
+# SDXL Training Improvements 🚀
+
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 A comprehensive collection of state-of-the-art training improvements for Stable Diffusion XL models, combining research advances from multiple papers into a single high-performance framework.
 
-## Features & Implemented Papers
+## 🌟 Features & Implemented Papers
 
-### Memory Optimization
-- Gradient checkpointing and layer offloading [1]
-- Mixed precision training with dynamic scaling [2]
-- Efficient tensor memory management [3]
+### 🧠 Memory Optimization
+- Gradient checkpointing and layer offloading [[1]](#references)
+- Mixed precision training with dynamic scaling [[2]](#references)
+- Efficient tensor memory management [[3]](#references)
 
-### Training Methods
-- Flow matching with logit-normal sampling from nyaflow-xl [4]
-- Dynamic tag-based loss weighting [5] 
-- Advanced noise scheduling with Karras sigmas [6]
-- NovelAI V3 training improvements [7]
+### 🔧 Training Methods
+- Flow matching with logit-normal sampling from nyaflow-xl [[4]](#references)
+- Dynamic tag-based loss weighting [[5]](#references)
+- Advanced noise scheduling with Karras sigmas [[6]](#references)
+- NovelAI V3 training improvements [[7]](#references)
 
-### Data Processing
+### 📊 Data Processing
 - High-throughput preprocessing pipeline
-- Aspect ratio bucketing for SDXL [8]
-- Advanced caption preprocessing [9]
+- Aspect ratio bucketing for SDXL [[8]](#references)
+- Advanced caption preprocessing [[9]](#references)
 
-### Architecture
+### 🏗️ Architecture
 - Distributed training support
 - CUDA-optimized operations
-- Wandb integration for experiment tracking
+- Weights & Biases integration for experiment tracking
 
-## Paper Citations
+## 📋 Requirements
 
-[1] Gradient Checkpointing paper citation
-[2] Mixed Precision Training paper citation
-[3] Memory Management paper citation
-[4] nyanko7, "nyaflow-xl-alpha: SDXL finetuning with Flow Matching", https://huggingface.co/nyanko7/nyaflow-xl-alpha, 2024
-[5] Dynamic Loss paper citation
-[6] Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
-[7] Ossa et al. "Improvements to SDXL in NovelAI Diffusion V3" arXiv:2312.12559, 2023
-[8] Aspect Ratio Bucketing paper citation
-[9] Caption Processing paper citation
+| Component | Version |
+|-----------|---------|
+| WSL2      | Ubuntu 20.04+ |
+| CUDA      | 11.7+ |
+| Python    | 3.8+ |
+| VRAM      | 24GB+ recommended |
 
-## Requirements
+## 🚀 Quick Start
 
-- WSL2 with Ubuntu 20.04 or later
-- CUDA 11.7 or later
-- Python 3.8+
-- 24GB+ VRAM recommended
-
-## Installation
+### Installation
 
 1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/sdxl-training.git
-cd sdxl-training
-```
+   ```bash
+   git clone https://github.com/yourusername/sdxl-training.git
+   cd sdxl-training
+   ```
 
 2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate
-```
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Linux/WSL
+   ```
 
 3. Install dependencies:
-```bash
-pip install -e .
-```
+   ```bash
+   pip install -e .
+   ```
 
-## Usage
+### Usage
 
-1. Prepare your configuration file:
-```bash
-cp src/config.yaml my_config.yaml
-```
+1. Prepare configuration:
+   ```bash
+   cp src/config.yaml my_config.yaml
+   ```
 
-2. Edit the configuration file to match your requirements:
-- Set data paths
-- Configure training parameters
-- Adjust memory optimization settings
+2. Configure training:
+   - Set data paths
+   - Configure training parameters
+   - Adjust memory optimization settings
 
 3. Start training:
-```bash
-python src/main.py --config my_config.yaml
-```
+   ```bash
+   python src/main.py --config my_config.yaml
+   ```
 
-## Configuration
+## ⚙️ Configuration
 
-The framework uses a hierarchical YAML configuration system with the following main sections:
+The framework uses a hierarchical YAML configuration system:
 
-- `global_config`: General settings and paths
-- `model`: Model architecture and parameters
-- `training`: Training loop configuration
-- `data`: Dataset and preprocessing settings
-- `tag_weighting`: Caption-based loss weighting
+| Section | Description |
+|---------|-------------|
+| `global_config` | General settings and paths |
+| `model` | Model architecture and parameters |
+| `training` | Training loop configuration |
+| `data` | Dataset and preprocessing settings |
+| `tag_weighting` | Caption-based loss weighting |
 
-See `src/config.yaml` for a complete example.
+See [`src/config.yaml`](src/config.yaml) for a complete example.
 
-## Memory Optimization
+## 💾 Memory Optimization
 
-The framework includes several memory optimization features:
+Advanced memory features include:
 
-- Layer offloading to CPU
-- Gradient checkpointing
-- Mixed precision training
-- Activation offloading
-- Efficient tensor management
+- ♻️ Layer offloading to CPU
+- 🔄 Gradient checkpointing
+- 🎯 Mixed precision training
+- 📊 Activation offloading
+- ⚡ Efficient tensor management
 
-Configure these in the `training.memory` section of your config file.
+Configure in `training.memory` section of config file.
 
-## Distributed Training
+## 🔄 Distributed Training
 
-For multi-GPU training:
-
+For multi-GPU setups:
 ```bash
 torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
 ```
 
-## License
+## 📚 References
 
-MIT License - See LICENSE file for details.
+1. Gradient Checkpointing paper citation
+2. Mixed Precision Training paper citation
+3. Memory Management paper citation
+4. [nyaflow-xl-alpha: SDXL finetuning with Flow Matching](https://huggingface.co/nyanko7/nyaflow-xl-alpha)
+5. Dynamic Loss paper citation
+6. Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
+7. Ossa et al. ["Improvements to SDXL in NovelAI Diffusion V3"](https://arxiv.org/abs/2312.12559)
+8. Aspect Ratio Bucketing paper citation
+9. Caption Processing paper citation
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
