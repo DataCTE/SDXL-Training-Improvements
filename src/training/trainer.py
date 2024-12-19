@@ -1,10 +1,9 @@
-"""SDXL trainer implementation."""
+"""SDXL trainer factory and base implementation."""
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Type
 
 import torch
-from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
 from src.core.types import DataType, ModelWeightDtypes
@@ -15,9 +14,10 @@ from src.core.memory.tensor import (
     torch_gc
 )
 from src.data.config import Config
-from src.core.distributed import is_main_process, get_world_size
+from src.core.distributed import is_main_process
 from src.core.logging import WandbLogger, log_metrics
 from src.models import StableDiffusionXLModel
+from src.training.methods.base import TrainingMethod
 from src.training.methods.ddpm_trainer import DDPMTrainer
 from src.training.methods.flow_matching_trainer import FlowMatchingTrainer
 

@@ -6,17 +6,16 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from src.core.distributed import is_main_process
+from src.training.methods.base import TrainingMethod
 from src.training.schedulers.noise_scheduler import get_add_time_ids
-from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
-class DDPMTrainer(SDXLTrainer):
+class DDPMTrainer(TrainingMethod):
     """SDXL trainer using DDPM method with v-prediction."""
     
     @property
-    def method_name(self) -> str:
+    def name(self) -> str:
         """Get training method name."""
         return "ddpm"
 

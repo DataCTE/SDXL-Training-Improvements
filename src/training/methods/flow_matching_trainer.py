@@ -6,18 +6,16 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from src.core.distributed import is_main_process
-from src.core.logging import log_metrics
+from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_scheduler_parameters, get_sigmas, get_add_time_ids
-from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
-class FlowMatchingTrainer(SDXLTrainer):
+class FlowMatchingTrainer(TrainingMethod):
     """SDXL trainer using Flow Matching method."""
     
     @property
-    def method_name(self) -> str:
+    def name(self) -> str:
         return "flow_matching"
 
     def sample_logit_normal(
