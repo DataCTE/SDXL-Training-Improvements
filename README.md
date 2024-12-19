@@ -33,7 +33,7 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 [4] Flow Matching paper citation
 [5] Dynamic Loss paper citation
 [6] Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
-[7] Ossa et al. "Improvements to SDXL in NovelAI Diffusion V3" arXiv:2409.15997, 2024
+[7] Ossa et al. "Improvements to SDXL in NovelAI Diffusion V3" arXiv:2312.12559, 2023
 [8] Aspect Ratio Bucketing paper citation
 [9] Caption Processing paper citation
 
