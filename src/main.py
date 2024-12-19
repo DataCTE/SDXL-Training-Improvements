@@ -13,7 +13,8 @@ from transformers import CLIPTokenizer, CLIPTextModel
 
 from config import Config
 from data import create_dataset, LatentPreprocessor
-from models import StableDiffusionXLModel, ModelType
+from models import StableDiffusionXLModel
+from models.base import ModelType
 from core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from core.logging import setup_logging
 from core.logging.wandb import WandbLogger
@@ -99,9 +100,10 @@ def main():
     if is_main_process():
         logger.info(f"Using device: {device}")
         
-    # Load models efficiently
+    # Load and configure models
     logger.info("Loading models...")
     models = load_models(config, device)
+    sdxl_model = models["model"]
     
     # Move models to device efficiently
     for name, model in models.items():
@@ -113,13 +115,13 @@ def main():
     
     # Setup memory optimizations
     setup_memory_optimizations(
-        models["unet"],
+        sdxl_model.unet,
         config,
         device
     )
     
     if is_main_process():
-        verify_memory_optimizations(models["unet"], config, device, logger)
+        verify_memory_optimizations(sdxl_model.unet, config, device, logger)
     
     # Initialize latent preprocessor
     latent_preprocessor = LatentPreprocessor(
@@ -189,7 +191,7 @@ def main():
     # Create trainer
     trainer = SDXLTrainer(
         config=config,
-        unet=models["unet"],
+        model=sdxl_model,
         optimizer=optimizer,
         scheduler=noise_scheduler_config["scheduler"],
         train_dataloader=train_dataloader,
