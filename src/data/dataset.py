@@ -233,37 +233,52 @@ class SDXLDataset(Dataset):
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
         compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
         
-        # Pre-allocate pinned memory buffer
+        # Initialize variables
+        pixel_values = None
+        pinned_buffer = None
+        
+        # Pre-allocate pinned memory buffer if using CUDA
         if torch.cuda.is_available():
             buffer_shape = (len(examples),) + examples[0]["pixel_values"].shape
             pinned_buffer = torch.empty(buffer_shape, pin_memory=True)
             
         # Stack tensors with optimized memory handling
         with create_stream_context(transfer_stream):
+            # Skip if no pinned buffer
+            if pinned_buffer is not None:
             # Copy to pinned buffer
             for i, example in enumerate(examples):
                 pinned_buffer[i].copy_(example["pixel_values"], non_blocking=True)
             
-            # Move to GPU with channels-last optimization
-            pixel_values = pinned_buffer.to(
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                memory_format=torch.channels_last,
-                non_blocking=True
-            )
-            
-            if torch.cuda.is_available():
-                tensors_record_stream(transfer_stream, pixel_values)
+            # Move to GPU with channels-last optimization if using CUDA
+            if pinned_buffer is not None:
+                pixel_values = pinned_buffer.to(
+                    device="cuda" if torch.cuda.is_available() else "cpu",
+                    memory_format=torch.channels_last,
+                    non_blocking=True
+                )
+                
+                if torch.cuda.is_available():
+                    tensors_record_stream(transfer_stream, pixel_values)
+            else:
+                # Fallback for CPU-only
+                pixel_values = torch.stack([example["pixel_values"] for example in examples])
                 
             loss_weights = torch.tensor([example["loss_weight"] for example in examples], dtype=torch.float32)
         
         # If using latent preprocessor, get cached embeddings
         if self.latent_preprocessor is not None:
-            text_embeddings = self.latent_preprocessor.encode_prompt(
-                [example["text"] for example in examples],
-                proportion_empty_prompts=self.config.data.proportion_empty_prompts,
-                is_train=self.is_train
-            )
-            vae_embeddings = self.latent_preprocessor.encode_images(pixel_values)
+            # Use compute stream for preprocessing
+            with create_stream_context(compute_stream):
+                if compute_stream is not None:
+                    compute_stream.wait_stream(transfer_stream)
+                    
+                text_embeddings = self.latent_preprocessor.encode_prompt(
+                    [example["text"] for example in examples],
+                    proportion_empty_prompts=self.config.data.proportion_empty_prompts,
+                    is_train=self.is_train
+                )
+                vae_embeddings = self.latent_preprocessor.encode_images(pixel_values)
             
             return {
                 "pixel_values": pixel_values,
