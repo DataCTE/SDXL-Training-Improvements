@@ -12,6 +12,7 @@ from .flow_matching import (
     optimal_transport_path,
     compute_flow_matching_loss
 )
+from ..core.logging import log_metrics
 
 __all__ = [
     "SDXLTrainer",
