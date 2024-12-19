@@ -7,9 +7,9 @@ import torch.nn.functional as F
 
 from src.core.distributed import is_main_process
 from src.core.logging import log_metrics
-from ...training.schedulers import get_scheduler_parameters, get_sigmas, get_add_time_ids
+from src.training.schedulers import get_scheduler_parameters, get_sigmas, get_add_time_ids
 from src.training.trainers.SDXLTrainer import BaseSDXLTrainer
-
+from src.training.schedulers.noise_scheduler import get_karras_sigmas
 logger = logging.getLogger(__name__)
 
 class DDPMTrainer(BaseSDXLTrainer):
