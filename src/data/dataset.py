@@ -27,10 +27,6 @@ from src.core.memory.optimizations import (
     setup_memory_optimizations,
     verify_memory_optimizations
 )
-from src.core.memory.optimizations import (
-    setup_memory_optimizations,
-    verify_memory_optimizations
-)
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
