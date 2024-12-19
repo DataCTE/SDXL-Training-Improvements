@@ -1,0 +1,68 @@
+global_config:
+  image:
+    target_size: [1024, 1024]
+    supported_dims:
+      - [1024, 1024]
+      - [1152, 896]
+      - [896, 1152]
+      - [1216, 832]
+      - [832, 1216]
+      - [1344, 768]
+      - [768, 1344]
+      - [1536, 640]
+      - [640, 1536]
+    max_size: [1536, 1536]
+    min_size: [640, 640]
+    max_dim: 2359296  # 1536 * 1536
+  cache:
+    cache_dir: "cache"
+    use_cache: true
+    clear_cache_on_start: false
+  seed: null
+  output_dir: "outputs"
+
+model:
+  pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
+  num_timesteps: 1000
+  sigma_min: 0.002
+  sigma_max: 80.0
+  rho: 7.0
+
+training:
+  batch_size: 4
+  gradient_accumulation_steps: 1
+  mixed_precision: true
+  gradient_checkpointing: true
+  learning_rate: 1.0e-5
+  max_grad_norm: 1.0
+  num_epochs: 100
+  warmup_steps: 500
+  save_steps: 500
+  log_steps: 10
+  eval_steps: 100
+  max_train_steps: null
+  lr_scheduler: "cosine"
+  optimizer_betas: [0.9, 0.999]
+  weight_decay: 1.0e-2
+  optimizer_eps: 1.0e-8
+  prediction_type: "epsilon"
+  snr_gamma: 5.0
+  use_wandb: true
+  random_flip: true
+  center_crop: true
+
+data:
+  train_data_dir: "data/train"
+  val_data_dir: "data/val"
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  proportion_empty_prompts: 0.05
+
+tag_weighting:
+  enable_tag_weighting: true
+  use_cache: true
+  default_weight: 1.0
+  min_weight: 0.1
+  max_weight: 10.0
+  smoothing_factor: 0.1
