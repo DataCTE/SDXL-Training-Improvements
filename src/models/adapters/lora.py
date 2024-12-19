@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Union
 import torch
 import torch.nn as nn
 
-from src.core import logging
+import logging
 
 logger = logging.getLogger(__name__)
 

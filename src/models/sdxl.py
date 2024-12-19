@@ -6,8 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 from torch import Tensor
 
-from src.core import logging
-
+import logging
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,

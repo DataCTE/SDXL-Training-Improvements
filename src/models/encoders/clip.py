@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 from transformers import CLIPTextModel
 
-from src.core import logging
+import logging
 
 logger = logging.getLogger(__name__)
 
