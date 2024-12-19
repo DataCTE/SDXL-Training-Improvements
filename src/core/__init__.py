@@ -9,6 +9,7 @@ from .memory.tensor import (
     tensors_match_device,
     device_equals
 )
+from .memory.optimizations import setup_memory_optimizations, verify_memory_optimizations
 from .distributed import (
     setup_distributed,
     cleanup_distributed,
@@ -30,6 +31,8 @@ __all__ = [
     "tensors_record_stream", 
     "tensors_match_device",
     "device_equals",
+    "setup_memory_optimizations",
+    "verify_memory_optimizations",
     "setup_distributed",
     "cleanup_distributed",
     "is_main_process",
