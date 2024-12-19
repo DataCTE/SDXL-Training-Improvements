@@ -75,7 +75,7 @@ def main():
     args = parse_args()
     
     # Load config
-    config = Config()  # TODO: Load from file
+    config = Config.from_yaml(args.config)
     
     # Setup logging
     setup_logging(
@@ -120,8 +120,9 @@ def main():
     logger.info("Creating datasets...")
     train_dataset = create_dataset(
         config,
-        ["path/to/image1.jpg"],  # TODO: Load actual image paths
-        ["caption 1"],  # TODO: Load actual captions
+        [str(p) for p in Path(config.data.train_data_dir).glob("*.jpg")],
+        [p.with_suffix(".txt").read_text().strip() 
+         for p in Path(config.data.train_data_dir).glob("*.jpg")],
         latent_preprocessor=latent_preprocessor,
         is_train=True
     )
@@ -156,7 +157,18 @@ def main():
             device_ids=[device] if device.type == "cuda" else None
         )
 
-    # TODO: Implement training loop
+    # Create trainer
+    trainer = SDXLTrainer(
+        config=config,
+        unet=models["unet"],
+        optimizer=optimizer,
+        scheduler=noise_scheduler_config["scheduler"],
+        train_dataloader=train_dataloader,
+        device=device
+    )
+    
+    # Execute training
+    trainer.train()
     
     # Cleanup
     cleanup_distributed()
