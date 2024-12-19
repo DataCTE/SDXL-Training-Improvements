@@ -29,7 +29,7 @@ from training.memory import (
     setup_memory_optimizations,
     verify_memory_optimizations
 )
-from training.noise import generate_noise, get_add_time_ids
+from .training.noise import generate_noise, get_add_time_ids
 from training.metrics import log_metrics as utils_log_metrics
 
 
