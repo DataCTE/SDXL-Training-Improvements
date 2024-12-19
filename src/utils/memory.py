@@ -8,6 +8,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+def configure_model_memory_format(
+    model: torch.nn.Module,
+    config: "Config"  # type: ignore
+) -> None:
+    """Configure model memory format for training.
+    
+    Args:
+        model: Model to configure
+        config: Training config
+    """
+    if torch.cuda.is_available():
+        model = model.to(memory_format=torch.channels_last)
+
 def setup_memory_optimizations(
     model: torch.nn.Module,
     config: "Config",  # type: ignore

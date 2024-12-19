@@ -24,7 +24,11 @@ from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from training.config import Config
-from training.memory import setup_memory_optimizations, verify_memory_optimizations
+from training.memory import (
+    setup_memory_optimizations,
+    verify_memory_optimizations,
+    configure_model_memory_format
+)
 from training.noise import generate_noise, get_add_time_ids
 from training.metrics import log_metrics
 
@@ -1103,7 +1107,7 @@ class NovelAIDiffusionV3Trainer(torch.nn.Module):
 
     def log_metrics(self, metrics: Dict[str, Any], step_type: str = "step") -> None:
         """Log metrics using utility function."""
-        utils_log_metrics(
+        log_metrics(
             metrics=metrics,
             step=self.global_step,
             is_main_process=True,  # TODO: Add distributed training support
