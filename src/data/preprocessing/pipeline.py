@@ -157,11 +157,14 @@ class PreprocessingPipeline:
                 if self.use_pinned_memory:
                     item = item.pin_memory()
                 
-                tensors_to_device_(
-                    item, 
-                    device=self.device_ids[0],
-                    non_blocking=True
-                )
+                with create_stream_context(torch.cuda.current_stream()):
+                    tensors_to_device_(
+                        item, 
+                        device=self.device_ids[0],
+                        non_blocking=True
+                    )
+                    if item.device.type == 'cuda':
+                        tensors_record_stream(torch.cuda.current_stream(), item)
 
                 # Custom CUDA stream for async processing
                 stream = torch.cuda.Stream()

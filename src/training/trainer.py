@@ -62,9 +62,13 @@ class SDXLTrainer:
                 validation_prompts=validation_prompts
             )
         
-        # Move model to device efficiently
+        # Move model and optimizer to device efficiently
         if not tensors_match_device(self.model.state_dict(), device):
-            tensors_to_device_(self.model.state_dict(), device)
+            with create_stream_context(torch.cuda.current_stream()):
+                tensors_to_device_(self.model.state_dict(), device, non_blocking=True)
+                if hasattr(self.optimizer, 'state'):
+                    tensors_to_device_(self.optimizer.state, device, non_blocking=True)
+            torch.cuda.current_stream().synchronize()
             torch_gc()
         
         # Training state

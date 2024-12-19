@@ -17,7 +17,14 @@ from models import StableDiffusionXLModel, ModelType
 from core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from core.logging import setup_logging
 from core.logging.wandb import WandbLogger
-from core.memory import setup_memory_optimizations, verify_memory_optimizations
+from core.memory import (
+    setup_memory_optimizations, 
+    verify_memory_optimizations,
+    tensors_to_device_,
+    tensors_match_device,
+    create_stream_context,
+    torch_gc
+)
 from training import configure_noise_scheduler, SDXLTrainer
 
 logger = logging.getLogger(__name__)
@@ -92,9 +99,17 @@ def main():
     if is_main_process():
         logger.info(f"Using device: {device}")
         
-    # Load models
+    # Load models efficiently
     logger.info("Loading models...")
     models = load_models(config, device)
+    
+    # Move models to device efficiently
+    for name, model in models.items():
+        if hasattr(model, 'state_dict') and not tensors_match_device(model.state_dict(), device):
+            logger.info(f"Moving {name} to device {device}")
+            with create_stream_context(torch.cuda.current_stream()):
+                tensors_to_device_(model.state_dict(), device)
+            torch_gc()
     
     # Setup memory optimizations
     setup_memory_optimizations(

@@ -106,8 +106,11 @@ class SDXLDataset(Dataset):
         if self.is_train and self.config.training.random_flip and torch.rand(1).item() < 0.5:
             image = image.transpose(FLIP_LEFT_RIGHT)
             
-        # Convert to tensor and normalize
-        image = self.train_transforms(image)
+        # Convert to tensor and normalize efficiently
+        with create_stream_context(torch.cuda.current_stream()):
+            image = self.train_transforms(image)
+            if self.is_train and image.device.type == 'cuda':
+                tensors_record_stream(torch.cuda.current_stream(), image)
         
         return image
 
