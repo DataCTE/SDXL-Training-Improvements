@@ -231,6 +231,46 @@ def get_sigmas(config: "Config", device: torch.device) -> torch.Tensor:
         logger.error(f"Error in get_sigmas: {str(e)}")
         raise
 
+def get_scheduler_parameters(
+    sigmas: torch.Tensor,
+    config: "Config",
+    device: torch.device
+) -> Dict[str, torch.Tensor]:
+    """Generate scheduler parameters from sigma schedule.
+    
+    Args:
+        sigmas: Noise schedule sigmas
+        config: Training config
+        device: Target device
+        
+    Returns:
+        Dict of scheduler parameters
+    """
+    try:
+        # Convert sigmas to betas
+        sigmas = sigmas.to(device)
+        sigmas_next = torch.cat([sigmas[1:], torch.tensor([0.0], device=device)])
+        
+        # Compute alphas and betas
+        alphas = 1 / (1 + sigmas ** 2)
+        betas = 1 - alphas / (1 + sigmas_next ** 2)
+        betas = torch.clip(betas, 0, 0.999)
+        
+        # Compute alphas cumprod
+        alphas = 1 - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        
+        return {
+            'alphas': alphas,
+            'betas': betas,
+            'alphas_cumprod': alphas_cumprod,
+            'sigmas': sigmas
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating scheduler parameters: {str(e)}")
+        raise
+
 def configure_noise_scheduler(config: "Config", device: torch.device) -> Dict[str, Any]:
     """Configure noise scheduler with Karras schedule and pre-compute training parameters."""
     try:
