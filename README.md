@@ -39,9 +39,7 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 - Flow matching with logit-normal sampling [[4]](#references)
 - Dynamic tag-based loss weighting [[5]](#references)
 - Advanced noise scheduling [[6]](#references)
-- NovelAI V3 improvements [[7]](#references)
-- Aspect ratio bucketing [[8]](#references)
-- Caption preprocessing [[9]](#references)
+- NovelAI V3 UNet improvements [[7]](#references)
 
 ## Requirements
 
@@ -131,9 +129,7 @@ torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
 4. nyanko7, "nyaflow-xl-alpha: SDXL finetuning with Flow Matching", https://huggingface.co/nyanko7/nyaflow-xl-alpha, 2024
 5. Jiang et al., "Dynamic Loss For Robust Learning", arXiv:2211.12506, 2022
 6. Karras et al., "Elucidating the Design Space of Diffusion-Based Generative Models", NeurIPS 2022
-7. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024
-8. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024 (Aspect ratio bucketing implementation)
-9. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024 (Caption processing methodology)
+7. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024 (UNet improvements)
 
 ## License
 
