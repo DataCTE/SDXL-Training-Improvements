@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Union
 import torch
 from diffusers import DDPMScheduler
 from diffusers.configuration_utils import ConfigMixin, register_to_config
+from ...data.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class NoiseSchedulerConfig:
     rescale_betas_zero_snr: bool = False
 
 def configure_noise_scheduler(
-    config: "Config",  # type: ignore
+    config: Config,
     device: Union[str, torch.device]
 ) -> DDPMScheduler:
     """Configure noise scheduler for training.
@@ -91,7 +92,7 @@ def get_karras_sigmas(
     return sigmas
 
 def get_sigmas(
-    config: "Config",  # type: ignore
+    config: Config,
     n_sigmas: int,
     device: Optional[Union[str, torch.device]] = None
 ) -> torch.Tensor:
@@ -114,7 +115,7 @@ def get_sigmas(
     )
 
 def get_scheduler_parameters(
-    config: "Config",  # type: ignore
+    config: Config,
     device: Optional[Union[str, torch.device]] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Get noise scheduler parameters.
