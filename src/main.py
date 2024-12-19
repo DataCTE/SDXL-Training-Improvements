@@ -5,8 +5,7 @@ import os
 from pathlib import Path
 
 import torch
-from accelerate import Accelerator
-from diffusers import AutoencoderKL, DDPMScheduler
+from diffusers import AutoencoderKL
 from transformers import CLIPTokenizer, CLIPTextModel
 
 from config import Config
