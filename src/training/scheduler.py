@@ -25,7 +25,6 @@ class DDPMScheduler:
         dynamic_thresholding_ratio: float = 0.995,
         sample_max_value: float = 1.0,
         clip_sample_range: float = 1.0,
-        num_inference_steps: int = 50,
     ):
         """Initialize DDPM scheduler.
         
@@ -58,6 +57,10 @@ class DDPMScheduler:
         self.sample_max_value = sample_max_value
         self.clip_sample_range = clip_sample_range
 
+        # Initialize scheduler parameters
+        self.num_inference_steps = None
+        self.timesteps = None
+        
         # Initialize betas and alphas
         self.betas = self._get_beta_schedule()
         self.alphas = 1.0 - self.betas
@@ -104,13 +107,20 @@ class DDPMScheduler:
         scaled = sample / ((sigma ** 2 + 1) ** 0.5)
         return scaled
 
-    def set_timesteps(self, num_inference_steps: Optional[int] = None) -> None:
+    def set_timesteps(self, num_inference_steps: int) -> None:
         """Set timesteps for inference.
         
         Args:
-            num_inference_steps: Optional number of inference steps to override default
+            num_inference_steps: Number of inference steps
         """
-        self.num_inference_steps = num_inference_steps or self.num_inference_steps
+        if num_inference_steps <= 0:
+            raise ValueError(f"num_inference_steps must be positive, got {num_inference_steps}")
+            
+        self.num_inference_steps = num_inference_steps
+        
+        # Generate timesteps
+        timesteps = torch.linspace(0, self.num_train_timesteps - 1, num_inference_steps)
+        self.timesteps = timesteps.round().long()
 
     def step(
         self,
@@ -120,10 +130,15 @@ class DDPMScheduler:
         return_dict: bool = True
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, ...]]:
         """Predict previous mean and variance."""
-        if not hasattr(self, 'num_inference_steps'):
-            raise ValueError("Number of inference steps not set. Call set_timesteps() first.")
+        if self.timesteps is None:
+            raise ValueError("Timesteps not set. Call set_timesteps() first.")
             
-        prev_timestep = timestep - self.num_train_timesteps // self.num_inference_steps
+        # Get timestep index
+        timestep_index = (self.timesteps == timestep).nonzero().item()
+        if timestep_index == len(self.timesteps) - 1:
+            prev_timestep = 0
+        else:
+            prev_timestep = self.timesteps[timestep_index + 1].item()
 
         # Get alpha values
         alpha_prod_t = self.alphas_cumprod[timestep]
