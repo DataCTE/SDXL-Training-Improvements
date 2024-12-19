@@ -10,7 +10,7 @@ from diffusers import AutoencoderKL
 from transformers import CLIPTokenizer, CLIPTextModel
 
 # Local imports
-from .core import (
+from src.core import (
     setup_distributed,
     cleanup_distributed,
     is_main_process,
@@ -26,18 +26,18 @@ from .core import (
     ModelWeightDtypes
 )
 
-from .data import (
+from src.data import (
     Config,
     create_dataset,
     LatentPreprocessor
 )
 
-from .models import (
+from src.models import (
     StableDiffusionXLModel,
     ModelType
 )
 
-from .training import (
+from src.training import (
     configure_noise_scheduler,
     SDXLTrainer
 )
