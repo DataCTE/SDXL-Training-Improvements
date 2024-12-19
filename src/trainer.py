@@ -490,6 +490,7 @@ class LatentPreprocessor:
         if self.vae_cache_path.exists():
             self.vae_cache_path.unlink()
 
+from .data import SDXLDataset
 from .scheduler import (
     get_karras_scalings,
     get_sigmas,
