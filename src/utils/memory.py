@@ -1,13 +1,16 @@
 """Memory optimization utilities for training."""
 import logging
 import torch
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import Config
 
 logger = logging.getLogger(__name__)
 
 def setup_memory_optimizations(
     model: torch.nn.Module,
-    config: "Config",
+    config: "Config",  # type: ignore
     device: torch.device,
     batch_size: int,
     micro_batch_size: int
@@ -50,7 +53,7 @@ def setup_memory_optimizations(
 
 def verify_memory_optimizations(
     model: torch.nn.Module,
-    config: "Config",
+    config: "Config",  # type: ignore
     device: torch.device,
     logger: Optional[logging.Logger] = None
 ) -> Dict[str, bool]:
