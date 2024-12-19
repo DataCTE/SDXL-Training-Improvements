@@ -1,10 +1,14 @@
 """Latent preprocessing utilities for SDXL training."""
 import logging
+from pathlib import Path
 import torch
 from typing import Dict, List, Optional, Union
 from transformers import CLIPTokenizer, CLIPTextModel
 from diffusers import AutoencoderKL
+from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 
+from ..config import Config
 from ..training.noise import get_add_time_ids
 
 logger = logging.getLogger(__name__)
