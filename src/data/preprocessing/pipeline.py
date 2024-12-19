@@ -4,7 +4,10 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ...data.config import Config
 import torch
 import torch.cuda
 from torch.cuda.amp import autocast
@@ -34,6 +37,7 @@ class PreprocessingPipeline:
     
     def __init__(
         self,
+        config: "Config",  # type: ignore
         num_gpu_workers: int = 1,
         num_cpu_workers: int = 4,
         num_io_workers: int = 2,
