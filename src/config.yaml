@@ -52,18 +52,16 @@ training:
   optimizer_betas: [0.9, 0.999]
   weight_decay: 1.0e-2
   optimizer_eps: 1.0e-8
-  prediction_type: "v_prediction" # Options: "epsilon", "v_prediction", "epsilon_prediction"
+  prediction_type: "v_prediction"  # Using v-prediction as per NovelAI V3
   snr_gamma: 5.0
   use_wandb: true
   random_flip: true
   center_crop: true
-  method: "flow_matching"  # Options: "ddpm" or "flow_matching" 
-  flow_matching:
-    enabled: true
-    num_timesteps: 1000
-    sigma: 1.0  # Standard deviation for logit-normal sampling
-    logit_normal_sampling: true  # Use logit-normal time sampling
-    optimal_transport_path: true  # Use optimal transport path for X_t
+  method: "ddpm"  # Using standard DDPM with v-prediction
+  zero_terminal_snr: true  # Enable Zero Terminal SNR
+  sigma_max: 20000.0  # High sigma for ZTSNR approximation
+  sigma_min: 0.002  # Minimum sigma
+  rho: 7.0  # Karras schedule parameter
 
 data:
   # Supports both Windows and Unix paths

@@ -230,7 +230,11 @@ def get_karras_scalings(sigmas: torch.Tensor, timestep_indices: torch.Tensor) ->
         raise
 
 def get_sigmas(config: "Config", device: torch.device) -> torch.Tensor:
-    """Generate noise schedule for ZTSNR with optimized scaling."""
+    """Generate noise schedule with Zero Terminal SNR (ZTSNR).
+    
+    Implements the NovelAI V3 ZTSNR schedule that ramps up to effectively infinite noise.
+    Uses sigma_max=20000 as a practical approximation of infinity.
+    """
     try:
         if not isinstance(config, Config):
             raise ValueError(f"Expected config to be Config, got {type(config)}")
@@ -238,9 +242,9 @@ def get_sigmas(config: "Config", device: torch.device) -> torch.Tensor:
             raise ValueError(f"Expected device to be torch.device, got {type(device)}")
             
         num_timesteps = config.model.num_timesteps
-        sigma_min = config.model.sigma_min
-        sigma_max = config.model.sigma_max
-        rho = config.model.rho
+        sigma_min = config.training.sigma_min
+        sigma_max = config.training.sigma_max  # Using high sigma (~20000) for ZTSNR
+        rho = config.training.rho
         
         if num_timesteps <= 0:
             raise ValueError(f"num_timesteps must be positive, got {num_timesteps}")
@@ -249,18 +253,21 @@ def get_sigmas(config: "Config", device: torch.device) -> torch.Tensor:
         if sigma_max <= sigma_min:
             raise ValueError(f"sigma_max must be greater than sigma_min, got {sigma_max} <= {sigma_min}")
         
-        # Create tensor on CPU first
+        # Create Karras schedule with ZTSNR
         ramp = torch.linspace(0, 1, num_timesteps)
         min_inv_rho = sigma_min ** (1/rho)
         max_inv_rho = sigma_max ** (1/rho)
         
+        # Generate sigmas that ramp up to effectively infinite noise
         sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho
+        
+        # Ensure endpoints are exact
         sigmas[0] = sigma_min  # First step
-        sigmas[-1] = sigma_max  # ZTSNR step
+        sigmas[-1] = sigma_max  # ZTSNR step (effectively infinite noise)
         
         # Move to device at the end
         sigmas = sigmas.to(device=device)
-        logger.info(f"Generated sigmas on device: {sigmas.device}")
+        logger.info(f"Generated ZTSNR sigmas from {sigma_min} to {sigma_max} on device: {sigmas.device}")
         
         return sigmas
         
