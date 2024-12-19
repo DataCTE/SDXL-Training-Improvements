@@ -114,6 +114,34 @@ def get_sigmas(
         device=device
     )
 
+def get_add_time_ids(
+    original_sizes: List[Tuple[int, int]],
+    crop_top_lefts: List[Tuple[int, int]],
+    target_sizes: List[Tuple[int, int]],
+    dtype: torch.dtype,
+    device: Union[str, torch.device]
+) -> torch.Tensor:
+    """Get time embeddings for SDXL conditioning.
+    
+    Args:
+        original_sizes: Original image sizes
+        crop_top_lefts: Crop coordinates
+        target_sizes: Target sizes after transforms
+        dtype: Tensor dtype
+        device: Target device
+        
+    Returns:
+        Time embedding tensor
+    """
+    add_time_ids = [
+        list(original_size) + list(crop_top_left) + list(target_size)
+        for original_size, crop_top_left, target_size 
+        in zip(original_sizes, crop_top_lefts, target_sizes)
+    ]
+    
+    add_time_ids = torch.tensor(add_time_ids, dtype=dtype, device=device)
+    return add_time_ids
+
 def get_scheduler_parameters(
     config: Config,
     device: Optional[Union[str, torch.device]] = None
