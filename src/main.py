@@ -102,7 +102,7 @@ def main():
         config.training.batch_size // config.training.gradient_accumulation_steps
     )
     
-    if accelerator.is_local_main_process:
+    if is_main_process():
         verify_memory_optimizations(models["unet"], config, device, logger)
     
     # Initialize latent preprocessor
@@ -150,7 +150,7 @@ def main():
     )
     
     # Initialize distributed training if needed
-    if get_world_size() > 1:
+    if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
         models["unet"] = torch.nn.parallel.DistributedDataParallel(
             models["unet"],
             device_ids=[device] if device.type == "cuda" else None
