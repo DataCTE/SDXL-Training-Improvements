@@ -5,6 +5,13 @@ import torch.nn as nn
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 
+from .tensor import (
+    tensors_to_device_,
+    device_equals,
+    create_stream_context,
+    torch_gc
+)
+
 logger = logging.getLogger(__name__)
 
 @dataclass 
@@ -68,13 +75,14 @@ class LayerOffloader:
         module = dict(self.model.named_modules())[name]
         target_device = self.layer_map[name]
         
-        if next(module.parameters()).device != target_device:
+        if not device_equals(next(module.parameters()).device, target_device):
             if self.streams["transfer"] is not None:
-                with torch.cuda.stream(self.streams["transfer"]):
-                    module.to(target_device)
+                with create_stream_context(self.streams["transfer"]):
+                    tensors_to_device_(module.state_dict(), target_device, non_blocking=True)
                 torch.cuda.current_stream().wait_stream(self.streams["transfer"])
             else:
-                module.to(target_device)
+                tensors_to_device_(module.state_dict(), target_device)
+            torch_gc()
                 
     def prefetch_layer(self, name: str):
         """Prefetch a layer back to main device."""
@@ -82,10 +90,11 @@ class LayerOffloader:
             return
             
         module = dict(self.model.named_modules())[name]
-        if next(module.parameters()).device != self.device:
+        if not device_equals(next(module.parameters()).device, self.device):
             if self.streams["transfer"] is not None:
-                with torch.cuda.stream(self.streams["transfer"]):
-                    module.to(self.device)
+                with create_stream_context(self.streams["transfer"]):
+                    tensors_to_device_(module.state_dict(), self.device, non_blocking=True)
                 torch.cuda.current_stream().wait_stream(self.streams["transfer"])
             else:
-                module.to(self.device)
+                tensors_to_device_(module.state_dict(), self.device)
+            torch_gc()
