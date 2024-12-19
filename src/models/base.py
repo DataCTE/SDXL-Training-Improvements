@@ -1,6 +1,6 @@
 """Base model classes and types for SDXL."""
 from enum import Enum, auto
-from typing import List, Optional, Union
+from typing import Optional
 import torch
 from torch import Tensor
 

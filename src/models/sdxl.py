@@ -1,11 +1,12 @@
 """StableDiffusionXL model implementation with support for embeddings and LoRA."""
-import logging
 from contextlib import nullcontext
 from random import Random
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+
+from src.core import logging
 
 from diffusers import (
     AutoencoderKL,
