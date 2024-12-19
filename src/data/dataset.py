@@ -10,10 +10,10 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import crop
 
-from ..core.memory.tensor import create_stream_context, tensors_record_stream
+from src.core.memory.tensor import create_stream_context, tensors_record_stream
 
-from ..data.config import Config
-from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
+from src.data.config import Config
+from src.data.preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
 logger = logging.getLogger(__name__)
 
