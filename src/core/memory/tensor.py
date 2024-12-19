@@ -1,11 +1,14 @@
 """Tensor and device management utilities."""
 import gc
+import logging
 from collections.abc import Callable
 from contextlib import nullcontext
 from packaging.version import Version
 import packaging
 import torch
 import accelerate
+
+logger = logging.getLogger(__name__)
 
 accelerator = accelerate.Accelerator()
 default_device = accelerator.device
