@@ -83,10 +83,17 @@ def load_models(config: Config):
 
     # Load SDXL model
     sdxl_model = StableDiffusionXLModel(ModelType.BASE)
-    sdxl_model.from_pretrained(
+    pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
         torch_dtype=torch.float32
     )
+    sdxl_model.unet = pipeline.unet
+    sdxl_model.vae = pipeline.vae
+    sdxl_model.text_encoder_1 = pipeline.text_encoder
+    sdxl_model.text_encoder_2 = pipeline.text_encoder_2
+    sdxl_model.tokenizer_1 = pipeline.tokenizer
+    sdxl_model.tokenizer_2 = pipeline.tokenizer_2
+    sdxl_model.noise_scheduler = pipeline.scheduler
 
     return {
         "tokenizer_one": tokenizer_one,
