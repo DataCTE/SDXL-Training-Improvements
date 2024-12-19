@@ -11,7 +11,7 @@ from diffusers import AutoencoderKL
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
-from ...config import Config
+from ...data.config import Config
 from ...training.noise import get_add_time_ids
 from ...models.encoders.clip import encode_clip
 

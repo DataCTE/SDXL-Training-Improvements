@@ -4,8 +4,8 @@ setup(
     name="sdxl_trainer",
     version="0.1.0",
     description="High-performance SDXL training framework optimized for WSL",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Alexander Izquierdo",
+    author_email="izquierdoxanderl@gmail.com",
     packages=find_packages(),
     install_requires=[
         "torch>=2.0.0",

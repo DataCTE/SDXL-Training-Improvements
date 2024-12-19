@@ -4,7 +4,7 @@ import torch
 from typing import Dict, Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..config import Config
+    from ...data.config import Config
 
 logger = logging.getLogger(__name__)
 

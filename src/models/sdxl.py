@@ -7,11 +7,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 from torch import Tensor
 
-from ..core.types import DataType, ModelWeightDtypes
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..config import Config
+from ..core.types import DataType
 from ..core.memory.tensor import (
     tensors_to_device_,
     device_equals,
@@ -90,7 +86,8 @@ class StableDiffusionXLModel(BaseModel):
         self.vae_autocast_context = nullcontext()
 
         # Data types
-        self.weight_dtypes = ModelWeightDtypes.from_single_dtype(DataType.FLOAT_32)
+        self.train_dtype = DataType.FLOAT_32
+        self.vae_train_dtype = DataType.FLOAT_32
 
         # Embedding training data
         self.embedding: Optional[StableDiffusionXLModelEmbedding] = None

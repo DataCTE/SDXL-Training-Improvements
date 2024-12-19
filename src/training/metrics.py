@@ -4,8 +4,8 @@ from typing import Any, Dict, Optional
 
 import torch.distributed as dist
 
-from ..distributed import reduce_dict
-from .wandb import WandbLogger
+from ..core.distributed import reduce_dict
+from ..core.logging.wandb import WandbLogger
 
 logger = logging.getLogger(__name__)
 
