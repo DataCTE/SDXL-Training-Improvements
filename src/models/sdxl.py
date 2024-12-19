@@ -7,12 +7,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 from torch import Tensor
 
-from ..core.memory.tensor import (
-    tensors_to_device_,
-    tensors_match_device,
-    tensors_record_stream,
-    create_stream_context
-)
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
@@ -22,10 +16,16 @@ from diffusers import (
 )
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 
-from .base import BaseModel, BaseModelEmbedding, ModelType
-from .encoders.clip import encode_clip
-from .adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
-from ..core.types import DataType
+from src.core.memory.tensor import (
+    tensors_to_device_,
+    tensors_match_device,
+    tensors_record_stream,
+    create_stream_context
+)
+from src.core.types import DataType
+from src.models.base import BaseModel, BaseModelEmbedding, ModelType
+from src.models.encoders.clip import encode_clip
+from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 
 logger = logging.getLogger(__name__)
 
