@@ -215,8 +215,9 @@ class PreprocessingPipeline:
                 if self.use_pinned_memory:
                     pin_tensor_(item)
                 
-                if stream:
-                    with torch.cuda.stream(stream):
+                # Use transfer stream for device moves
+                if transfer_stream is not None:
+                    with torch.cuda.stream(transfer_stream):
                         # Batch transfer to GPU
                         tensors_to_device_(
                             item,
@@ -225,11 +226,12 @@ class PreprocessingPipeline:
                         )
                         # Record stream for proper synchronization
                         if item.device.type == 'cuda':
-                            tensors_record_stream(stream, item)
-                            stream.synchronize()
+                            tensors_record_stream(transfer_stream, item)
+                            transfer_stream.synchronize()
 
-                # Custom CUDA stream for async processing
-                stream = torch.cuda.Stream()
+                # Use compute stream for processing
+                if compute_stream is not None:
+                    compute_stream.wait_stream(transfer_stream)
                 with torch.cuda.stream(stream):
                     # Process tensor with memory optimizations
                     processed = self._apply_transforms(item)
