@@ -13,7 +13,7 @@ from src.core.memory.tensor import tensors_to_device_, tensors_match_device, cre
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
-from src.training.trainers.SDXLTrainer import TrainingMethod
+from src.training.trainers.base import TrainingMethod
 
 logger = logging.getLogger(__name__)
 

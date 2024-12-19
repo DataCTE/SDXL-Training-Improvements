@@ -18,7 +18,9 @@ class TrainingMethod(ABC):
             unet: UNet model
             config: Training configuration
         """
-        super().__init__(unet, config)
+        self.unet = unet
+        self.config = config
+        self.training = True
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=config.model.num_timesteps,
             prediction_type=config.training.prediction_type,
