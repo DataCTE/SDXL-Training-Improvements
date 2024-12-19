@@ -3,6 +3,7 @@ import logging
 import torch
 import torch.nn.functional as F
 from typing import Dict, Optional, Tuple
+from ..core.memory.tensor import create_stream_context, tensors_record_stream
 
 logger = logging.getLogger(__name__)
 
