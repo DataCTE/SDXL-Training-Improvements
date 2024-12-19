@@ -3,7 +3,7 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A research-focused SDXL training framework implementing cutting-edge advances in diffusion model training.
+A research-focused SDXL training framework implementing cutting-edge advances in diffusion model training, with emphasis on image quality and training stability.
 
 ## Novel Research Methods
 
@@ -17,8 +17,41 @@ A research-focused SDXL training framework implementing cutting-edge advances in
 - Zero Terminal SNR (ZTSNR) training with infinite noise approximation
   - Uses high sigma_max (~20000) for better high-noise region handling
   - Significantly reduces image artifacts and improves detail preservation
+  - Enhanced contrast and color fidelity in generated images
 - v-prediction parameterization for more stable gradients
+  - Better handling of high-frequency details
+  - Reduced color shifting during sampling
 - Karras noise schedule with dynamic sigma spacing
+  - Improved sampling quality at all noise levels
+  - Better preservation of fine textures and patterns
+
+## Image Quality Improvements
+
+- Enhanced Detail Preservation
+  - Fine-grained texture generation
+  - Improved handling of complex patterns
+  - Better preservation of small objects and features
+
+- Color and Lighting
+  - More accurate color reproduction
+  - Enhanced dynamic range in highlights and shadows
+  - Better handling of complex lighting conditions
+
+- Composition and Structure
+  - Improved spatial coherence
+  - Better handling of perspective and depth
+  - More consistent object proportions
+
+## Model Architecture Features
+
+- Dual Text Encoder Integration
+  - Combined CLIP text embeddings for richer semantic understanding
+  - Enhanced prompt interpretation accuracy
+
+- Advanced UNet Design
+  - Cross-attention optimization for better feature extraction
+  - Improved skip connections for detail preservation
+  - Enhanced downsampling/upsampling paths
 
 ## Requirements
 
