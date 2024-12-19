@@ -1,5 +1,4 @@
-from .unet import UNetWrapper
-from .sdxl import StableDiffusionXLModel, StableDiffusionXLModelEmbedding
+from .sdxl import StableDiffusionXLModel, StableDiffusionXLModelEmbedding, UNetWrapper
 
 __all__ = [
     "UNetWrapper",
