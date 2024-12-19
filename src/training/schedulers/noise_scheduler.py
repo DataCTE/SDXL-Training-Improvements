@@ -1,7 +1,7 @@
 """Noise scheduler implementation for SDXL training."""
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 from diffusers import DDPMScheduler
