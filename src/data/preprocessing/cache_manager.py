@@ -10,6 +10,12 @@ import torch
 import numpy as np
 from PIL import Image
 from tqdm.auto import tqdm
+from src.core.memory.tensor import (
+    torch_gc,
+    pin_tensor_,
+    unpin_tensor_,
+    tensors_to_device_
+)
 
 logger = logging.getLogger(__name__)
 

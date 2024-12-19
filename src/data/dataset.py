@@ -19,9 +19,13 @@ from src.core.memory.tensor import (
     tensors_record_stream,
     pin_tensor_,
     unpin_tensor_,
-    torch_gc
+    torch_gc,
+    tensors_to_device_
 )
-from src.core.memory.optimizations import setup_memory_optimizations
+from src.core.memory.optimizations import (
+    setup_memory_optimizations,
+    verify_memory_optimizations
+)
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 

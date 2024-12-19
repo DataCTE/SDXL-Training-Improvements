@@ -14,7 +14,8 @@ from src.core.memory.tensor import (
     tensors_record_stream,
     torch_gc,
     pin_tensor_,
-    unpin_tensor_
+    unpin_tensor_,
+    device_equals
 )
 from src.core.types import ModelWeightDtypes
 import nvidia.dali as dali
