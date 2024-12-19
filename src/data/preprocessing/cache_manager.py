@@ -113,9 +113,23 @@ class CacheManager:
         self,
         data_dir: Union[str, Path],
         image_exts: List[str] = [".jpg", ".jpeg", ".png"],
-        caption_ext: str = ".txt",
+        caption_ext: str = ".txt", 
         num_workers: Optional[int] = None
     ) -> Dict[str, int]:
+        """Process dataset with performance metrics logging.
+        
+        Args:
+            data_dir: Directory containing image-caption pairs
+            image_exts: List of valid image extensions
+            caption_ext: Caption file extension
+            num_workers: Number of worker processes
+            
+        Returns:
+            Dict with processing statistics
+        """
+        import time
+        start_time = time.time()
+        logger.info(f"Starting dataset processing with {num_workers or self.num_proc} workers")
         from ...utils.paths import convert_windows_path
         data_dir = convert_windows_path(data_dir)
         """Process entire dataset with parallel processing.

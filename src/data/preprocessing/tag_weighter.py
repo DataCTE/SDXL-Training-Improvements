@@ -60,7 +60,14 @@ class TagWeighter:
         return dict(categorized_tags)
 
     def _determine_tag_type(self, tag: str) -> str:
-        """Determine tag type based on keywords."""
+        """Determine tag type based on keywords.
+        
+        Args:
+            tag: Input tag to categorize
+            
+        Returns:
+            Category name for the tag
+        """
         tag = tag.lower()
         for type_name, keywords in self.tag_types.items():
             if any(keyword in tag for keyword in keywords):

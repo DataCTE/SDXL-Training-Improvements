@@ -121,8 +121,13 @@ class PreprocessingPipeline:
 
         return pipe
 
-    def _prefetch_worker(self):
-        """Background worker for prefetching data."""
+    def _prefetch_worker(self) -> None:
+        """Background worker for prefetching data.
+        
+        Continuously pulls batches from input queue, processes them
+        through DALI pipeline and GPU transforms, then puts results
+        in output queue. Runs in separate thread.
+        """
         try:
             while not self.stop_event.is_set():
                 # Get next batch from input queue
@@ -184,11 +189,21 @@ class PreprocessingPipeline:
             raise
 
     def _apply_transforms(self, tensor: torch.Tensor) -> torch.Tensor:
-        """Apply transforms using custom CUDA kernels."""
+        """Apply transforms using custom CUDA kernels.
+        
+        Args:
+            tensor: Input tensor to transform
+            
+        Returns:
+            Transformed tensor
+        """
         # TODO: Implement custom CUDA kernels
         return tensor
 
-    def process_batch(self, batch: List[Any]) -> List[Dict[str, torch.Tensor]]:
+    def process_batch(
+        self,
+        batch: List[Union[torch.Tensor, Dict[str, Any]]]
+    ) -> List[Dict[str, torch.Tensor]]:
         """Process a batch of items."""
         self.input_queue.put(batch)
         return self.output_queue.get()
