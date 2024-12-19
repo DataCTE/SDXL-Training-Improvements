@@ -51,6 +51,7 @@ class SDXLTrainer:
         """
         self.config = config
         self.model = model
+        self.unet = model.unet  # Extract UNet from SDXL model
         self.optimizer = optimizer
         self.noise_scheduler = scheduler
         self.train_dataloader = train_dataloader
@@ -131,7 +132,7 @@ class SDXLTrainer:
         
         # Compute loss
         loss = compute_flow_matching_loss(
-            self.unet,
+            self.model.unet,
             x0,
             x1,
             t,
@@ -202,7 +203,7 @@ class SDXLTrainer:
         )
         
         # Predict noise
-        noise_pred = self.model.unet(
+        noise_pred = self.unet(
             noisy_latents,
             timesteps,
             encoder_hidden_states=prompt_embeds,
