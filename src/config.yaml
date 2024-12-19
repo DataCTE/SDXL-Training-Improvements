@@ -40,6 +40,7 @@ training:
   save_steps: 500
   log_steps: 10
   eval_steps: 100
+  validation_steps: 1000
   max_train_steps: null
   lr_scheduler: "cosine"
   optimizer_betas: [0.9, 0.999]

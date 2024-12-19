@@ -1,11 +1,11 @@
 """SDXL trainer implementation."""
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
-from diffusers import DDPMScheduler
+from diffusers import DDPMScheduler, StableDiffusionXLPipeline
 from tqdm.auto import tqdm
 
 from ..config import Config
@@ -27,7 +27,8 @@ class SDXLTrainer:
         scheduler: DDPMScheduler,
         train_dataloader: torch.utils.data.DataLoader,
         device: Union[str, torch.device],
-        wandb_logger: Optional[WandbLogger] = None
+        wandb_logger: Optional[WandbLogger] = None,
+        validation_prompts: Optional[List[str]] = None
     ):
         """Initialize trainer.
         
@@ -47,6 +48,16 @@ class SDXLTrainer:
         self.train_dataloader = train_dataloader
         self.device = device
         self.wandb_logger = wandb_logger
+        
+        # Initialize validator
+        if is_main_process():
+            from ..utils.text_to_image_validation import TextToImageValidator
+            self.validator = TextToImageValidator(
+                base_model_path=config.model.pretrained_model_name,
+                device=device,
+                output_dir=config.global_config.output_dir,
+                validation_prompts=validation_prompts
+            )
         
         # Move model to device
         self.unet = self.unet.to(device)
@@ -238,6 +249,28 @@ class SDXLTrainer:
             
             # Update metrics
             metrics.update(epoch_metrics)
+            
+            # Run validation
+            if (
+                is_main_process() and
+                self.config.training.validation_steps > 0 and
+                self.global_step % self.config.training.validation_steps == 0
+            ):
+                # Create pipeline from current model
+                pipeline = StableDiffusionXLPipeline.from_pretrained(
+                    self.config.model.pretrained_model_name,
+                    unet=self.unet,
+                    torch_dtype=torch.float16 if self.device.type == "cuda" else torch.float32
+                ).to(self.device)
+                
+                self.validator.validate(
+                    pipeline=pipeline,
+                    step=self.global_step,
+                    seed=self.config.global_config.seed
+                )
+                
+                del pipeline
+                torch.cuda.empty_cache()
             
             # Save checkpoint
             self.save_checkpoint()

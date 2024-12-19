@@ -60,7 +60,8 @@ class TrainingConfig:
     warmup_steps: int = 500
     save_steps: int = 500
     log_steps: int = 10
-    eval_steps: int = 100
+    eval_steps: int = 100,
+    validation_steps: int = 1000
     max_train_steps: Optional[int] = None
     lr_scheduler: str = "cosine"
     optimizer_betas: Tuple[float, float] = (0.9, 0.999)
