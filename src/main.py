@@ -141,6 +141,15 @@ def main():
     # Configure noise scheduler
     noise_scheduler_config = configure_noise_scheduler(config, device)
     
+    # Create optimizer
+    optimizer = torch.optim.AdamW(
+        models["unet"].parameters(),
+        lr=config.training.learning_rate,
+        betas=config.training.optimizer_betas,
+        weight_decay=config.training.weight_decay,
+        eps=config.training.optimizer_eps
+    )
+    
     # Prepare for distributed training
     unet, optimizer, train_dataloader, scheduler = accelerator.prepare(
         models["unet"],
