@@ -10,21 +10,23 @@ from diffusers import AutoencoderKL
 from transformers import CLIPTokenizer, CLIPTextModel
 
 # Local imports
-from src.core import (
+from src.core.distributed import (
     setup_distributed,
     cleanup_distributed,
-    is_main_process,
-    setup_logging,
-    WandbLogger,
-    setup_memory_optimizations,
-    verify_memory_optimizations,
+    is_main_process
+)
+from src.core.logging import setup_logging, WandbLogger
+from src.core.memory import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
-    torch_gc,
-    DataType,
-    ModelWeightDtypes
+    torch_gc
 )
+from src.core.memory.optimizations import (
+    setup_memory_optimizations,
+    verify_memory_optimizations
+)
+from src.core.types import DataType, ModelWeightDtypes
 
 from src.data import (
     Config,
