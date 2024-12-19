@@ -173,8 +173,10 @@ class CacheManager:
             Dict with processing statistics
         """
         logger.info(f"Starting dataset processing with {num_workers or self.num_proc} workers")
-        from src.utils.paths import convert_windows_path
-        data_dir = convert_windows_path(data_dir)
+        from src.utils.paths import convert_windows_path, is_wsl
+        data_dir = convert_windows_path(data_dir, make_absolute=True)
+        if is_wsl():
+            logger.info(f"Running in WSL, using converted path: {data_dir}")
         """Process entire dataset with parallel processing.
         
         Args:
@@ -188,10 +190,15 @@ class CacheManager:
         data_dir = Path(data_dir)
         stats = {"processed": 0, "failed": 0, "skipped": 0}
         
-        # Get all image files
+        # Get all image files with WSL path handling
         image_files = []
         for ext in image_exts:
-            image_files.extend(data_dir.glob(f"*{ext}"))
+            found_files = list(data_dir.glob(f"*{ext}"))
+            # Convert any Windows paths
+            image_files.extend([
+                Path(str(convert_windows_path(f, make_absolute=True)))
+                for f in found_files
+            ])
             
         logger.info(f"Found {len(image_files)} images to process")
         

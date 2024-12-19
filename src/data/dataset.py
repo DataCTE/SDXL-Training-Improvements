@@ -60,12 +60,15 @@ class SDXLDataset(Dataset):
                 device=torch.device("cuda"),
                 batch_size=config.training.batch_size
             )
-        # Convert Windows paths if needed
-        image_paths = [str(convert_windows_path(p, make_absolute=True)) for p in image_paths]
-        # Verify all paths exist after conversion
+        # Convert and validate paths for WSL/Windows compatibility
+        converted_paths = []
         for path in image_paths:
-            if not os.path.exists(path):
-                logger.warning(f"Path does not exist after conversion: {path}")
+            converted = convert_windows_path(path, make_absolute=True)
+            if not os.path.exists(str(converted)):
+                logger.warning(f"Path does not exist after conversion: {path} -> {converted}")
+            else:
+                converted_paths.append(str(converted))
+        image_paths = converted_paths
         """SDXL Dataset with bucketing and aspect ratio preservation.
         
         Args:
