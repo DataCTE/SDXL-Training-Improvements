@@ -14,7 +14,14 @@ from torchvision import transforms
 from torchvision.transforms.functional import crop
 
 # Local imports
-from src.core.memory.tensor import create_stream_context, tensors_record_stream
+from src.core.memory.tensor import (
+    create_stream_context,
+    tensors_record_stream,
+    pin_tensor_,
+    unpin_tensor_,
+    torch_gc
+)
+from src.core.memory.optimizations import setup_memory_optimizations
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
