@@ -23,7 +23,7 @@ class SDXLTrainer:
     def __init__(
         self,
         config: Config,
-        unet: torch.nn.Module,
+        model: StableDiffusionXLModel,
         optimizer: torch.optim.Optimizer,
         scheduler: DDPMScheduler,
         train_dataloader: torch.utils.data.DataLoader,
@@ -43,7 +43,7 @@ class SDXLTrainer:
             device: Target device
         """
         self.config = config
-        self.unet = unet
+        self.model = model
         self.optimizer = optimizer
         self.noise_scheduler = scheduler
         self.train_dataloader = train_dataloader
@@ -61,7 +61,7 @@ class SDXLTrainer:
             )
         
         # Move model to device
-        self.unet = self.unet.to(device)
+        self.model.to(device)
         
         # Training state
         self.global_step = 0
@@ -189,7 +189,7 @@ class SDXLTrainer:
         )
         
         # Predict noise
-        noise_pred = self.unet(
+        noise_pred = self.model.unet(
             noisy_latents,
             timesteps,
             encoder_hidden_states=prompt_embeds,
@@ -240,7 +240,7 @@ class SDXLTrainer:
         epoch_metrics = {}
         
         # Set models to training mode
-        self.unet.train()
+        self.model.train()
         
         # Training loop
         progress_bar = tqdm(
@@ -331,22 +331,17 @@ class SDXLTrainer:
                 self.config.training.validation_steps > 0 and
                 self.global_step % self.config.training.validation_steps == 0
             ):
-                # Create SDXL model for validation
-                model = StableDiffusionXLModel(ModelType.BASE)
-                model.from_pretrained(
-                    self.config.model.pretrained_model_name,
-                    torch_dtype=torch.float16 if self.device.type == "cuda" else torch.float32
-                )
-                model.unet = self.unet
-                model.to(self.device)
+                # Create validation copy of model
+                validation_model = self.model.create_validation_copy()
+                validation_model.to(self.device)
                 
                 self.validator.validate(
-                    model=model,
+                    model=validation_model,
                     step=self.global_step,
                     seed=self.config.global_config.seed
                 )
                 
-                del model
+                del validation_model
                 torch.cuda.empty_cache()
             
             # Save checkpoint
@@ -369,7 +364,7 @@ class SDXLTrainer:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         
         # Save model
-        self.unet.save_pretrained(checkpoint_dir)
+        self.model.save_pretrained(checkpoint_dir)
         
         # Save optimizer state
         torch.save(
