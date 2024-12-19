@@ -17,7 +17,7 @@ class DDPMScheduler:
         beta_end: float = 0.012,
         beta_schedule: str = "scaled_linear",
         clip_sample: bool = True,
-        prediction_type: str = "epsilon",
+        prediction_type: str = "v_prediction",  # Changed to v-prediction
         set_alpha_to_one: bool = True,
         steps_offset: int = 0,
         timestep_spacing: str = "leading",
@@ -25,6 +25,10 @@ class DDPMScheduler:
         dynamic_thresholding_ratio: float = 0.995,
         sample_max_value: float = 1.0,
         clip_sample_range: float = 1.0,
+        use_ztsnr: bool = True,  # Enable ZTSNR
+        sigma_max: float = 20000.0,  # High sigma for ZTSNR
+        sigma_min: float = 0.002,
+        rho: float = 7.0,  # Karras schedule parameter
     ):
         """Initialize DDPM scheduler.
         
@@ -75,19 +79,33 @@ class DDPMScheduler:
         self.init_noise_sigma = self.sigmas.max()
 
     def _get_beta_schedule(self) -> torch.Tensor:
-        """Get beta schedule tensor."""
-        if self.beta_schedule == "linear":
-            betas = torch.linspace(self.beta_start, self.beta_end, self.num_train_timesteps)
-        elif self.beta_schedule == "scaled_linear":
-            # Glide paper schedule
-            betas = torch.linspace(self.beta_start ** 0.5, self.beta_end ** 0.5, self.num_train_timesteps) ** 2
-        elif self.beta_schedule == "squaredcos_cap_v2":
-            # Stable Diffusion schedule
-            t = torch.linspace(0, self.num_train_timesteps - 1, self.num_train_timesteps)
-            betas = 0.999 * (torch.cos((t / self.num_train_timesteps + 0.008) / 1.008 * math.pi / 2) ** 2)
-        else:
-            raise ValueError(f"Unknown beta schedule: {self.beta_schedule}")
-        return betas
+        """Get beta schedule tensor with ZTSNR support."""
+        if not self.use_ztsnr:
+            # Original beta schedules
+            if self.beta_schedule == "linear":
+                betas = torch.linspace(self.beta_start, self.beta_end, self.num_train_timesteps)
+            elif self.beta_schedule == "scaled_linear":
+                betas = torch.linspace(self.beta_start ** 0.5, self.beta_end ** 0.5, self.num_train_timesteps) ** 2
+            elif self.beta_schedule == "squaredcos_cap_v2":
+                t = torch.linspace(0, self.num_train_timesteps - 1, self.num_train_timesteps)
+                betas = 0.999 * (torch.cos((t / self.num_train_timesteps + 0.008) / 1.008 * math.pi / 2) ** 2)
+            else:
+                raise ValueError(f"Unknown beta schedule: {self.beta_schedule}")
+            return betas
+            
+        # ZTSNR Karras schedule implementation
+        t = torch.linspace(0, 1, self.num_train_timesteps)
+        # Generate sigmas that ramp up to effectively infinite noise
+        sigmas = (self.sigma_max ** (1/self.rho) + t * (self.sigma_min ** (1/self.rho) - self.sigma_max ** (1/self.rho))) ** self.rho
+        
+        # Ensure endpoints are exact
+        sigmas[0] = self.sigma_max  # ZTSNR step (effectively infinite noise)
+        sigmas[-1] = self.sigma_min  # Final step
+        
+        # Convert sigmas to betas
+        alphas = 1 / (1 + sigmas ** 2)
+        betas = 1 - alphas
+        return torch.clip(betas, 0, 0.999)
 
     def scale_model_input(self, sample: torch.Tensor, timestep: int) -> torch.Tensor:
         """Scale input sample based on timestep.
@@ -129,7 +147,7 @@ class DDPMScheduler:
         sample: torch.Tensor,
         return_dict: bool = True
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, ...]]:
-        """Predict previous mean and variance."""
+        """Predict previous mean and variance with ZTSNR support."""
         if self.timesteps is None:
             raise ValueError("Timesteps not set. Call set_timesteps() first.")
             
@@ -146,22 +164,24 @@ class DDPMScheduler:
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
-        # Compute predicted original sample
-        if self.prediction_type == "epsilon":
-            pred_original_sample = (sample - beta_prod_t ** 0.5 * model_output) / alpha_prod_t ** 0.5
-        elif self.prediction_type == "sample":
-            pred_original_sample = model_output
-        elif self.prediction_type == "v_prediction":
-            pred_original_sample = alpha_prod_t ** 0.5 * sample - beta_prod_t ** 0.5 * model_output
+        # Special handling for ZTSNR first step
+        if self.use_ztsnr and timestep_index == 0:
+            # For σ = ∞ step, use simplified computation
+            n = sample / self.sigma_max  # Extract normalized noise
+            sigma_data = 1.0  # Assuming normalized data
+            prev_sample = self.sigma_min * n - sigma_data * model_output
+            
         else:
-            raise ValueError(f"Unknown prediction type {self.prediction_type}")
+            # Regular step computation
+            # Compute predicted original sample using v-prediction
+            pred_original_sample = alpha_prod_t ** 0.5 * sample - beta_prod_t ** 0.5 * model_output
 
-        # Clip predicted sample if needed
-        if self.clip_sample:
-            pred_original_sample = torch.clamp(pred_original_sample, -self.clip_sample_range, self.clip_sample_range)
+            # Clip predicted sample if needed
+            if self.clip_sample:
+                pred_original_sample = torch.clamp(pred_original_sample, -self.clip_sample_range, self.clip_sample_range)
 
-        # Get previous sample
-        prev_sample = alpha_prod_t_prev ** 0.5 * pred_original_sample + beta_prod_t_prev ** 0.5 * model_output
+            # Get previous sample
+            prev_sample = alpha_prod_t_prev ** 0.5 * pred_original_sample + beta_prod_t_prev ** 0.5 * model_output
 
         if not return_dict:
             return (prev_sample,)
