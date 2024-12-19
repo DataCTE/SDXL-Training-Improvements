@@ -159,9 +159,23 @@ class Config:
             config_dict = yaml.safe_load(f)
             
         # Create nested dataclass instances
-        global_config = GlobalConfig(**config_dict.get('global_config', {}))
+        global_config_dict = config_dict.get('global_config', {})
+        global_config = GlobalConfig(
+            image=GlobalConfig.ImageConfig(**global_config_dict.get('image', {})),
+            cache=GlobalConfig.CacheConfig(**global_config_dict.get('cache', {})),
+            seed=global_config_dict.get('seed'),
+            output_dir=global_config_dict.get('output_dir', 'outputs')
+        )
+        
         model_config = ModelConfig(**config_dict.get('model', {}))
-        training_config = TrainingConfig(**config_dict.get('training', {}))
+        
+        training_dict = config_dict.get('training', {})
+        training_config = TrainingConfig(
+            memory=MemoryConfig(**training_dict.get('memory', {})),
+            flow_matching=FlowMatchingConfig(**training_dict.get('flow_matching', {})),
+            **{k: v for k, v in training_dict.items() if k not in ['memory', 'flow_matching']}
+        )
+        
         data_config = DataConfig(**config_dict.get('data', {}))
         tag_weighting_config = TagWeightingConfig(**config_dict.get('tag_weighting', {}))
         
