@@ -3,17 +3,20 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from .config import Config
 
 logger = logging.getLogger(__name__)
 
 class TagWeighter:
     def __init__(
         self,
-        config: "Config", 
+        config: "Config",  # type: ignore
         cache_path: Optional[Path] = None
     ):
         """Initialize tag weighting system."""
@@ -164,7 +167,7 @@ class TagWeighter:
         return stats
 
 def create_tag_weighter(
-    config: "Config",
+    config: "Config",  # type: ignore
     captions: List[str],
     cache_path: Optional[Path] = None
 ) -> TagWeighter:
