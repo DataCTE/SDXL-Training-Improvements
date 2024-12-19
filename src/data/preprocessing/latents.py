@@ -123,7 +123,6 @@ class LatentPreprocessor:
         self,
         dataset: Dataset,
         batch_size: int = 8,
-        num_workers: int = 4,
         cache: bool = True
     ) -> Dataset:
         """Preprocess and cache embeddings for a dataset."""
