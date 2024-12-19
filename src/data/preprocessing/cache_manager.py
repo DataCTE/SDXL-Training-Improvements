@@ -116,6 +116,8 @@ class CacheManager:
         caption_ext: str = ".txt",
         num_workers: Optional[int] = None
     ) -> Dict[str, int]:
+        from ...utils.paths import convert_windows_path
+        data_dir = convert_windows_path(data_dir)
         """Process entire dataset with parallel processing.
         
         Args:

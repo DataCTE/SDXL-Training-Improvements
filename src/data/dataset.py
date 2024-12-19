@@ -30,7 +30,7 @@ class SDXLDataset(Dataset):
         is_train: bool = True
     ):
         # Convert Windows paths if needed
-        image_paths = [str(p) for p in convert_path_list(image_paths)]
+        image_paths = [str(convert_windows_path(p)) for p in image_paths]
         """SDXL Dataset with bucketing and aspect ratio preservation.
         
         Args:
