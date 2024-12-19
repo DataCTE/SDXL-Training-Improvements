@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+from .base import BaseModel, BaseModelEmbedding, ModelType
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
