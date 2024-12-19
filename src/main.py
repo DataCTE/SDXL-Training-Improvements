@@ -16,7 +16,7 @@ from data import create_dataset, LatentPreprocessor
 from models import StableDiffusionXLModel
 from models.base import ModelType
 from core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from core.logging import setup_logging
+from core.logging.base import setup_logging
 from core.logging.wandb import WandbLogger
 from core.memory import (
     setup_memory_optimizations, 
