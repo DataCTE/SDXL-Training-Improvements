@@ -51,11 +51,12 @@ class LatentPreprocessor:
 
         # Set up cache paths if enabled
         if self.use_cache:
-            self.cache_dir = Path(config.global_config.cache.cache_dir)
+            from src.utils.paths import convert_windows_path
+            self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             
-            self.text_cache_path = self.cache_dir / "text_embeddings.pt"
-            self.vae_cache_path = self.cache_dir / "vae_latents.pt"
+            self.text_cache_path = Path(convert_windows_path(self.cache_dir / "text_embeddings.pt", make_absolute=True))
+            self.vae_cache_path = Path(convert_windows_path(self.cache_dir / "vae_latents.pt", make_absolute=True))
             
             # Clear cache if configured
             if config.global_config.cache.clear_cache_on_start:

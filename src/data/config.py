@@ -127,9 +127,12 @@ class Config:
     
     def __post_init__(self):
         """Validate configuration after initialization."""
-        # Create output and cache directories
-        Path(self.global_config.output_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.global_config.cache.cache_dir).mkdir(parents=True, exist_ok=True)
+        from src.utils.paths import convert_windows_path
+        # Create output and cache directories with WSL path handling
+        output_dir = convert_windows_path(self.global_config.output_dir, make_absolute=True)
+        cache_dir = convert_windows_path(self.global_config.cache.cache_dir, make_absolute=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
         
         # Validate image sizes
         max_h, max_w = self.global_config.image.max_size
