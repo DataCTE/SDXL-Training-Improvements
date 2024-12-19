@@ -232,13 +232,13 @@ class PreprocessingPipeline:
                 # Use compute stream for processing
                 if compute_stream is not None:
                     compute_stream.wait_stream(transfer_stream)
-                with torch.cuda.stream(stream):
+                with torch.cuda.stream(compute_stream):
                     # Process tensor with memory optimizations
                     processed = self._apply_transforms(item)
                     
                     # Move back to CPU if needed, with proper cleanup
                     if self.cache_dir:
-                        with create_stream_context(stream):
+                        with create_stream_context(compute_stream):
                             processed = processed.cpu()
                             torch_gc()
                             
