@@ -13,7 +13,7 @@ from transformers import CLIPTokenizer, CLIPTextModel
 
 from config import Config
 from data import create_dataset, LatentPreprocessor
-from models import UNetWrapper
+from models import StableDiffusionXLModel, ModelType
 from core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from core.logging import setup_logging
 from core.logging.wandb import WandbLogger
@@ -57,11 +57,11 @@ def load_models(config: Config, device: torch.device):
         subfolder="vae"
     )
 
-    # Load UNet
-    unet = UNetWrapper(
+    # Load SDXL model
+    sdxl_model = StableDiffusionXLModel(ModelType.BASE)
+    sdxl_model.from_pretrained(
         config.model.pretrained_model_name,
-        device=device,
-        dtype=torch.float32
+        torch_dtype=torch.float32
     )
 
     return {
@@ -70,7 +70,7 @@ def load_models(config: Config, device: torch.device):
         "text_encoder_one": text_encoder_one,
         "text_encoder_two": text_encoder_two,
         "vae": vae,
-        "unet": unet
+        "model": sdxl_model
     }
 
 def main():
