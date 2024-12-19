@@ -23,6 +23,15 @@ from torchvision.transforms.functional import crop
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
+from training.config import Config
+from training.memory import (
+    configure_model_memory_format,
+    setup_memory_optimizations,
+    verify_memory_optimizations
+)
+from training.noise import generate_noise, get_add_time_ids
+from training.metrics import log_metrics as utils_log_metrics
+
 
 logger = logging.getLogger(__name__)
 
@@ -1119,53 +1128,3 @@ class NovelAIDiffusionV3Trainer(torch.nn.Module):
         return self.training_step(batch)
 
 
-# Create dataset with preprocessor
-latent_preprocessor = LatentPreprocessor(
-    config=config,
-    tokenizer_one=tokenizer_one,
-    tokenizer_two=tokenizer_two,
-    text_encoder_one=text_encoder_one,
-    text_encoder_two=text_encoder_two,
-    vae=vae,
-    device=device
-)
-
-# Optional tag weighter
-tag_weighter = TagWeighter(config=config)
-
-# Create dataset
-dataset = create_dataset(
-    config=config,
-    image_paths=image_paths,
-    captions=captions,
-    latent_preprocessor=latent_preprocessor,
-    tag_weighter=tag_weighter,
-    is_train=True
-)
-
-trainer = NovelAIDiffusionV3Trainer(
-    config=config,
-    model=model,  # Optional: UNet2DConditionModel
-    dataset=dataset,  # Optional: SDXLDataset
-    device=device  # Optional: torch.device
-)
-
-# Set dataloader if not provided during initialization
-trainer.set_dataloader(DataLoader(
-    dataset,
-    batch_size=config.training.batch_size,
-    collate_fn=dataset.collate_fn,
-    shuffle=True
-))
-
-# Train for multiple epochs
-for epoch in range(config.training.num_epochs):
-    trainer.train_epoch(epoch)
-
-    # Metrics are automatically logged during training
-# But you can also manually log:
-trainer.log_metrics({
-    'custom_metric': value,
-    'epoch': epoch,
-    'step': step
-})
