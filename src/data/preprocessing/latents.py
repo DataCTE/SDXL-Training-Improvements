@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from src.data.config import Config
 from src.models.encoders.clip import encode_clip
 
-logger = setup_logging(__name__)
+logger = setup_logging(__name__, level="INFO")
 
 class LatentPreprocessor:
     def __init__(
