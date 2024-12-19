@@ -5,6 +5,7 @@ from .preprocessing import (
     TagWeighter,
     create_tag_weighter
 )
+from .config import Config
 
 __all__ = [
     "SDXLDataset",
@@ -12,5 +13,6 @@ __all__ = [
     "LatentPreprocessor",
     "CacheManager", 
     "TagWeighter",
-    "create_tag_weighter"
+    "create_tag_weighter",
+    "Config"
 ]
