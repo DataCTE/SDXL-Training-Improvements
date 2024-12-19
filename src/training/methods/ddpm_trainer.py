@@ -5,10 +5,10 @@ from typing import Dict, Optional
 import torch
 import torch.nn.functional as F
 
-from sdxl_trainer.core.distributed import is_main_process
-from sdxl_trainer.core.logging import log_metrics
-from sdxl_trainer.training.noise import generate_noise, get_add_time_ids
-from sdxl_trainer.training.methods.base import BaseSDXLTrainer
+from src.core.distributed import is_main_process
+from src.core.logging import log_metrics
+from src.training.noise import generate_noise, get_add_time_ids
+from src.training.trainers.SDXLTrainer import BaseSDXLTrainer
 
 logger = logging.getLogger(__name__)
 
