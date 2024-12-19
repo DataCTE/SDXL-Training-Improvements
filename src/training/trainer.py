@@ -15,7 +15,6 @@ from ..core.memory.tensor import (
     torch_gc
 )
 from ..core.types import DataType, ModelWeightDtypes
-from ..core.validation.types import ValidationConfig, ValidationMode, ValidationMetric
 from ..config import Config
 from ..core.distributed import is_main_process, get_world_size
 from ..core.logging import log_metrics
@@ -58,25 +57,6 @@ class SDXLTrainer:
         self.train_dataloader = train_dataloader
         self.device = device
         self.wandb_logger = wandb_logger
-        
-        # Initialize validator
-        if is_main_process():
-            from ..core.validation.text_to_image import TextToImageValidator
-            validation_config = ValidationConfig(
-                mode=ValidationMode.TEXT_TO_IMAGE,
-                metrics=[ValidationMetric.FID, ValidationMetric.CLIP_SCORE],
-                num_samples=config.training.validation_samples,
-                guidance_scale=config.training.validation_guidance_scale,
-                num_inference_steps=config.training.validation_inference_steps,
-                seed=config.global_config.seed
-            )
-            self.validator = TextToImageValidator(
-                config=config,
-                device=device,
-                output_dir=config.global_config.output_dir,
-                validation_prompts=validation_prompts,
-                validation_config=validation_config
-            )
         
         # Move model and optimizer to device efficiently
         if not tensors_match_device(self.model.state_dict(), device):
@@ -348,25 +328,6 @@ class SDXLTrainer:
             
             # Update metrics
             metrics.update(epoch_metrics)
-            
-            # Run validation
-            if (
-                is_main_process() and
-                self.config.training.validation_steps > 0 and
-                self.global_step % self.config.training.validation_steps == 0
-            ):
-                # Create validation copy of model
-                validation_model = self.model.create_validation_copy()
-                validation_model.to(self.device)
-                
-                self.validator.validate(
-                    model=validation_model,
-                    step=self.global_step,
-                    seed=self.config.global_config.seed
-                )
-                
-                del validation_model
-                torch.cuda.empty_cache()
             
             # Save checkpoint
             self.save_checkpoint()
