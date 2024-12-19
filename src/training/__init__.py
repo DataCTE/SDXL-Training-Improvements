@@ -7,11 +7,9 @@ from .scheduler import (
     get_scheduler_parameters
 )
 from .noise import generate_noise, get_add_time_ids
-from .flow_matching import (
-    sample_logit_normal,
-    optimal_transport_path,
-    compute_flow_matching_loss
-)
+from .methods.base import TrainingMethod
+from .methods.ddpm import DDPMMethod
+from .methods.flow_matching import FlowMatchingMethod
 from ..core.logging import log_metrics
 
 __all__ = [
@@ -24,7 +22,7 @@ __all__ = [
     "generate_noise",
     "get_add_time_ids",
     "log_metrics",
-    "sample_logit_normal",
-    "optimal_transport_path", 
-    "compute_flow_matching_loss"
+    "TrainingMethod",
+    "DDPMMethod",
+    "FlowMatchingMethod"
 ]

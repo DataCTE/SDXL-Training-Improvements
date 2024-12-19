@@ -93,72 +93,56 @@ class SDXLTrainer:
             len(train_dataloader) * config.training.num_epochs
         )
         
+    def __init__(
+        self,
+        config: Config,
+        model: StableDiffusionXLModel,
+        optimizer: torch.optim.Optimizer,
+        scheduler: DDPMScheduler,
+        train_dataloader: torch.utils.data.DataLoader,
+        device: Union[str, torch.device],
+        wandb_logger: Optional[WandbLogger] = None,
+        validation_prompts: Optional[List[str]] = None
+    ):
+        """Initialize trainer."""
+        super().__init__()
+        self.config = config
+        self.model = model
+        self.unet = model.unet
+        self.optimizer = optimizer
+        self.noise_scheduler = scheduler
+        self.train_dataloader = train_dataloader
+        self.device = device
+        self.wandb_logger = wandb_logger
+        
+        # Initialize training method
+        if config.training.method == "flow_matching":
+            from .methods.flow_matching import FlowMatchingMethod
+            self.training_method = FlowMatchingMethod()
+        else:
+            from .methods.ddpm import DDPMMethod
+            self.training_method = DDPMMethod(
+                prediction_type=config.training.prediction_type
+            )
+            
+        # Rest of initialization...
+
     def train_step(
         self,
         batch: Dict[str, torch.Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, float]:
         """Execute single training step."""
-        if self.config.training.method == "flow_matching":
-            return self._train_step_flow_matching(batch)
-        else:
-            return self._train_step_ddpm(batch, generator)
-            
-    def _train_step_flow_matching(
-        self,
-        batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, float]:
-        """Execute Flow Matching training step using nyaflow-xl approach."""
-        from .flow_matching import sample_logit_normal, compute_flow_matching_loss, optimal_transport_path
-        
-        # Get batch inputs
-        x1 = batch["model_input"]  # Target samples
-        
-        # Sample time values from logit-normal as in nyaflow-xl
-        t = sample_logit_normal(
-            (x1.shape[0],),
-            device=self.device,
-            dtype=x1.dtype,
-            mean=0.0,
-            std=1.0
+        # Compute loss using selected method
+        loss_dict = self.training_method.compute_loss(
+            self.unet,
+            batch,
+            self.noise_scheduler,
+            generator
         )
         
-        # Sample initial points from standard normal
-        x0 = torch.randn_like(x1)
-        
-        # Compute optimal transport path points
-        xt = optimal_transport_path(x0, x1, t)
-        
-        # Get conditioning
-        condition_embeddings = {
-            "prompt_embeds": batch["prompt_embeds"],
-            "added_cond_kwargs": {
-                "text_embeds": batch["pooled_prompt_embeds"],
-                "time_ids": get_add_time_ids(
-                    batch["original_sizes"],
-                    batch["crop_top_lefts"],
-                    batch["target_sizes"],
-                    dtype=batch["prompt_embeds"].dtype,
-                    device=self.device
-                )
-            }
-        }
-        
-        # Compute loss
-        loss = compute_flow_matching_loss(
-            self.model.unet,
-            x0,
-            x1,
-            t,
-            condition_embeddings
-        )
-        
-        # Apply loss weights if provided
-        if "loss_weights" in batch:
-            loss = loss * batch["loss_weights"].mean()
-            
         # Backpropagate
-        loss.backward()
+        loss_dict["loss"].backward()
         
         # Gradient clipping
         if self.config.training.max_grad_norm > 0:
@@ -170,94 +154,7 @@ class SDXLTrainer:
         self.optimizer.step()
         self.optimizer.zero_grad()
         
-        return {"loss": loss.detach().item()}
-        
-    def _train_step_ddpm(
-        self,
-        batch: Dict[str, torch.Tensor],
-        generator: Optional[torch.Generator] = None
-    ) -> Dict[str, float]:
-        """Execute single training step.
-        
-        Args:
-            batch: Batch of training data
-            generator: Optional random number generator
-            
-        Returns:
-            Dict of metrics
-        """
-        # Get batch inputs
-        latents = batch["model_input"]
-        prompt_embeds = batch["prompt_embeds"]
-        pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-        
-        # Add noise
-        noise = generate_noise(
-            latents.shape,
-            device=self.device,
-            dtype=latents.dtype,
-            generator=generator,
-            layout=latents
-        )
-        timesteps = torch.randint(
-            0,
-            self.noise_scheduler.config.num_train_timesteps,
-            (latents.shape[0],),
-            device=self.device
-        )
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-        
-        # Get time embeddings
-        add_time_ids = get_add_time_ids(
-            batch["original_sizes"],
-            batch["crop_top_lefts"],
-            batch["target_sizes"],
-            dtype=prompt_embeds.dtype,
-            device=self.device
-        )
-        
-        # Predict noise
-        noise_pred = self.unet(
-            noisy_latents,
-            timesteps,
-            encoder_hidden_states=prompt_embeds,
-            added_cond_kwargs={
-                "text_embeds": pooled_prompt_embeds,
-                "time_ids": add_time_ids
-            }
-        ).sample
-        
-        # Compute loss
-        if self.config.training.prediction_type == "epsilon":
-            target = noise
-        elif self.config.training.prediction_type == "v_prediction":
-            target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
-        else:
-            raise ValueError(f"Unknown prediction type {self.config.training.prediction_type}")
-            
-        loss = F.mse_loss(noise_pred, target, reduction="none")
-        loss = loss.mean([1, 2, 3])
-        
-        # Apply loss weights if provided
-        if "loss_weights" in batch:
-            loss = loss * batch["loss_weights"]
-            
-        loss = loss.mean()
-        
-        # Backpropagate
-        loss.backward()
-        
-        # Gradient clipping
-        if self.config.training.max_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
-                self.unet.parameters(),
-                self.config.training.max_grad_norm
-            )
-            
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-        
-        return {"loss": loss.detach().item()}
+        return {k: v.detach().item() for k, v in loss_dict.items()}
         
     def train_epoch(self) -> Dict[str, float]:
         """Train for one epoch.
