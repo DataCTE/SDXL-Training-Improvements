@@ -24,13 +24,9 @@ from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from training.config import Config
-from training.memory import (
-    configure_model_memory_format,
-    setup_memory_optimizations,
-    verify_memory_optimizations
-)
-from .training.noise import generate_noise, get_add_time_ids
-from training.metrics import log_metrics as utils_log_metrics
+from training.memory import setup_memory_optimizations, verify_memory_optimizations
+from training.noise import generate_noise, get_add_time_ids
+from training.metrics import log_metrics
 
 
 logger = logging.getLogger(__name__)
