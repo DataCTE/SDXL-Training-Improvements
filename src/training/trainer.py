@@ -330,20 +330,22 @@ class SDXLTrainer:
                 self.config.training.validation_steps > 0 and
                 self.global_step % self.config.training.validation_steps == 0
             ):
-                # Create pipeline from current model
-                pipeline = StableDiffusionXLPipeline.from_pretrained(
+                # Create SDXL model for validation
+                model = StableDiffusionXLModel(ModelType.BASE)
+                model.from_pretrained(
                     self.config.model.pretrained_model_name,
-                    unet=self.unet,
                     torch_dtype=torch.float16 if self.device.type == "cuda" else torch.float32
-                ).to(self.device)
+                )
+                model.unet = self.unet
+                model.to(self.device)
                 
                 self.validator.validate(
-                    pipeline=pipeline,
+                    model=model,
                     step=self.global_step,
                     seed=self.config.global_config.seed
                 )
                 
-                del pipeline
+                del model
                 torch.cuda.empty_cache()
             
             # Save checkpoint

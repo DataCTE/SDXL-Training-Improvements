@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Optional, Tuple, Union
 
 import torch
-from diffusers import StableDiffusionXLPipeline
 from PIL import Image
 import matplotlib.pyplot as plt
+
+from ...models import StableDiffusionXLModel, ModelType
+from ...config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,7 @@ class TextToImageValidator:
     
     def __init__(
         self,
-        base_model_path: str,
+        config: Config,
         device: Union[str, torch.device],
         output_dir: Union[str, Path],
         validation_prompts: Optional[list] = None
@@ -23,11 +25,12 @@ class TextToImageValidator:
         """Initialize validator.
         
         Args:
-            base_model_path: Path to base model for comparison
+            config: Training configuration
             device: Target device
             output_dir: Directory to save validation images
             validation_prompts: List of prompts to use for validation
         """
+        self.config = config
         self.device = device
         self.output_dir = Path(output_dir) / "validation_images"
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -41,11 +44,12 @@ class TextToImageValidator:
         
         # Load base model for comparison
         logger.info("Loading base model for validation...")
-        self.base_pipeline = StableDiffusionXLPipeline.from_pretrained(
-            base_model_path,
-            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
-            variant="fp16" if device.type == "cuda" else None
-        ).to(device)
+        self.base_model = StableDiffusionXLModel(ModelType.BASE)
+        self.base_model.from_pretrained(
+            config.model.pretrained_model_name,
+            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
+        )
+        self.base_model.to(device)
         
         # Cache base model outputs
         logger.info("Generating base model reference images...")
@@ -57,25 +61,27 @@ class TextToImageValidator:
         
         for prompt in self.validation_prompts:
             with torch.no_grad():
-                image = self.base_pipeline(
+                image = self.base_model.generate(
                     prompt=prompt,
                     num_inference_steps=30,
-                    guidance_scale=7.5
-                ).images[0]
+                    guidance_scale=7.5,
+                    width=1024,
+                    height=1024
+                )
                 base_images[prompt] = image
                 
         return base_images
         
     def validate(
         self,
-        pipeline: StableDiffusionXLPipeline,
+        model: StableDiffusionXLModel,
         step: int,
         seed: Optional[int] = None
     ) -> None:
         """Generate validation images and compare to base model.
         
         Args:
-            pipeline: Current training pipeline
+            model: Current training model
             step: Current training step
             seed: Optional seed for reproducibility
         """
@@ -89,11 +95,13 @@ class TextToImageValidator:
         for prompt in self.validation_prompts:
             # Generate image with current model
             with torch.no_grad():
-                current_image = pipeline(
+                current_image = model.generate(
                     prompt=prompt,
                     num_inference_steps=30,
-                    guidance_scale=7.5
-                ).images[0]
+                    guidance_scale=7.5,
+                    width=1024,
+                    height=1024
+                )
                 
             # Create comparison figure
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
