@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from src.training.methods.base import TrainingMethod
+from src.training.trainers.base import TrainingMethod
 from src.training.schedulers.noise_scheduler import get_add_time_ids
 
 logger = logging.getLogger(__name__)

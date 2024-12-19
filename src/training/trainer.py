@@ -18,8 +18,10 @@ from src.data.config import Config
 from src.core.distributed import is_main_process
 from src.core.logging import WandbLogger, log_metrics
 from src.models import StableDiffusionXLModel
-from src.training.methods.ddpm_trainer import DDPMTrainer
+from src.training.trainers.base import TrainingMethod
+from src.training.methods.ddpm_trainer import DDPMTrainer 
 from src.training.methods.flow_matching_trainer import FlowMatchingTrainer
+from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ def create_trainer(
     device: Union[str, torch.device],
     wandb_logger: Optional[WandbLogger] = None,
     validation_prompts: Optional[List[str]] = None
-) -> Union[DDPMTrainer, FlowMatchingTrainer]:
+) -> SDXLTrainer:
     """Create appropriate trainer based on config.
     
     Args:
@@ -61,7 +63,14 @@ def create_trainer(
     logger.info(f"Using {trainer_cls.__name__} for training")
     
     # Create trainer instance
-    return trainer_cls(
+    # Create training method instance
+    training_method = trainer_cls(
+        unet=model.unet,
+        config=config
+    )
+    
+    # Create and return trainer
+    return SDXLTrainer(
         config=config,
         model=model,
         optimizer=optimizer,

@@ -1,4 +1,4 @@
-"""Base trainer implementation for SDXL with support for multiple training methods."""
+"""SDXL trainer implementation with support for multiple training methods."""
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -48,7 +48,7 @@ class SDXLTrainer:
         self.unet = model.unet
         self.optimizer = optimizer
         self.train_dataloader = train_dataloader
-        self.method = training_method
+        self.training_method = training_method
         self.device = device
         self.wandb_logger = wandb_logger
         
@@ -101,7 +101,7 @@ class SDXLTrainer:
             Dict of metrics
         """
         # Compute loss using selected method
-        loss_dict = self.method.compute_loss(
+        loss_dict = self.training_method.compute_loss(
             self.unet,
             batch,
             generator=generator
