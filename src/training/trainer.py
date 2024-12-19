@@ -74,6 +74,80 @@ class SDXLTrainer:
         batch: Dict[str, torch.Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, float]:
+        """Execute single training step."""
+        if self.config.training.method == "flow_matching":
+            return self._train_step_flow_matching(batch)
+        else:
+            return self._train_step_ddpm(batch, generator)
+            
+    def _train_step_flow_matching(
+        self,
+        batch: Dict[str, torch.Tensor]
+    ) -> Dict[str, float]:
+        """Execute Flow Matching training step."""
+        from .flow_matching import sample_logit_normal, compute_flow_matching_loss
+        
+        # Get batch inputs
+        x1 = batch["model_input"]  # Target samples
+        
+        # Sample time values from logit-normal
+        t = sample_logit_normal(
+            (x1.shape[0],),
+            device=self.device,
+            dtype=x1.dtype
+        )
+        
+        # Sample initial points
+        x0 = torch.randn_like(x1)
+        
+        # Get conditioning
+        condition_embeddings = {
+            "prompt_embeds": batch["prompt_embeds"],
+            "added_cond_kwargs": {
+                "text_embeds": batch["pooled_prompt_embeds"],
+                "time_ids": get_add_time_ids(
+                    batch["original_sizes"],
+                    batch["crop_top_lefts"],
+                    batch["target_sizes"],
+                    dtype=batch["prompt_embeds"].dtype,
+                    device=self.device
+                )
+            }
+        }
+        
+        # Compute loss
+        loss = compute_flow_matching_loss(
+            self.unet,
+            x0,
+            x1,
+            t,
+            condition_embeddings
+        )
+        
+        # Apply loss weights if provided
+        if "loss_weights" in batch:
+            loss = loss * batch["loss_weights"].mean()
+            
+        # Backpropagate
+        loss.backward()
+        
+        # Gradient clipping
+        if self.config.training.max_grad_norm > 0:
+            torch.nn.utils.clip_grad_norm_(
+                self.unet.parameters(),
+                self.config.training.max_grad_norm
+            )
+            
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        
+        return {"loss": loss.detach().item()}
+        
+    def _train_step_ddpm(
+        self,
+        batch: Dict[str, torch.Tensor],
+        generator: Optional[torch.Generator] = None
+    ) -> Dict[str, float]:
         """Execute single training step.
         
         Args:

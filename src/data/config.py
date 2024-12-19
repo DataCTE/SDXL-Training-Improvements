@@ -48,6 +48,13 @@ class ModelConfig:
     rho: float = 7.0
     
 @dataclass
+class FlowMatchingConfig:
+    """Flow Matching configuration."""
+    enabled: bool = False
+    num_timesteps: int = 1000
+    sigma: float = 1.0
+
+@dataclass
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
@@ -72,6 +79,8 @@ class TrainingConfig:
     use_wandb: bool = True
     random_flip: bool = True
     center_crop: bool = True
+    method: str = "ddpm"
+    flow_matching: FlowMatchingConfig = field(default_factory=FlowMatchingConfig)
     
 @dataclass
 class DataConfig:

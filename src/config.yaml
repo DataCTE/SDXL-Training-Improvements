@@ -51,6 +51,11 @@ training:
   use_wandb: true
   random_flip: true
   center_crop: true
+  method: "ddpm"  # Options: "ddpm" or "flow_matching"
+  flow_matching:
+    enabled: false
+    num_timesteps: 1000
+    sigma: 1.0  # Standard deviation for logit-normal sampling
 
 data:
   train_data_dir: "data/train"
