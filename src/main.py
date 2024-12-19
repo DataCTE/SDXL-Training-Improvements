@@ -41,7 +41,7 @@ from src.models import (
 
 from src.training import (
     configure_noise_scheduler,
-    SDXLTrainer
+    create_trainer
 )
 
 logger = logging.getLogger(__name__)
