@@ -21,8 +21,8 @@ class FlowMatchingMethod(TrainingMethod):
         self,
         model: torch.nn.Module,
         batch: Dict[str, torch.Tensor],
-        noise_scheduler: Optional[object] = None,  # Kept for interface compatibility
-        generator: Optional[torch.Generator] = None  # Kept for interface compatibility
+        noise_scheduler: Optional[object] = None,  # Unused - kept for interface compatibility
+        generator: Optional[torch.Generator] = None  # Unused - kept for interface compatibility
     ) -> Dict[str, torch.Tensor]:
         """Compute Flow Matching training loss."""
         # Get batch inputs
@@ -39,8 +39,6 @@ class FlowMatchingMethod(TrainingMethod):
         
         # Sample initial points from standard normal
         x0 = torch.randn_like(x1)
-        
-        # Get conditioning
         condition_embeddings = {
             "prompt_embeds": batch["prompt_embeds"],
             "added_cond_kwargs": {
