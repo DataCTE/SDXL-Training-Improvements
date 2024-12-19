@@ -1,19 +1,20 @@
 """DDPM trainer implementation for SDXL."""
 import logging
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor
 
 from ...core.distributed import is_main_process
 from ...core.logging import log_metrics
-from ...training.schedulers.noise_scheduler import (
+from ...training.schedulers import (
     get_scheduler_parameters,
     get_sigmas,
     get_add_time_ids
 )
 from ..trainer import SDXLTrainer
+from ...data.config import Config
+from ...models import StableDiffusionXLModel
 
 logger = logging.getLogger(__name__)
 
