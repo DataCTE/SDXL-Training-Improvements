@@ -19,7 +19,8 @@ from ..core.memory.tensor import (
 from ..core.types import DataType, ModelWeightDtypes
 from ..data.config import Config
 from ..core.distributed import is_main_process, get_world_size
-from ..core.logging.wandb import WandbLogger, log_metrics
+from ..core.logging.wandb import WandbLogger
+from ..core.logging.metrics import log_metrics
 from ..models import StableDiffusionXLModel
 from .noise import generate_noise, get_add_time_ids
 
@@ -292,14 +293,9 @@ class SDXLTrainer:
                     step_metrics,
                     self.global_step,
                     is_main_process=is_main_process(),
-                    use_wandb=False  # Handled by WandbLogger
+                    use_wandb=self.wandb_logger is not None,
+                    wandb_logger=self.wandb_logger
                 )
-                
-                if self.wandb_logger is not None and is_main_process():
-                    self.wandb_logger.log_metrics(
-                        step_metrics,
-                        step=self.global_step
-                    )
                 
             # Save checkpoint
             if (

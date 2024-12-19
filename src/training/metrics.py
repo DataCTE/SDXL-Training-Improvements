@@ -3,9 +3,9 @@ import logging
 from typing import Any, Dict, Optional
 
 import torch.distributed as dist
-import wandb
 
-from ..utils.distributed import reduce_dict, is_main_process
+from ..distributed import reduce_dict
+from .wandb import WandbLogger
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,7 @@ def log_metrics(
     step: int,
     is_main_process: bool = True,
     use_wandb: bool = False,
+    wandb_logger: Optional[WandbLogger] = None,
     step_type: str = "step"
 ) -> None:
     """Log training metrics to console and optional trackers.
@@ -23,6 +24,7 @@ def log_metrics(
         step: Current training step
         is_main_process: Whether this is the main training process
         use_wandb: Whether to log to Weights & Biases
+        wandb_logger: Optional WandbLogger instance
         step_type: Type of step (step/epoch)
     """
     try:
@@ -40,9 +42,9 @@ def log_metrics(
         logger.info(metric_str)
         
         # Log to wandb if enabled
-        if use_wandb:
+        if use_wandb and wandb_logger is not None:
             try:
-                wandb.log(metrics, step=step)
+                wandb_logger.log_metrics(metrics, step=step)
             except Exception as e:
                 logger.error(f"Failed to log metrics to wandb: {str(e)}")
                 
