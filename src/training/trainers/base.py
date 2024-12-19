@@ -5,10 +5,12 @@ from typing import Dict, Optional
 import torch
 from torch import Tensor
 
+from src.data.config import Config
+
 class TrainingMethod(ABC):
     """Abstract base class for SDXL training methods."""
     
-    def __init__(self, unet: torch.nn.Module, config: "Config"):  # type: ignore
+    def __init__(self, unet: torch.nn.Module, config: Config):
         """Initialize training method.
         
         Args:
