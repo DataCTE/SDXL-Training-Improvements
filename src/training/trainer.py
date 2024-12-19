@@ -5,12 +5,11 @@ from typing import Dict, Optional, Union
 
 import torch
 import torch.nn.functional as F
-from accelerate import Accelerator
 from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
 from ..config import Config
-from ..utils.distributed import is_main_process
+from ..utils.distributed import is_main_process, get_world_size
 from ..utils.logging import log_metrics
 from .noise import generate_noise, get_add_time_ids
 
@@ -22,7 +21,6 @@ class SDXLTrainer:
     def __init__(
         self,
         config: Config,
-        accelerator: Accelerator,
         unet: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: DDPMScheduler,
@@ -41,12 +39,14 @@ class SDXLTrainer:
             device: Target device
         """
         self.config = config
-        self.accelerator = accelerator
         self.unet = unet
         self.optimizer = optimizer
         self.noise_scheduler = scheduler
         self.train_dataloader = train_dataloader
         self.device = device
+        
+        # Move model to device
+        self.unet = self.unet.to(device)
         
         # Training state
         self.global_step = 0
@@ -128,10 +128,11 @@ class SDXLTrainer:
         loss = loss.mean()
         
         # Backpropagate
-        self.accelerator.backward(loss)
+        loss.backward()
         
-        if self.accelerator.sync_gradients:
-            self.accelerator.clip_grad_norm_(
+        # Gradient clipping
+        if self.config.training.max_grad_norm > 0:
+            torch.nn.utils.clip_grad_norm_(
                 self.unet.parameters(),
                 self.config.training.max_grad_norm
             )
@@ -248,9 +249,8 @@ class SDXLTrainer:
         checkpoint_dir = Path(self.config.global_config.output_dir) / f"checkpoint-{self.global_step}"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save unwrapped model
-        unwrapped_unet = self.accelerator.unwrap_model(self.unet)
-        unwrapped_unet.save_pretrained(checkpoint_dir)
+        # Save model
+        self.unet.save_pretrained(checkpoint_dir)
         
         # Save optimizer state
         torch.save(

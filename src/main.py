@@ -83,11 +83,10 @@ def main():
         filename="train.log"
     )
     
-    # Initialize distributed training
-    accelerator = Accelerator()
-    device = accelerator.device
+    # Initialize device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    if accelerator.is_local_main_process:
+    if is_main_process():
         logger.info(f"Using device: {device}")
         
     # Load models
@@ -150,19 +149,18 @@ def main():
         eps=config.training.optimizer_eps
     )
     
-    # Prepare for distributed training
-    unet, optimizer, train_dataloader, scheduler = accelerator.prepare(
-        models["unet"],
-        optimizer,
-        train_dataloader,
-        noise_scheduler_config["scheduler"]
-    )
-    
+    # Initialize distributed training if needed
+    if get_world_size() > 1:
+        models["unet"] = torch.nn.parallel.DistributedDataParallel(
+            models["unet"],
+            device_ids=[device] if device.type == "cuda" else None
+        )
+
     # TODO: Implement training loop
     
     # Cleanup
-    accelerator.wait_for_everyone()
-    if accelerator.is_local_main_process:
+    cleanup_distributed()
+    if is_main_process():
         logger.info("Training complete!")
     
 if __name__ == "__main__":
