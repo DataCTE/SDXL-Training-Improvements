@@ -1,16 +1,39 @@
-# SDXL Training Framework
+# SDXL Training Improvements
 
-A high-performance training framework for Stable Diffusion XL models, optimized for WSL environments.
+A comprehensive collection of state-of-the-art training improvements for Stable Diffusion XL models, combining research advances from multiple papers into a single high-performance framework.
 
-## Features
+## Features & Implemented Papers
 
-- Efficient memory management with layer offloading
+### Memory Optimization
+- Gradient checkpointing and layer offloading [1]
+- Mixed precision training with dynamic scaling [2]
+- Efficient tensor memory management [3]
+
+### Training Methods
+- Flow matching for improved convergence [4]
+- Dynamic tag-based loss weighting [5]
+- Advanced noise scheduling with Karras sigmas [6]
+
+### Data Processing
+- High-throughput preprocessing pipeline
+- Aspect ratio bucketing for SDXL [7]
+- Advanced caption preprocessing [8]
+
+### Architecture
 - Distributed training support
-- Advanced data preprocessing pipeline
-- Tag-based loss weighting
-- Flow matching and DDPM training methods
+- CUDA-optimized operations
 - Wandb integration for experiment tracking
-- CUDA-optimized tensor operations
+
+## Paper Citations
+
+[1] Gradient Checkpointing paper citation
+[2] Mixed Precision Training paper citation
+[3] Memory Management paper citation
+[4] Flow Matching paper citation
+[5] Dynamic Loss paper citation
+[6] Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
+[7] Aspect Ratio Bucketing paper citation
+[8] Caption Processing paper citation
 
 ## Requirements
 
