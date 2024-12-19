@@ -21,8 +21,8 @@ class FlowMatchingMethod(TrainingMethod):
         self,
         model: torch.nn.Module,
         batch: Dict[str, torch.Tensor],
-        noise_scheduler: Optional[object] = None,
-        generator: Optional[torch.Generator] = None
+        noise_scheduler: Optional[object] = None,  # Kept for interface compatibility
+        generator: Optional[torch.Generator] = None  # Kept for interface compatibility
     ) -> Dict[str, torch.Tensor]:
         """Compute Flow Matching training loss."""
         # Get batch inputs
@@ -39,9 +39,6 @@ class FlowMatchingMethod(TrainingMethod):
         
         # Sample initial points from standard normal
         x0 = torch.randn_like(x1)
-        
-        # Compute optimal transport path points
-        xt = optimal_transport_path(x0, x1, t)
         
         # Get conditioning
         condition_embeddings = {
