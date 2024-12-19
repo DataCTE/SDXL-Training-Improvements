@@ -25,6 +25,7 @@ class DDPMScheduler:
         dynamic_thresholding_ratio: float = 0.995,
         sample_max_value: float = 1.0,
         clip_sample_range: float = 1.0,
+        num_inference_steps: int = 50,
     ):
         """Initialize DDPM scheduler.
         
@@ -103,9 +104,13 @@ class DDPMScheduler:
         scaled = sample / ((sigma ** 2 + 1) ** 0.5)
         return scaled
 
-    def set_timesteps(self, num_inference_steps: int) -> None:
-        """Set timesteps for inference."""
-        self.num_inference_steps = num_inference_steps
+    def set_timesteps(self, num_inference_steps: Optional[int] = None) -> None:
+        """Set timesteps for inference.
+        
+        Args:
+            num_inference_steps: Optional number of inference steps to override default
+        """
+        self.num_inference_steps = num_inference_steps or self.num_inference_steps
 
     def step(
         self,
