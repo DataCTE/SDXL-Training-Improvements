@@ -1,13 +1,11 @@
 """Memory optimization utilities for training."""
-import logging
 import torch
 from typing import Dict, Optional, Any, TYPE_CHECKING
 from ..types import DataType, ModelWeightDtypes
+from .tensor import logger
 
 if TYPE_CHECKING:
     from ...data.config import Config
-
-logger = logging.getLogger(__name__)
 
 def setup_memory_optimizations(
     model: torch.nn.Module,
