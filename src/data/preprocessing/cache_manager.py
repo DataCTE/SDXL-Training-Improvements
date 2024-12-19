@@ -1,6 +1,6 @@
 """High-performance cache management for large-scale dataset preprocessing."""
-import logging
 import multiprocessing as mp
+from src.core.logging.logging import setup_logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -24,7 +24,7 @@ from src.core.memory.optimizations import (
     verify_memory_optimizations
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 class CacheManager:
     """Manages high-throughput caching of image-caption pairs."""

@@ -1,6 +1,6 @@
 """Latent preprocessing utilities for SDXL training."""
-import logging
 from pathlib import Path
+from src.core.logging.logging import setup_logging
 import torch
 from typing import Dict, List, Optional, Union
 
@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from src.data.config import Config
 from src.models.encoders.clip import encode_clip
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 class LatentPreprocessor:
     def __init__(

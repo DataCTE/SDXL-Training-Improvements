@@ -1,6 +1,6 @@
 """Dataset implementation for SDXL training."""
-import logging
 import os
+from src.core.logging.logging import setup_logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -30,7 +30,7 @@ from src.core.memory.optimizations import (
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 class SDXLDataset(Dataset):
     def __init__(
