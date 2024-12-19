@@ -4,7 +4,7 @@ from .tag_weighter import TagWeighter, create_tag_weighter
 from .pipeline import PreprocessingPipeline
 
 __all__ = [
-    "LatentPreprocessor",
+    "LatentPreprocessor", 
     "CacheManager",
     "TagWeighter",
     "create_tag_weighter",
