@@ -18,7 +18,6 @@ from src.data.config import Config
 from src.core.distributed import is_main_process
 from src.core.logging import WandbLogger, log_metrics
 from src.models import StableDiffusionXLModel
-from src.training.methods.base import TrainingMethod
 from src.training.methods.ddpm_trainer import DDPMTrainer
 from src.training.methods.flow_matching_trainer import FlowMatchingTrainer
 
