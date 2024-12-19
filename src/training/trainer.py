@@ -5,13 +5,14 @@ from typing import Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
-from diffusers import DDPMScheduler, StableDiffusionXLPipeline
+from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
 from ..config import Config
 from ..core.distributed import is_main_process, get_world_size
 from ..core.logging import log_metrics
 from ..core.logging.wandb import WandbLogger
+from ..models import StableDiffusionXLModel, ModelType
 from .noise import generate_noise, get_add_time_ids
 
 logger = logging.getLogger(__name__)
