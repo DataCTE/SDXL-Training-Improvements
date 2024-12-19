@@ -247,14 +247,14 @@ def get_scheduler_parameters(
         Dict of scheduler parameters
     """
     try:
-        # Convert sigmas to betas
+        # Convert sigmas to betas using config parameters
         sigmas = sigmas.to(device)
-        sigmas_next = torch.cat([sigmas[1:], torch.tensor([0.0], device=device)])
+        sigmas_next = torch.cat([sigmas[1:], torch.tensor([config.model.sigma_min], device=device)])
         
-        # Compute alphas and betas
+        # Compute alphas and betas with config-based clipping
         alphas = 1 / (1 + sigmas ** 2)
         betas = 1 - alphas / (1 + sigmas_next ** 2)
-        betas = torch.clip(betas, 0, 0.999)
+        betas = torch.clip(betas, 0, config.training.snr_gamma or 0.999)
         
         # Compute alphas cumprod
         alphas = 1 - betas
