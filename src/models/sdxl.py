@@ -204,24 +204,24 @@ class StableDiffusionXLModel(BaseModel):
         """
         # Tokenize if needed
         if tokens_1 is None and text is not None:
-            tokenizer_output = self.tokenizer_1(
+            tokens_1 = self.tokenizer_1.encode(
                 text,
                 padding='max_length',
                 truncation=True,
                 max_length=77,
                 return_tensors="pt",
             )
-            tokens_1 = tokenizer_output.input_ids.to(self.text_encoder_1.device)
+            tokens_1 = tokens_1.to(self.text_encoder_1.device)
 
         if tokens_2 is None and text is not None:
-            tokenizer_output = self.tokenizer_2(
+            tokens_2 = self.tokenizer_2.encode(
                 text,
-                padding='max_length',
+                padding='max_length', 
                 truncation=True,
                 max_length=77,
                 return_tensors="pt",
             )
-            tokens_2 = tokenizer_output.input_ids.to(self.text_encoder_2.device)
+            tokens_2 = tokens_2.to(self.text_encoder_2.device)
 
         # Encode with both encoders
         text_encoder_1_output, _ = encode_clip(
