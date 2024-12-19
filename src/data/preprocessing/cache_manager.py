@@ -24,7 +24,7 @@ from src.core.memory.optimizations import (
     verify_memory_optimizations
 )
 
-logger = setup_logging(__name__)
+logger = setup_logging(__name__, level="INFO")
 
 class CacheManager:
     """Manages high-throughput caching of image-caption pairs."""

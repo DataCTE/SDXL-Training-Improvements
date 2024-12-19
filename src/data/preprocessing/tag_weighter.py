@@ -11,7 +11,7 @@ import torch
 if TYPE_CHECKING:
     from src.data.config import Config
 
-logger = setup_logging(__name__)
+logger = setup_logging(__name__, level="INFO")
 
 class TagWeighter:
     def __init__(

@@ -8,7 +8,7 @@ import packaging
 import torch
 import accelerate
 
-logger = setup_logging(__name__)
+logger = setup_logging(__name__, level="INFO")
 
 accelerator = accelerate.Accelerator()
 default_device = accelerator.device
