@@ -64,7 +64,7 @@ training:
     sigma: 1.0  # Standard deviation for logit-normal sampling
 
 data:
-  train_data_dir: ["D:\Datasets\High-quality-photo10k","D:\Datasets\collage\collage"]
+  train_data_dir: ["D:\\Datasets\\High-quality-photo10k", "D:\\Datasets\\collage\\collage"]
   num_workers: 4
   pin_memory: true
   persistent_workers: true
