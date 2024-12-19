@@ -205,15 +205,15 @@ class PreprocessingPipeline:
             compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
             transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
             
-            # Pre-allocate pinned memory buffer
+            # Pre-allocate and use pinned memory buffer
             if self.use_pinned_memory and torch.cuda.is_available():
                 pinned_buffer = torch.empty_like(item, pin_memory=True)
+                pinned_buffer.copy_(item, non_blocking=True)
+                item = pinned_buffer
             
             with autocast(enabled=True):
-                # Optimize memory format and pin memory
+                # Optimize memory format
                 item = item.to(memory_format=torch.channels_last, non_blocking=True)
-                if self.use_pinned_memory:
-                    pin_tensor_(item)
                 
                 # Use transfer stream for device moves
                 if transfer_stream is not None:
