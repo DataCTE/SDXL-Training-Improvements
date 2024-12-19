@@ -76,37 +76,6 @@ def setup_memory_optimizations(
                 logger.info(f"Reducing effective batch size from {batch_size} to {micro_batch_size} with gradient accumulation")
                 
         return True
-    """Setup memory optimizations for training.
-    
-    Args:
-        model: Model to optimize
-        config: Training config
-        device: Target device
-        batch_size: Training batch size
-        micro_batch_size: Micro batch size for gradient accumulation
-        
-    Returns:
-        bool: Whether optimizations were successful
-    """
-    try:
-        if device.type != "cuda":
-            logger.info("Memory optimizations only available for CUDA devices")
-            return False
-            
-        # Configure gradients
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        
-        # Enable gradient checkpointing if configured
-        if config.training.gradient_checkpointing:
-            model.enable_gradient_checkpointing()
-            
-        # Configure automatic mixed precision
-        if config.training.mixed_precision:
-            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
-                
-        return True
         
     except Exception as e:
         logger.error(f"Failed to setup memory optimizations: {str(e)}")
