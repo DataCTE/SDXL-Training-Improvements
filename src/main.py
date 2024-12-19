@@ -11,14 +11,14 @@ import torch
 from diffusers import AutoencoderKL
 from transformers import CLIPTokenizer, CLIPTextModel
 
-from data.config import Config
-from data import create_dataset, LatentPreprocessor
-from models import StableDiffusionXLModel
-from models.base import ModelType
-from core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from core.logging.logging import setup_logging
-from core.logging.wandb import WandbLogger
-from core.memory import (
+from .data.config import Config
+from .data import create_dataset, LatentPreprocessor
+from .models import StableDiffusionXLModel
+from .models.base import ModelType
+from .core.distributed import setup_distributed, cleanup_distributed, is_main_process
+from .core.logging.logging import setup_logging
+from .core.logging.wandb import WandbLogger
+from .core.memory import (
     setup_memory_optimizations, 
     verify_memory_optimizations,
     tensors_to_device_,
