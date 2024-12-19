@@ -1,6 +1,7 @@
 """Common type definitions."""
 from enum import Enum, auto
 import inspect
+import torch
 from typing import Dict, List, Optional, Union
 
 class DataType(Enum):
