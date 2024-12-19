@@ -2,6 +2,7 @@
 import logging
 import torch
 from typing import Dict, Optional, Any, TYPE_CHECKING
+from ..types import DataType, ModelWeightDtypes
 
 if TYPE_CHECKING:
     from ...config import Config

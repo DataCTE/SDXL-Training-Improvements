@@ -14,6 +14,7 @@ from ..core.memory.tensor import (
     create_stream_context,
     torch_gc
 )
+from ..core.types import DataType
 
 from ..config import Config
 from ..core.distributed import is_main_process, get_world_size
