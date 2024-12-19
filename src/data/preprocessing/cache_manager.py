@@ -83,12 +83,18 @@ class CacheManager:
         return hasher.hexdigest()
         
     def _process_image(self, image_path: Path) -> Optional[torch.Tensor]:
-        """Process single image with error handling."""
+        """Process single image with error handling and memory optimization."""
         try:
             image = Image.open(image_path).convert('RGB')
-            # Convert to tensor and normalize
+            # Convert to tensor and normalize with memory optimizations
             tensor = torch.from_numpy(np.array(image)).float() / 255.0
             tensor = tensor.permute(2, 0, 1)  # CHW format
+            tensor = tensor.contiguous(memory_format=torch.channels_last)
+            
+            # Pin memory if CUDA is available
+            if torch.cuda.is_available():
+                tensor = tensor.pin_memory()
+                
             return tensor
         except Exception as e:
             logger.error(f"Error processing {image_path}: {str(e)}")

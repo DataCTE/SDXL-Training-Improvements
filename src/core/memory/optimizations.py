@@ -91,10 +91,12 @@ def verify_memory_optimizations(
         "cuda_available": torch.cuda.is_available(),
         "device_type": device.type == "cuda",
         "channels_last": (
+            model is not None and
             model.training and 
             next(model.parameters()).is_contiguous(memory_format=torch.channels_last)
         ),
         "gradient_checkpointing": (
+            model is not None and
             hasattr(model, "is_gradient_checkpointing") and
             model.is_gradient_checkpointing
         ),
@@ -102,6 +104,18 @@ def verify_memory_optimizations(
             config.training.mixed_precision and
             torch.cuda.is_available() and
             torch.cuda.is_bf16_supported()
+        ),
+        "vram_optimizations": (
+            config.training.memory.enable_24gb_optimizations and
+            config.training.memory.layer_offload_fraction > 0
+        ),
+        "activation_offloading": (
+            config.training.memory.enable_24gb_optimizations and
+            config.training.memory.enable_activation_offloading
+        ),
+        "async_offloading": (
+            config.training.memory.enable_24gb_optimizations and
+            config.training.memory.enable_async_offloading
         )
     }
     

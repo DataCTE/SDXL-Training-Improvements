@@ -183,6 +183,8 @@ class PreprocessingPipeline:
                 # Move to GPU with optimized memory format
                 if self.use_pinned_memory:
                     item = item.pin_memory()
+                    
+                item = item.to(memory_format=torch.channels_last)
                 
                 with create_stream_context(torch.cuda.current_stream()):
                     tensors_to_device_(
@@ -196,13 +198,15 @@ class PreprocessingPipeline:
                 # Custom CUDA stream for async processing
                 stream = torch.cuda.Stream()
                 with torch.cuda.stream(stream):
-                    # Process tensor
+                    # Process tensor with memory optimizations
                     processed = self._apply_transforms(item)
                     
-                    # Move back to CPU if needed
+                    # Move back to CPU if needed, with proper cleanup
                     if self.cache_dir:
-                        processed = processed.cpu()
-                        
+                        with create_stream_context(stream):
+                            processed = processed.cpu()
+                            torch_gc()
+                            
                     return {"tensor": processed}
 
         except Exception as e:
