@@ -13,11 +13,12 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 - Flow matching for improved convergence [4]
 - Dynamic tag-based loss weighting [5]
 - Advanced noise scheduling with Karras sigmas [6]
+- NovelAI V3 training improvements [7]
 
 ### Data Processing
 - High-throughput preprocessing pipeline
-- Aspect ratio bucketing for SDXL [7]
-- Advanced caption preprocessing [8]
+- Aspect ratio bucketing for SDXL [8]
+- Advanced caption preprocessing [9]
 
 ### Architecture
 - Distributed training support
@@ -32,8 +33,9 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 [4] Flow Matching paper citation
 [5] Dynamic Loss paper citation
 [6] Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
-[7] Aspect Ratio Bucketing paper citation
-[8] Caption Processing paper citation
+[7] Ossa et al. "Improvements to SDXL in NovelAI Diffusion V3" arXiv:2409.15997, 2024
+[8] Aspect Ratio Bucketing paper citation
+[9] Caption Processing paper citation
 
 ## Requirements
 
