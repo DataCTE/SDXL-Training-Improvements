@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 def configure_model_memory_format(
     model: torch.nn.Module,
-    config: "Config"  # type: ignore
 ) -> None:
     """Configure model memory format for training.
     
@@ -24,9 +23,7 @@ def configure_model_memory_format(
 def setup_memory_optimizations(
     model: torch.nn.Module,
     config: "Config",  # type: ignore
-    device: torch.device,
-    batch_size: int,
-    micro_batch_size: int
+    device: torch.device
 ) -> bool:
     """Setup memory optimizations for training.
     
