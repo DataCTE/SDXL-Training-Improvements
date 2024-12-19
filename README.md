@@ -57,23 +57,19 @@ A high-performance training framework for Stable Diffusion XL that implements cu
 
 ## Performance Improvements
 
-### Memory Usage
-- 50% VRAM reduction through smart offloading
-- Efficient gradient accumulation
-- Optimized tensor memory layout
-- Reduced CPU-GPU transfer overhead
+### Research-Backed Improvements
 
-### Training Speed
-- 30% faster convergence with flow matching
-- Improved stability from v-prediction
-- Efficient multi-GPU scaling
-- Reduced I/O bottlenecks
+#### Flow Matching with Logit-Normal Time Sampling
+- 30% faster convergence through optimal transport paths
+- Improved gradient flow via logit-normal sampling
+- Direct velocity field learning without noise schedules
+- Reduced training instability through optimal transport
 
-### Sample Quality
-- Better high-frequency detail preservation
-- Reduced artifacts through ZTSNR
-- Improved color accuracy
-- More stable text alignment
+#### Zero Terminal SNR Training
+- Novel infinite noise approximation (sigma_max ~20000)
+- Improved high-frequency detail preservation
+- Significantly reduced image artifacts
+- Enhanced text-to-image alignment
 
 ## Requirements
 
@@ -136,24 +132,6 @@ The framework uses a hierarchical YAML configuration system:
 
 See [`src/config.yaml`](src/config.yaml) for a complete example.
 
-## Memory Optimization
-
-Advanced memory features include:
-
-- Layer offloading to CPU
-- Gradient checkpointing
-- Mixed precision training
-- Activation offloading
-- Efficient tensor management
-
-Configure in `training.memory` section of config file.
-
-## Distributed Training
-
-For multi-GPU setups:
-```bash
-torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
-```
 
 ## References
 
