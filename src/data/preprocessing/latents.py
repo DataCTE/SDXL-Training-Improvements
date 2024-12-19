@@ -4,8 +4,8 @@ from pathlib import Path
 import torch
 from typing import Dict, List, Optional, Union
 
-from ...core.memory.tensor import tensors_to_device_, torch_gc
-from ...core.types import DataType, ModelWeightDtypes
+from sdxl_trainer.core.memory.tensor import tensors_to_device_, torch_gc
+from sdxl_trainer.core.types import DataType, ModelWeightDtypes
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers import AutoencoderKL
 from torch.utils.data import Dataset

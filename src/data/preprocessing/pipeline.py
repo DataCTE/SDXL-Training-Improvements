@@ -8,13 +8,13 @@ from typing import Dict, List, Optional, Union, Any
 import torch
 import torch.cuda
 from torch.cuda.amp import autocast
-from ...core.memory.tensor import (
+from sdxl_trainer.core.memory.tensor import (
     tensors_to_device_,
     create_stream_context,
     tensors_record_stream,
     torch_gc
 )
-from ...core.types import DataType, ModelWeightDtypes
+from sdxl_trainer.core.types import DataType, ModelWeightDtypes
 import nvidia.dali as dali
 import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline

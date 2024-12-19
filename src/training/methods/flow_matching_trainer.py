@@ -4,15 +4,15 @@ from typing import Dict, Optional
 
 import torch
 
-from ...core.distributed import is_main_process
-from ...core.logging import log_metrics
-from ..flow_matching import (
+from sdxl_trainer.core.distributed import is_main_process
+from sdxl_trainer.core.logging import log_metrics
+from sdxl_trainer.training.flow_matching import (
     sample_logit_normal,
     optimal_transport_path,
     compute_flow_matching_loss
 )
-from ..noise import get_add_time_ids
-from .base import BaseSDXLTrainer
+from sdxl_trainer.training.noise import get_add_time_ids
+from sdxl_trainer.training.methods.base import BaseSDXLTrainer
 
 logger = logging.getLogger(__name__)
 

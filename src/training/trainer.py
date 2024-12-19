@@ -7,17 +7,17 @@ import torch
 from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
-from ..core.types import DataType, ModelWeightDtypes
-from ..core.memory.tensor import (
+from sdxl_trainer.core.types import DataType, ModelWeightDtypes
+from sdxl_trainer.core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
     torch_gc
 )
-from ..data.config import Config
-from ..core.distributed import is_main_process, get_world_size
-from ..core.logging import WandbLogger, log_metrics
-from ..models import StableDiffusionXLModel
+from sdxl_trainer.data.config import Config
+from sdxl_trainer.core.distributed import is_main_process, get_world_size
+from sdxl_trainer.core.logging import WandbLogger, log_metrics
+from sdxl_trainer.models import StableDiffusionXLModel
 from .methods.base import BaseSDXLTrainer
 from .methods.ddpm_trainer import DDPMTrainer
 from .methods.flow_matching_trainer import FlowMatchingTrainer
