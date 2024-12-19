@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
+from ..core.types import DataType, ModelWeightDtypes
+
 from ..core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
@@ -57,6 +59,24 @@ class SDXLTrainer:
         self.train_dataloader = train_dataloader
         self.device = device
         self.wandb_logger = wandb_logger
+        
+        # Configure model dtypes
+        self.model_dtypes = ModelWeightDtypes(
+            train_dtype=DataType.FLOAT_32,
+            fallback_train_dtype=DataType.FLOAT_16,
+            unet=DataType.FLOAT_32,
+            prior=DataType.FLOAT_32,
+            text_encoder=DataType.FLOAT_32,
+            text_encoder_2=DataType.FLOAT_32,
+            text_encoder_3=DataType.FLOAT_32,
+            vae=DataType.FLOAT_32,
+            effnet_encoder=DataType.FLOAT_32,
+            decoder=DataType.FLOAT_32,
+            decoder_text_encoder=DataType.FLOAT_32,
+            decoder_vqgan=DataType.FLOAT_32,
+            lora=DataType.FLOAT_32,
+            embedding=DataType.FLOAT_32
+        )
         
         # Move model and optimizer to device efficiently
         if not tensors_match_device(self.model.state_dict(), device):
