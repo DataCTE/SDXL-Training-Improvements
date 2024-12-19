@@ -2,7 +2,10 @@
 import logging
 from typing import Any, Dict, Optional
 
+import torch.distributed as dist
 import wandb
+
+from ..utils.distributed import reduce_dict, is_main_process
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,10 @@ def log_metrics(
         step_type: Type of step (step/epoch)
     """
     try:
+        # Reduce metrics across processes
+        if dist.is_initialized():
+            metrics = reduce_dict(metrics)
+            
         if not is_main_process:
             return
             
