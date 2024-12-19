@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument("--local_rank", type=int, default=-1, help="Local rank for distributed training")
     return parser.parse_args()
 
-def load_models(config: Config, device: torch.device):
+def load_models(config: Config):
     """Load and configure all required models."""
     # Load tokenizers
     tokenizer_one = CLIPTokenizer.from_pretrained(
@@ -103,7 +103,7 @@ def main():
         
     # Load and configure models
     logger.info("Loading models...")
-    models = load_models(config, device)
+    models = load_models(config)
     sdxl_model = models["model"]
     
     # Move models to device efficiently
