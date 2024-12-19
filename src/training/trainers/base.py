@@ -4,6 +4,7 @@ from typing import Dict, Optional
 
 import torch
 from torch import Tensor
+from diffusers import DDPMScheduler
 
 from src.data.config import Config
 
