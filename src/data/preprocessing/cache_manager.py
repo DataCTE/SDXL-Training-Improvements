@@ -130,7 +130,7 @@ class CacheManager:
         import time
         start_time = time.time()
         logger.info(f"Starting dataset processing with {num_workers or self.num_proc} workers")
-        from ...utils.paths import convert_windows_path
+        from src.utils.paths import convert_windows_path
         data_dir = convert_windows_path(data_dir)
         """Process entire dataset with parallel processing.
         

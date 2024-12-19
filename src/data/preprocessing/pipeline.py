@@ -11,10 +11,9 @@ from torch.cuda.amp import autocast
 from src.core.memory.tensor import (
     tensors_to_device_,
     create_stream_context,
-    tensors_record_stream,
-    torch_gc
+    tensors_record_stream
 )
-from src.core.types import DataType, ModelWeightDtypes
+from src.core.types import ModelWeightDtypes
 import nvidia.dali as dali
 import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline
