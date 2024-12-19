@@ -1,4 +1,7 @@
-"""Main training script for SDXL fine-tuning."""
+"""Main training script for SDXL fine-tuning.
+
+Note: utils/ directory has been removed and its contents reorganized into core/ and other modules.
+"""
 import argparse
 import logging
 import os
