@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Third-party imports
 import torch
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, StableDiffusionXLPipeline
 from transformers import CLIPTokenizer, CLIPTextModel
 
 # Local imports
