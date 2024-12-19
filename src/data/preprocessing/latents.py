@@ -155,17 +155,23 @@ class LatentPreprocessor:
         if torch.cuda.is_available():
             pixel_values = pixel_values.pin_memory()
             
-        # Create streams for pipelined transfer and compute
-        transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-        compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-
         latents = []
         for idx in range(0, len(pixel_values), batch_size):
             batch = pixel_values[idx:idx + batch_size]
             with torch.no_grad():
-                batch_latents = self.vae.encode(batch).latent_dist.sample()
-                batch_latents = batch_latents * self.vae.config.scaling_factor
-                latents.append(batch_latents.cpu())
+                # Use CUDA streams for pipelined compute and transfer
+                if torch.cuda.is_available():
+                    with torch.cuda.stream(torch.cuda.Stream()) as compute_stream:
+                        batch_latents = self.vae.encode(batch).latent_dist.sample()
+                        batch_latents = batch_latents * self.vae.config.scaling_factor
+                        
+                    with torch.cuda.stream(torch.cuda.Stream()) as transfer_stream:
+                        transfer_stream.wait_stream(compute_stream)
+                        latents.append(batch_latents.cpu())
+                else:
+                    batch_latents = self.vae.encode(batch).latent_dist.sample()
+                    batch_latents = batch_latents * self.vae.config.scaling_factor
+                    latents.append(batch_latents.cpu())
 
         latents = torch.cat(latents)
         return {"model_input": latents}
