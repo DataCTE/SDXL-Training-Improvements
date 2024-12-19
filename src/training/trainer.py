@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Union, Type
 
 import torch
 from tqdm.auto import tqdm
+from diffusers import DDPMScheduler
 
 from src.core.types import DataType, ModelWeightDtypes
 from src.core.memory.tensor import (
@@ -71,70 +72,6 @@ def create_trainer(
         validation_prompts=validation_prompts
     )
     
-    def __init__(
-        self,
-        config: Config,
-        model: StableDiffusionXLModel,
-        optimizer: torch.optim.Optimizer,
-        scheduler: DDPMScheduler,
-        train_dataloader: torch.utils.data.DataLoader,
-        device: Union[str, torch.device],
-        wandb_logger: Optional[WandbLogger] = None,
-        validation_prompts: Optional[List[str]] = None
-    ):
-        """Initialize trainer.
-        
-        Args:
-            config: Training configuration
-            accelerator: Accelerator for distributed training
-            unet: UNet model
-            optimizer: Optimizer
-            scheduler: Noise scheduler
-            train_dataloader: Training data loader
-            device: Target device
-        """
-        self.config = config
-        self.model = model
-        self.unet = model.unet  # Extract UNet from SDXL model
-        self.optimizer = optimizer
-        self.noise_scheduler = scheduler
-        self.train_dataloader = train_dataloader
-        self.device = device
-        self.wandb_logger = wandb_logger
-        
-        # Configure model dtypes
-        self.model_dtypes = ModelWeightDtypes(
-            train_dtype=DataType.FLOAT_32,
-            fallback_train_dtype=DataType.FLOAT_16,
-            unet=DataType.FLOAT_32,
-            prior=DataType.FLOAT_32,
-            text_encoder=DataType.FLOAT_32,
-            text_encoder_2=DataType.FLOAT_32,
-            text_encoder_3=DataType.FLOAT_32,
-            vae=DataType.FLOAT_32,
-            effnet_encoder=DataType.FLOAT_32,
-            decoder=DataType.FLOAT_32,
-            decoder_text_encoder=DataType.FLOAT_32,
-            decoder_vqgan=DataType.FLOAT_32,
-            lora=DataType.FLOAT_32,
-            embedding=DataType.FLOAT_32
-        )
-        
-        # Move model and optimizer to device efficiently
-        if not tensors_match_device(self.model.state_dict(), device):
-            with create_stream_context(torch.cuda.current_stream()):
-                tensors_to_device_(self.model.state_dict(), device, non_blocking=True)
-                if hasattr(self.optimizer, 'state'):
-                    tensors_to_device_(self.optimizer.state, device, non_blocking=True)
-            torch.cuda.current_stream().synchronize()
-            torch_gc()
-        
-        # Training state
-        self.global_step = 0
-        self.epoch = 0
-        self.max_steps = config.training.max_train_steps or (
-            len(train_dataloader) * config.training.num_epochs
-        )
         
     def train_step(
         self,
