@@ -9,11 +9,11 @@ import torch.nn.functional as F
 from src.core.distributed import is_main_process
 from src.core.logging import log_metrics
 from src.training.schedulers import get_scheduler_parameters, get_sigmas, get_add_time_ids
-from src.training.trainers.SDXLTrainer import BaseSDXLTrainer
+from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
-class FlowMatchingTrainer(BaseSDXLTrainer):
+class FlowMatchingTrainer(SDXLTrainer):
     """SDXL trainer using Flow Matching method."""
     
     @property
@@ -139,6 +139,7 @@ class FlowMatchingTrainer(BaseSDXLTrainer):
 
     def compute_loss(
         self,
+        model: torch.nn.Module,
         batch: Dict[str, torch.Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, torch.Tensor]:

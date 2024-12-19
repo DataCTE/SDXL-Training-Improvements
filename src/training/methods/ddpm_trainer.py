@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from src.core.distributed import is_main_process
 from src.training.schedulers.noise_scheduler import get_add_time_ids
-from src.training.trainer import SDXLTrainer
+from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ class DDPMTrainer(SDXLTrainer):
 
     def compute_loss(
         self,
-        batch: Dict[str, Tensor],
+        model: torch.nn.Module,
+        batch: Dict[str, Tensor], 
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         """Compute DDPM training loss.
