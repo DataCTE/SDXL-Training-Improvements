@@ -98,8 +98,8 @@ class TrainingConfig:
 @dataclass
 class DataConfig:
     """Data configuration."""
-    train_data_dir: str = "data/train"
-    val_data_dir: str = "data/val"
+    train_data_dir: Union[str, List[str]] = field(default_factory=lambda: ["data/train"])
+    val_data_dir: Union[str, List[str]] = field(default_factory=lambda: ["data/val"])
     num_workers: int = 4
     pin_memory: bool = True
     persistent_workers: bool = True

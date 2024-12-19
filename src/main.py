@@ -137,11 +137,52 @@ def main():
     
     # Load datasets
     logger.info("Creating datasets...")
+    # Handle multiple training directories
+    image_paths = []
+    captions = []
+    train_dirs = config.data.train_data_dir if isinstance(config.data.train_data_dir, list) else [config.data.train_data_dir]
+    
+    for data_dir in train_dirs:
+        dir_path = Path(data_dir)
+        if not dir_path.exists():
+            logger.warning(f"Training directory not found: {data_dir}")
+            continue
+            
+        # Collect images and captions from this directory
+        dir_images = list(dir_path.glob("*.jpg"))
+        if not dir_images:
+            logger.warning(f"No jpg images found in {data_dir}")
+            continue
+            
+        # Check for corresponding caption files
+        valid_images = []
+        valid_captions = []
+        for img_path in dir_images:
+            caption_path = img_path.with_suffix(".txt")
+            if caption_path.exists():
+                try:
+                    caption = caption_path.read_text(encoding='utf-8').strip()
+                    valid_images.append(str(img_path))
+                    valid_captions.append(caption)
+                except Exception as e:
+                    logger.warning(f"Error reading caption file {caption_path}: {e}")
+            else:
+                logger.warning(f"Missing caption file for {img_path}")
+        
+        image_paths.extend(valid_images)
+        captions.extend(valid_captions)
+        
+        logger.info(f"Found {len(valid_images)} valid image-caption pairs in {data_dir}")
+    
+    if not image_paths:
+        raise ValueError("No valid training image-caption pairs found in specified directories")
+        
+    logger.info(f"Total training samples: {len(image_paths)} across {len(train_dirs)} directories")
+    
     train_dataset = create_dataset(
         config,
-        [str(p) for p in Path(config.data.train_data_dir).glob("*.jpg")],
-        [p.with_suffix(".txt").read_text().strip() 
-         for p in Path(config.data.train_data_dir).glob("*.jpg")],
+        image_paths,
+        captions,
         latent_preprocessor=latent_preprocessor,
         is_train=True
     )
