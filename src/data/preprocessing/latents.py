@@ -3,6 +3,9 @@ import logging
 from pathlib import Path
 import torch
 from typing import Dict, List, Optional, Union
+
+from ...core.memory.tensor import tensors_to_device_, torch_gc
+from ...core.types import DataType
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers import AutoencoderKL
 from torch.utils.data import Dataset

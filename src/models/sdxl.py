@@ -6,6 +6,13 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+
+from ..core.types import DataType
+from ..core.memory.tensor import (
+    tensors_to_device_,
+    device_equals,
+    torch_gc
+)
 from .base import BaseModel, BaseModelEmbedding, ModelType
 from diffusers import (
     AutoencoderKL,
