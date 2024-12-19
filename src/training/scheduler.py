@@ -120,6 +120,9 @@ class DDPMScheduler:
         return_dict: bool = True
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, ...]]:
         """Predict previous mean and variance."""
+        if not hasattr(self, 'num_inference_steps'):
+            raise ValueError("Number of inference steps not set. Call set_timesteps() first.")
+            
         prev_timestep = timestep - self.num_train_timesteps // self.num_inference_steps
 
         # Get alpha values
