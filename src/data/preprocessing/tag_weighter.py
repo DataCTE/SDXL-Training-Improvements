@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from ...data.config import Config
+    from ..config import Config
 
 logger = logging.getLogger(__name__)
 
