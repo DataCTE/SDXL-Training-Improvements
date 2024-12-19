@@ -26,25 +26,6 @@ A high-performance training framework for Stable Diffusion XL that implements cu
   - Dynamic sigma spacing for better noise coverage
   - Improved training stability at high noise levels
 
-### Memory Optimization System
-
-#### Gradient Checkpointing and Layer Offloading [[1]](#references)
-- Implements selective layer offloading with 50% VRAM reduction
-- Smart gradient checkpointing for memory-efficient backpropagation
-- Asynchronous CPU-GPU tensor transfers for reduced overhead
-- Configurable offload fraction based on available hardware
-
-#### Mixed Precision Training [[2]](#references)
-- Dynamic loss scaling for stable mixed precision training
-- Automatic dtype selection based on hardware capabilities
-- Support for both FP16 and BF16 where available
-- Gradient scaling to prevent underflow
-
-#### Efficient Memory Management [[3]](#references)
-- CUDA stream-aware tensor operations
-- Pinned memory usage for faster CPU-GPU transfers
-- Efficient caching system with optional compression
-- Smart memory defragmentation during training
 
 ### Data Processing Pipeline
 
@@ -176,9 +157,6 @@ torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
 
 ## References
 
-1. Chen et al., "Training Deep Nets with Sublinear Memory Cost", arXiv:1604.06174, 2016
-2. Micikevicius et al., "Mixed Precision Training", arXiv:1710.03740, 2017
-3. Atkinson and Shiffrin, "Human memory: A proposed system and its control processes", Psychology of Learning and Motivation, 1968
 4. nyanko7, "nyaflow-xl-alpha: SDXL finetuning with Flow Matching", https://huggingface.co/nyanko7/nyaflow-xl-alpha, 2024
 5. Jiang et al., "Dynamic Loss For Robust Learning", arXiv:2211.12506, 2022
 6. Karras et al., "Elucidating the Design Space of Diffusion-Based Generative Models", NeurIPS 2022
