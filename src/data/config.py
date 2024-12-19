@@ -55,12 +55,22 @@ class FlowMatchingConfig:
     sigma: float = 1.0
 
 @dataclass
+class MemoryConfig:
+    """Memory optimization configuration."""
+    enable_24gb_optimizations: bool = False
+    layer_offload_fraction: float = 0.0
+    enable_activation_offloading: bool = False
+    enable_async_offloading: bool = True
+    temp_device: str = "cpu"
+
+@dataclass
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     learning_rate: float = 1e-5
     max_grad_norm: float = 1.0
     num_epochs: int = 100

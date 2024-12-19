@@ -33,6 +33,12 @@ training:
   gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
+  memory:
+    enable_24gb_optimizations: false
+    layer_offload_fraction: 0.0
+    enable_activation_offloading: false
+    enable_async_offloading: true
+    temp_device: "cpu"
   learning_rate: 1.0e-5
   max_grad_norm: 1.0
   num_epochs: 100
