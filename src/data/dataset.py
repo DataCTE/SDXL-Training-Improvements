@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 # Third-party imports
 import torch
 from PIL import Image
-from ..utils.paths import convert_path_list
+from ..utils.paths import convert_path_list, convert_windows_path
 from PIL.Image import BILINEAR, FLIP_LEFT_RIGHT
 from torch.utils.data import Dataset
 from torchvision import transforms
