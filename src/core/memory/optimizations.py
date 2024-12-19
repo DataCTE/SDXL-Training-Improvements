@@ -93,8 +93,9 @@ def verify_memory_optimizations(
         "channels_last": (
             model is not None and
             model.training and 
-            next(model.parameters()).is_contiguous(memory_format=torch.channels_last)
+            any(p.is_contiguous(memory_format=torch.channels_last) for p in model.parameters())
         ),
+        "cuda_amp_autocast": torch.cuda.amp.autocast_mode.is_autocast_enabled(),
         "gradient_checkpointing": (
             model is not None and
             hasattr(model, "is_gradient_checkpointing") and

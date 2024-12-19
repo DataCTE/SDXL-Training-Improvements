@@ -179,21 +179,28 @@ class PreprocessingPipeline:
     def _process_item(self, item: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Process single item with GPU acceleration."""
         try:
+            # Pre-allocate CUDA stream
+            stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            
             with autocast(enabled=True):
-                # Move to GPU with optimized memory format
-                if self.use_pinned_memory:
-                    item = item.pin_memory()
-                    
-                item = item.to(memory_format=torch.channels_last)
+                # Optimize memory format before transfer
+                item = item.to(memory_format=torch.channels_last, non_blocking=True)
                 
-                with create_stream_context(torch.cuda.current_stream()):
-                    tensors_to_device_(
-                        item, 
-                        device=self.device_ids[0],
-                        non_blocking=True
-                    )
-                    if item.device.type == 'cuda':
-                        tensors_record_stream(torch.cuda.current_stream(), item)
+                if self.use_pinned_memory and not item.is_pinned():
+                    item = item.pin_memory()
+                
+                if stream:
+                    with torch.cuda.stream(stream):
+                        # Batch transfer to GPU
+                        tensors_to_device_(
+                            item,
+                            device=self.device_ids[0],
+                            non_blocking=True
+                        )
+                        # Record stream for proper synchronization
+                        if item.device.type == 'cuda':
+                            tensors_record_stream(stream, item)
+                            stream.synchronize()
 
                 # Custom CUDA stream for async processing
                 stream = torch.cuda.Stream()

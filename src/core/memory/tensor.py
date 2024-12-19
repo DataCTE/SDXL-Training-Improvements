@@ -170,14 +170,18 @@ def create_stream_context(stream: torch.cuda.Stream) -> torch.cuda.StreamContext
 def pin_tensor_(x: torch.Tensor) -> None:
     """Pin tensor memory (CUDA only)."""
     if torch.cuda.is_available():
-        cudart = torch.cuda.cudart()
-        err = cudart.cudaHostRegister(
-            x.data_ptr(),
-            x.numel() * x.element_size(),
-            0,
-        )
-        if err.value != 0:
-            raise RuntimeError(f"CUDA Error while trying to pin memory. error: {err.value}, ptr: {x.data_ptr()}, size: {x.numel() * x.element_size()}")
+        if not x.is_pinned():
+            try:
+                cudart = torch.cuda.cudart()
+                err = cudart.cudaHostRegister(
+                    x.data_ptr(),
+                    x.numel() * x.element_size(),
+                    cudart.cudaHostRegisterDefault
+                )
+                if err.value != 0:
+                    raise RuntimeError(f"CUDA Error while trying to pin memory. error: {err.value}, ptr: {x.data_ptr()}, size: {x.numel() * x.element_size()}")
+            except Exception as e:
+                logger.warning(f"Failed to pin tensor memory: {str(e)}")
 
 def unpin_tensor_(x: torch.Tensor) -> None:
     """Unpin tensor memory (CUDA only)."""
