@@ -34,12 +34,12 @@ training:
   mixed_precision: true
   gradient_checkpointing: true
   memory:
-    enable_24gb_optimizations: false
-    layer_offload_fraction: 0.0
-    enable_activation_offloading: false
+    enable_24gb_optimizations: true
+    layer_offload_fraction: 0.5 # Fraction of layers to offload to CPU best % is 0.5
+    enable_activation_offloading: true
     enable_async_offloading: true
     temp_device: "cpu"
-  learning_rate: 1.0e-5
+  learning_rate: 4.0e-7
   max_grad_norm: 1.0
   num_epochs: 100
   warmup_steps: 500
@@ -48,11 +48,11 @@ training:
   eval_steps: 100
   validation_steps: 1000
   max_train_steps: null
-  lr_scheduler: "cosine"
+  lr_scheduler: "linear"
   optimizer_betas: [0.9, 0.999]
   weight_decay: 1.0e-2
   optimizer_eps: 1.0e-8
-  prediction_type: "epsilon"
+  prediction_type: "v_prediction" # Options: "epsilon", "v_prediction", "epsilon_prediction"
   snr_gamma: 5.0
   use_wandb: true
   random_flip: true
