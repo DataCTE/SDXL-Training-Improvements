@@ -10,8 +10,8 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 - Efficient tensor memory management [3]
 
 ### Training Methods
-- Flow matching for improved convergence [4]
-- Dynamic tag-based loss weighting [5]
+- Flow matching with logit-normal sampling from nyaflow-xl [4]
+- Dynamic tag-based loss weighting [5] 
 - Advanced noise scheduling with Karras sigmas [6]
 - NovelAI V3 training improvements [7]
 
@@ -30,7 +30,7 @@ A comprehensive collection of state-of-the-art training improvements for Stable 
 [1] Gradient Checkpointing paper citation
 [2] Mixed Precision Training paper citation
 [3] Memory Management paper citation
-[4] Flow Matching paper citation
+[4] nyanko7, "nyaflow-xl-alpha: SDXL finetuning with Flow Matching", https://huggingface.co/nyanko7/nyaflow-xl-alpha, 2024
 [5] Dynamic Loss paper citation
 [6] Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
 [7] Ossa et al. "Improvements to SDXL in NovelAI Diffusion V3" arXiv:2312.12559, 2023
