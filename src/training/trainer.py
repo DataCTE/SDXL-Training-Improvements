@@ -108,21 +108,26 @@ class SDXLTrainer:
         self,
         batch: Dict[str, torch.Tensor]
     ) -> Dict[str, float]:
-        """Execute Flow Matching training step."""
-        from .flow_matching import sample_logit_normal, compute_flow_matching_loss
+        """Execute Flow Matching training step using nyaflow-xl approach."""
+        from .flow_matching import sample_logit_normal, compute_flow_matching_loss, optimal_transport_path
         
         # Get batch inputs
         x1 = batch["model_input"]  # Target samples
         
-        # Sample time values from logit-normal
+        # Sample time values from logit-normal as in nyaflow-xl
         t = sample_logit_normal(
             (x1.shape[0],),
             device=self.device,
-            dtype=x1.dtype
+            dtype=x1.dtype,
+            mean=0.0,
+            std=1.0
         )
         
-        # Sample initial points
+        # Sample initial points from standard normal
         x0 = torch.randn_like(x1)
+        
+        # Compute optimal transport path points
+        xt = optimal_transport_path(x0, x1, t)
         
         # Get conditioning
         condition_embeddings = {

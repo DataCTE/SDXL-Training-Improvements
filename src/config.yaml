@@ -57,11 +57,13 @@ training:
   use_wandb: true
   random_flip: true
   center_crop: true
-  method: "ddpm"  # Options: "ddpm" or "flow_matching"
+  method: "flow_matching"  # Options: "ddpm" or "flow_matching" 
   flow_matching:
-    enabled: false
+    enabled: true
     num_timesteps: 1000
     sigma: 1.0  # Standard deviation for logit-normal sampling
+    logit_normal_sampling: true  # Use logit-normal time sampling
+    optimal_transport_path: true  # Use optimal transport path for X_t
 
 data:
   train_data_dir: ["D:\\Datasets\\High-quality-photo10k", "D:\\Datasets\\collage\\collage"]

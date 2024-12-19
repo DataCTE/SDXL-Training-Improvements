@@ -10,22 +10,29 @@ logger = logging.getLogger(__name__)
 def sample_logit_normal(
     shape: Tuple[int, ...],
     device: torch.device,
-    dtype: torch.dtype
+    dtype: torch.dtype,
+    mean: float = 0.0,
+    std: float = 1.0
 ) -> torch.Tensor:
-    """Sample from logit-normal distribution.
+    """Sample from logit-normal distribution as used in nyaflow-xl.
     
     Args:
         shape: Output tensor shape
         device: Target device
         dtype: Target dtype
+        mean: Mean of underlying normal distribution
+        std: Standard deviation of underlying normal
         
     Returns:
         Sampled tensor in [0,1]
     """
     with create_stream_context(torch.cuda.current_stream()):
-        normal = torch.randn(shape, device=device, dtype=dtype)
+        # Sample from N(mean, std^2)
+        normal = torch.randn(shape, device=device, dtype=dtype) * std + mean
         tensors_record_stream(torch.cuda.current_stream(), normal)
-    return torch.sigmoid(normal)
+        
+        # Transform to logit-normal via sigmoid
+        return torch.sigmoid(normal)
 
 def optimal_transport_path(
     x0: torch.Tensor,
