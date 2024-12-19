@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
+import yaml
 
 @dataclass
 class GlobalConfig:
@@ -143,3 +144,31 @@ class Config:
         # Validate batch sizes
         if self.training.batch_size < self.training.gradient_accumulation_steps:
             raise ValueError("batch_size must be >= gradient_accumulation_steps")
+
+    @classmethod
+    def from_yaml(cls, path: Union[str, Path]) -> "Config":
+        """Load configuration from YAML file.
+        
+        Args:
+            path: Path to YAML config file
+            
+        Returns:
+            Loaded Config object
+        """
+        with open(path, 'r') as f:
+            config_dict = yaml.safe_load(f)
+            
+        # Create nested dataclass instances
+        global_config = GlobalConfig(**config_dict.get('global_config', {}))
+        model_config = ModelConfig(**config_dict.get('model', {}))
+        training_config = TrainingConfig(**config_dict.get('training', {}))
+        data_config = DataConfig(**config_dict.get('data', {}))
+        tag_weighting_config = TagWeightingConfig(**config_dict.get('tag_weighting', {}))
+        
+        return cls(
+            global_config=global_config,
+            model=model_config,
+            training=training_config,
+            data=data_config,
+            tag_weighting=tag_weighting_config
+        )
