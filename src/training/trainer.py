@@ -8,7 +8,12 @@ import torch.nn.functional as F
 from diffusers import DDPMScheduler
 from tqdm.auto import tqdm
 
-from ..core.memory.tensor import tensors_to_device_, tensors_match_device, torch_gc
+from ..core.memory.tensor import (
+    tensors_to_device_,
+    tensors_match_device,
+    create_stream_context,
+    torch_gc
+)
 
 from ..config import Config
 from ..core.distributed import is_main_process, get_world_size

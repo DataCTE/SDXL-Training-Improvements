@@ -10,6 +10,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import crop
 
+from ..core.memory.tensor import create_stream_context, tensors_record_stream
+
 from ..config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
