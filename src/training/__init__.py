@@ -1,8 +1,8 @@
 from .trainer import SDXLTrainer
-from .scheduler import (
-    DDPMScheduler,
+from .schedulers import (
+    NoiseSchedulerConfig,
     configure_noise_scheduler,
-    get_karras_scalings,
+    get_karras_sigmas,
     get_sigmas,
     get_scheduler_parameters
 )
@@ -14,9 +14,9 @@ from ..core.logging import log_metrics
 
 __all__ = [
     "SDXLTrainer",
-    "DDPMScheduler",
+    "NoiseSchedulerConfig",
     "configure_noise_scheduler",
-    "get_karras_scalings",
+    "get_karras_sigmas",
     "get_sigmas",
     "get_scheduler_parameters",
     "generate_noise",
