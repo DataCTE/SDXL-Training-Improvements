@@ -19,7 +19,11 @@ def encode_clip(
     use_attention_mask: bool = False,
     add_layer_norm: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    """Encode text tokens using CLIP text encoder."""
+    """Encode text tokens using CLIP text encoder.
+    
+    Returns:
+        Tuple of (encoder output tensor, optional pooled output tensor)
+    """
     if text_encoder_output is None:
         # Create attention mask if needed
         attention_mask = None
