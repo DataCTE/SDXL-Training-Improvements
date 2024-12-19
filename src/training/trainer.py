@@ -93,40 +93,6 @@ class SDXLTrainer:
             len(train_dataloader) * config.training.num_epochs
         )
         
-    def __init__(
-        self,
-        config: Config,
-        model: StableDiffusionXLModel,
-        optimizer: torch.optim.Optimizer,
-        scheduler: DDPMScheduler,
-        train_dataloader: torch.utils.data.DataLoader,
-        device: Union[str, torch.device],
-        wandb_logger: Optional[WandbLogger] = None,
-        validation_prompts: Optional[List[str]] = None
-    ):
-        """Initialize trainer."""
-        super().__init__()
-        self.config = config
-        self.model = model
-        self.unet = model.unet
-        self.optimizer = optimizer
-        self.noise_scheduler = scheduler
-        self.train_dataloader = train_dataloader
-        self.device = device
-        self.wandb_logger = wandb_logger
-        
-        # Initialize training method
-        if config.training.method == "flow_matching":
-            from .methods.flow_matching import FlowMatchingMethod
-            self.training_method = FlowMatchingMethod()
-        else:
-            from .methods.ddpm import DDPMMethod
-            self.training_method = DDPMMethod(
-                prediction_type=config.training.prediction_type
-            )
-            
-        # Rest of initialization...
-
     def train_step(
         self,
         batch: Dict[str, torch.Tensor],
