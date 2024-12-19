@@ -9,9 +9,9 @@ from diffusers import DDPMScheduler, StableDiffusionXLPipeline
 from tqdm.auto import tqdm
 
 from ..config import Config
-from ..utils.distributed import is_main_process, get_world_size
-from ..utils.logging import log_metrics
-from ..utils.wandb_logger import WandbLogger
+from ..core.distributed import is_main_process, get_world_size
+from ..core.logging import log_metrics
+from ..core.logging.wandb import WandbLogger
 from .noise import generate_noise, get_add_time_ids
 
 logger = logging.getLogger(__name__)

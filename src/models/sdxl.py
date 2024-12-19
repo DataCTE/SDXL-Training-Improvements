@@ -16,9 +16,9 @@ from diffusers import (
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 
 from .base import BaseModel, BaseModelEmbedding, ModelType
-from ..utils.clip import encode_clip
-from ..utils.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
-from ..utils.types import DataType
+from .encoders.clip import encode_clip
+from .adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
+from ..core.types import DataType
 
 logger = logging.getLogger(__name__)
 

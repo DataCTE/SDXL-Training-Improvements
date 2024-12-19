@@ -11,10 +11,10 @@ from transformers import CLIPTokenizer, CLIPTextModel
 from config import Config
 from data import create_dataset, LatentPreprocessor
 from models import UNetWrapper
-from utils.distributed import setup_distributed, cleanup_distributed, is_main_process
-from utils.logging import setup_logging
-from utils.wandb_logger import WandbLogger
-from utils.memory import setup_memory_optimizations, verify_memory_optimizations
+from core.distributed import setup_distributed, cleanup_distributed, is_main_process
+from core.logging import setup_logging
+from core.logging.wandb import WandbLogger
+from core.memory import setup_memory_optimizations, verify_memory_optimizations
 from training import configure_noise_scheduler, SDXLTrainer
 
 logger = logging.getLogger(__name__)
