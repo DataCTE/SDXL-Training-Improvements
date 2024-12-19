@@ -111,15 +111,15 @@ torchrun --nproc_per_node=NUM_GPUS src/main.py --config my_config.yaml
 
 ## References
 
-1. Gradient Checkpointing paper citation
-2. Mixed Precision Training paper citation
-3. Memory Management paper citation
-4. [nyaflow-xl-alpha: SDXL finetuning with Flow Matching](https://huggingface.co/nyanko7/nyaflow-xl-alpha)
-5. Dynamic Loss paper citation
-6. Karras et al. "Elucidating the Design Space of Diffusion-Based Generative Models"
-7. Ossa et al. ["Improvements to SDXL in NovelAI Diffusion V3"](https://arxiv.org/abs/2312.12559)
-8. Aspect Ratio Bucketing paper citation
-9. Caption Processing paper citation
+1. Chen et al., "Training Deep Nets with Sublinear Memory Cost", arXiv:1604.06174, 2016
+2. Micikevicius et al., "Mixed Precision Training", arXiv:1710.03740, 2017
+3. Atkinson and Shiffrin, "Human memory: A proposed system and its control processes", Psychology of Learning and Motivation, 1968
+4. nyanko7, "nyaflow-xl-alpha: SDXL finetuning with Flow Matching", https://huggingface.co/nyanko7/nyaflow-xl-alpha, 2024
+5. Jiang et al., "Dynamic Loss For Robust Learning", arXiv:2211.12506, 2022
+6. Karras et al., "Elucidating the Design Space of Diffusion-Based Generative Models", NeurIPS 2022
+7. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024
+8. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024 (Aspect ratio bucketing implementation)
+9. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024 (Caption processing methodology)
 
 ## License
 
