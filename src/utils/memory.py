@@ -23,7 +23,9 @@ def configure_model_memory_format(
 def setup_memory_optimizations(
     model: torch.nn.Module,
     config: "Config",  # type: ignore
-    device: torch.device
+    device: torch.device,
+    batch_size: int,
+    micro_batch_size: int
 ) -> bool:
     """Setup memory optimizations for training.
     

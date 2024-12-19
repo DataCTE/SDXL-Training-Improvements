@@ -98,9 +98,7 @@ def main():
     setup_memory_optimizations(
         models["unet"],
         config,
-        device,
-        config.training.batch_size,
-        config.training.batch_size // config.training.gradient_accumulation_steps
+        device
     )
     
     if is_main_process():
