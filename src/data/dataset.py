@@ -20,7 +20,12 @@ from src.core.memory.tensor import (
     pin_tensor_,
     unpin_tensor_,
     torch_gc,
-    tensors_to_device_
+    tensors_to_device_,
+    device_equals
+)
+from src.core.memory.optimizations import (
+    setup_memory_optimizations,
+    verify_memory_optimizations
 )
 from src.core.memory.optimizations import (
     setup_memory_optimizations,
@@ -84,6 +89,15 @@ class SDXLDataset(Dataset):
         # Initialize tag weighter if enabled but not provided
         if self.tag_weighter is None and config.tag_weighting.enable_tag_weighting:
             self.tag_weighter = create_tag_weighter(config, captions)
+            
+        # Verify memory optimizations
+        if torch.cuda.is_available():
+            verify_memory_optimizations(
+                model=None,
+                config=config,
+                device=torch.device("cuda"),
+                logger=logger
+            )
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
         """Get supported SDXL dimensions as buckets."""

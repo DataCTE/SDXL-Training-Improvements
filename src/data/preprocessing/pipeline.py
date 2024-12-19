@@ -15,7 +15,12 @@ from src.core.memory.tensor import (
     torch_gc,
     pin_tensor_,
     unpin_tensor_,
-    device_equals
+    device_equals,
+    replace_tensors_
+)
+from src.core.memory.optimizations import (
+    setup_memory_optimizations,
+    verify_memory_optimizations
 )
 from src.core.types import ModelWeightDtypes
 import nvidia.dali as dali
@@ -66,6 +71,15 @@ class PreprocessingPipeline:
 
         # Initialize workers
         self._init_workers()
+        
+        # Setup memory optimizations
+        if torch.cuda.is_available():
+            setup_memory_optimizations(
+                model=None,
+                config=config,
+                device=torch.device("cuda"),
+                batch_size=32  # DALI pipeline batch size
+            )
         
         # Setup DALI pipeline
         self.dali_pipeline = self._create_dali_pipeline()
