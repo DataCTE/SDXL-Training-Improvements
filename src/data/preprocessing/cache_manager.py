@@ -113,7 +113,8 @@ class CacheManager:
         self,
         data_dir: Union[str, Path],
         image_exts: List[str] = [".jpg", ".jpeg", ".png"],
-        caption_ext: str = ".txt"
+        caption_ext: str = ".txt",
+        num_workers: Optional[int] = None
     ) -> Dict[str, int]:
         """Process entire dataset with parallel processing.
         
@@ -135,8 +136,13 @@ class CacheManager:
             
         logger.info(f"Found {len(image_files)} images to process")
         
+        # Use provided num_workers or default
+        workers = num_workers if num_workers is not None else self.num_proc
+        
         # Process in chunks
-        for chunk_start in tqdm(range(0, len(image_files), self.chunk_size)):
+        for chunk_start in tqdm(range(0, len(image_files), self.chunk_size), 
+                               desc="Processing chunks",
+                               disable=workers > 1):
             chunk = image_files[chunk_start:chunk_start + self.chunk_size]
             chunk_id = chunk_start // self.chunk_size
             
@@ -152,7 +158,12 @@ class CacheManager:
                     stats["failed"] += 1
                     continue
                     
-                futures.append(self.image_pool.submit(self._process_image, img_path))
+                futures.append(
+                    self.image_pool.submit(
+                        self._process_image, 
+                        img_path
+                    ) if workers > 1 else self._process_image(img_path)
+                )
                 
             # Collect results
             tensors = []
