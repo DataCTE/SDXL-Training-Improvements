@@ -16,7 +16,7 @@ from .noise import generate_noise, get_add_time_ids
 
 logger = logging.getLogger(__name__)
 
-class NovelAIDiffusionV3Trainer:
+class SDXLTrainer:
     """Trainer for SDXL fine-tuning with advanced features."""
     
     def __init__(
