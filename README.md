@@ -6,28 +6,42 @@
 
 A comprehensive collection of state-of-the-art training improvements for Stable Diffusion XL models, combining research advances from multiple papers into a single high-performance framework.
 
-## Features & Implemented Papers
+## Key Improvements
+
+### Flow Matching Training
+- Logit-normal time sampling from nyaflow-xl for improved convergence
+- Optimal transport path computation for stable training
+- Dynamic noise scheduling with Karras sigmas
 
 ### Memory Optimization
+- Smart layer offloading with 50% VRAM reduction
+- Async tensor transfers between CPU/GPU
+- Efficient caching system with compression
+
+### Data Processing
+- Multi-GPU preprocessing pipeline with DALI integration
+- Dynamic tag-based loss weighting
+- Advanced aspect ratio bucketing for SDXL
+
+### Architecture
+- Distributed training with DDP support
+- CUDA-optimized tensor operations
+- Comprehensive experiment tracking
+
+## Implemented Research
+
+### Memory Management
 - Gradient checkpointing and layer offloading [[1]](#references)
 - Mixed precision training with dynamic scaling [[2]](#references)
 - Efficient tensor memory management [[3]](#references)
 
 ### Training Methods
-- Flow matching with logit-normal sampling from nyaflow-xl [[4]](#references)
+- Flow matching with logit-normal sampling [[4]](#references)
 - Dynamic tag-based loss weighting [[5]](#references)
-- Advanced noise scheduling with Karras sigmas [[6]](#references)
-- NovelAI V3 training improvements [[7]](#references)
-
-### Data Processing
-- High-throughput preprocessing pipeline
-- Aspect ratio bucketing for SDXL [[8]](#references)
-- Advanced caption preprocessing [[9]](#references)
-
-### Architecture
-- Distributed training support
-- CUDA-optimized operations
-- Weights & Biases integration for experiment tracking
+- Advanced noise scheduling [[6]](#references)
+- NovelAI V3 improvements [[7]](#references)
+- Aspect ratio bucketing [[8]](#references)
+- Caption preprocessing [[9]](#references)
 
 ## Requirements
 
