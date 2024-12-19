@@ -26,6 +26,7 @@ class TrainingMethod(ABC):
             prediction_type=config.training.prediction_type,
             rescale_betas_zero_snr=config.training.zero_terminal_snr
         )
+        self.noise_scheduler.to(unet.device)
 
     @property
     @abstractmethod

@@ -48,6 +48,10 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
             
+            logger.debug(f"Input shapes - latents: {latents.shape}, "
+                        f"prompts: {prompt_embeds.shape}, "
+                        f"pooled: {pooled_prompt_embeds.shape}")
+            
             # Add noise using scheduler
             noise = torch.randn(
                 latents.shape,

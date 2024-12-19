@@ -119,6 +119,10 @@ class FlowMatchingTrainer(TrainingMethod):
         Returns:
             Flow Matching loss
         """
+        # Validate devices
+        if x0.device != x1.device or x0.device != t.device:
+            raise RuntimeError(f"Device mismatch: x0={x0.device}, x1={x1.device}, t={t.device}")
+            
         # Get current point on optimal transport path
         xt = self.optimal_transport_path(x0, x1, t)
         
