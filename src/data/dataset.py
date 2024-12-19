@@ -12,7 +12,7 @@ from torchvision.transforms.functional import crop
 
 from ..core.memory.tensor import create_stream_context, tensors_record_stream
 
-from ..config import Config
+from ..data.config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
 logger = logging.getLogger(__name__)
