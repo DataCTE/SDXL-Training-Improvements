@@ -30,7 +30,11 @@ class SDXLDataset(Dataset):
         is_train: bool = True
     ):
         # Convert Windows paths if needed
-        image_paths = [str(convert_windows_path(p)) for p in image_paths]
+        image_paths = [str(convert_windows_path(p, make_absolute=True)) for p in image_paths]
+        # Verify all paths exist after conversion
+        for path in image_paths:
+            if not os.path.exists(path):
+                logger.warning(f"Path does not exist after conversion: {path}")
         """SDXL Dataset with bucketing and aspect ratio preservation.
         
         Args:
