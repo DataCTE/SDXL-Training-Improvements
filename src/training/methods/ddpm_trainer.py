@@ -6,14 +6,9 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from ...core.distributed import is_main_process
-from ...core.logging import log_metrics
-from ...training.schedulers import (
-    get_scheduler_parameters,
-    get_sigmas,
-    get_add_time_ids
-)
-from ..trainer import BaseSDXLTrainer
+from src.core.distributed import is_main_process
+from src.training.schedulers.noise_scheduler import get_add_time_ids
+from src.training.trainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
