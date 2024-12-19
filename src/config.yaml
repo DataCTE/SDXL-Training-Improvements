@@ -66,7 +66,11 @@ training:
     optimal_transport_path: true  # Use optimal transport path for X_t
 
 data:
-  train_data_dir: ["D:\\Datasets\\High-quality-photo10k", "D:\\Datasets\\collage\\collage"]
+  # Supports both Windows and Unix paths
+  # Windows paths (D:\Dataset) will be automatically converted to WSL paths (/mnt/d/Dataset)
+  train_data_dir: 
+    - "D:\\Datasets\\High-quality-photo10k"  # Windows path
+    - "/mnt/d/Datasets/collage/collage"      # WSL path
   num_workers: 4
   pin_memory: true
   persistent_workers: true

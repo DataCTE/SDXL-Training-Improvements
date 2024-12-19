@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 # Third-party imports
 import torch
 from PIL import Image
+from ..utils.paths import convert_path_list
 from PIL.Image import BILINEAR, FLIP_LEFT_RIGHT
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -28,6 +29,8 @@ class SDXLDataset(Dataset):
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True
     ):
+        # Convert Windows paths if needed
+        image_paths = [str(p) for p in convert_path_list(image_paths)]
         """SDXL Dataset with bucketing and aspect ratio preservation.
         
         Args:
