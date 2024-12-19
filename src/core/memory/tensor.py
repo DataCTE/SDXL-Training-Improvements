@@ -128,11 +128,13 @@ def tensors_record_stream(
 
 def unpin_module(module: torch.nn.Module) -> torch.nn.Module:
     """Unpin module tensors."""
-    def convert(t):
-        if t.is_pinned():
-            return t.clone()
-        return t
-    return module._apply(convert)
+    for param in module.parameters():
+        if param.is_pinned():
+            param.data = param.clone()
+    for buffer in module.buffers():
+        if buffer.is_pinned():
+            buffer.data = buffer.clone()
+    return module
 
 def device_equals(device1: torch.device, device2: torch.device) -> bool:
     """Check if two devices are equivalent."""
