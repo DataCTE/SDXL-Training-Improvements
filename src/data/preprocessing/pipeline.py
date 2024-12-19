@@ -63,6 +63,7 @@ class PreprocessingPipeline:
         """Initialize preprocessing pipeline.
         
         Args:
+            config: Training configuration
             num_gpu_workers: Number of GPU workers for encoding
             num_cpu_workers: Number of CPU workers for transforms
             num_io_workers: Number of I/O workers for disk ops
@@ -72,6 +73,7 @@ class PreprocessingPipeline:
             use_pinned_memory: Whether to use pinned memory
             compression: Cache compression algorithm
         """
+        self.config = config
         self.num_gpu_workers = num_gpu_workers
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
