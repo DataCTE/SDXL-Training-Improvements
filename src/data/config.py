@@ -45,7 +45,7 @@ class ModelConfig:
     pretrained_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
     num_timesteps: int = 1000
     sigma_min: float = 0.002
-    sigma_max: float = 80.0
+    sigma_max: float = 2000.0
     rho: float = 7.0
     
 @dataclass
