@@ -161,9 +161,12 @@ class SDXLDataset(Dataset):
             
         # Convert to tensor and normalize efficiently
         with create_stream_context(torch.cuda.current_stream()):
-            image = self.train_transforms(image)
-            if self.is_train and image.device.type == 'cuda':
-                tensors_record_stream(torch.cuda.current_stream(), image)
+            tensor = self.train_transforms(image)
+            if torch.cuda.is_available():
+                pin_tensor_(tensor)
+                if self.is_train:
+                    tensors_record_stream(torch.cuda.current_stream(), tensor)
+            return tensor
         
         return image
 
@@ -251,14 +254,14 @@ class SDXLDataset(Dataset):
             
             # Move to GPU with channels-last optimization if using CUDA
             if pinned_buffer is not None:
-                pixel_values = pinned_buffer.to(
-                    device="cuda" if torch.cuda.is_available() else "cpu",
-                    memory_format=torch.channels_last,
-                    non_blocking=True
-                )
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                tensors_to_device_(pinned_buffer, device, non_blocking=True)
+                pixel_values = pinned_buffer.to(memory_format=torch.channels_last)
                 
                 if torch.cuda.is_available():
                     tensors_record_stream(transfer_stream, pixel_values)
+                    # Clean up pinned memory
+                    unpin_tensor_(pinned_buffer)
             else:
                 # Fallback for CPU-only
                 pixel_values = torch.stack([example["pixel_values"] for example in examples])
@@ -272,6 +275,9 @@ class SDXLDataset(Dataset):
                 if compute_stream is not None:
                     compute_stream.wait_stream(transfer_stream)
                     
+                # Clean up GPU memory before preprocessing
+                torch_gc()
+                
                 text_embeddings = self.latent_preprocessor.encode_prompt(
                     [example["text"] for example in examples],
                     proportion_empty_prompts=self.config.data.proportion_empty_prompts,
