@@ -32,7 +32,7 @@ def convert_windows_path(path: Union[str, Path], make_absolute: bool = True) -> 
     
     # Skip if not in WSL or not a Windows path
     if not is_wsl() or not is_windows_path(path_str):
-        return Path(path_str)
+        return Path(os.path.normpath(path_str))
         
     # Handle UNC paths (\\server\share)
     if path_str.startswith('\\\\'):
@@ -47,14 +47,20 @@ def convert_windows_path(path: Union[str, Path], make_absolute: bool = True) -> 
         
     # Handle relative Windows paths if make_absolute=True
     if make_absolute and '\\' in path_str:
-        # Convert relative path to absolute using current directory
-        abs_path = os.path.abspath(path_str.replace('\\', '/'))
-        if abs_path.startswith('/mnt/'):
-            return Path(abs_path)
-        # Assume C: drive if no drive letter
-        return Path(f"/mnt/c/{abs_path.lstrip('/')}")
+        # Get current working directory and normalize
+        cwd = os.getcwd()
+        if cwd.startswith('/mnt/'):
+            base_path = cwd
+        else:
+            # If not in a mounted drive, use outputs/wslref as base
+            base_path = os.path.join(os.getcwd(), 'outputs', 'wslref')
+            os.makedirs(base_path, exist_ok=True)
             
-    return Path(path_str.replace('\\', '/'))
+        # Convert relative path using normalized base
+        rel_path = path_str.replace('\\', '/')
+        return Path(os.path.normpath(os.path.join(base_path, rel_path)))
+            
+    return Path(os.path.normpath(path_str.replace('\\', '/')))
 
 def convert_path_list(paths: Union[str, List[str], Path, List[Path]], make_absolute: bool = True) -> List[Path]:
     """Convert list of Windows/Unix paths to appropriate format.
