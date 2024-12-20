@@ -105,7 +105,8 @@ class SDXLTrainer:
         
         # Setup gradient accumulation
         self.gradient_accumulation_steps = (
-            batch_size // micro_batch_size if micro_batch_size else 1
+            train_dataloader.batch_size // config.training.micro_batch_size 
+            if config.training.micro_batch_size else 1
         )
 
     def train_step(

@@ -1,4 +1,5 @@
 """Memory optimization utilities for training."""
+import logging
 import torch
 from src.core.logging.logging import setup_logging
 from typing import Dict, Optional, Any, TYPE_CHECKING
