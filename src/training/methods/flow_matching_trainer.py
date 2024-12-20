@@ -7,12 +7,12 @@ from src.core.types import DataType
 from src.core.memory import torch_gc, create_stream_context
 import torch.nn.functional as F
 
-from src.training.methods.base import BaseTrainingMethod
+from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
 logger = logging.getLogger(__name__)
 
-class FlowMatchingTrainer(BaseTrainingMethod):
+class FlowMatchingTrainer(TrainingMethod):
     """SDXL trainer using Flow Matching method."""
     
     name = "flow_matching"  # Class attribute for registration
