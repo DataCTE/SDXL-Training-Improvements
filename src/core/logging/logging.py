@@ -83,9 +83,9 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
-    # Create log directory with error handling
+    # Create log directory inside outputs with error handling
     try:
-        log_path = Path(log_dir)
+        log_path = Path(log_dir) / "logs"
         log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Created log directory: {log_path}")
     except Exception as e:
