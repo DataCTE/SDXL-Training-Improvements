@@ -27,6 +27,7 @@ class GlobalConfig:
         min_size: Tuple[int, int] = (640, 640)
         max_dim: int = 1536 * 1536  # Max total pixels
         bucket_step: int = 64  # Step size for bucketing dimensions
+        max_aspect_ratio: float = 2.0  # Maximum allowed aspect ratio for images
         
     @dataclass 
     class CacheConfig:
