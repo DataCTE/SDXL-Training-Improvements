@@ -24,7 +24,7 @@ class TagWeighter:
         from src.utils.paths import convert_windows_path
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True)
         self.cache_path = Path(convert_windows_path(
-            cache_path if cache_path else Path(cache_dir) / "tag_weights.json",
+            cache_path if cache_path else cache_dir / "tag_weights.json",
             make_absolute=True
         ))
         

@@ -53,8 +53,14 @@ class LatentPreprocessor:
             self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             
-            self.text_cache_path = Path(convert_windows_path(self.cache_dir / "text_embeddings.pt", make_absolute=True))
-            self.vae_cache_path = Path(convert_windows_path(self.cache_dir / "vae_latents.pt", make_absolute=True))
+            # Create subdirectories
+            self.text_cache_dir = Path(convert_windows_path(self.cache_dir / "text", make_absolute=True))
+            self.image_cache_dir = Path(convert_windows_path(self.cache_dir / "image", make_absolute=True))
+            self.text_cache_dir.mkdir(parents=True, exist_ok=True)
+            self.image_cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            self.text_cache_path = Path(convert_windows_path(self.text_cache_dir / "embeddings.pt", make_absolute=True))
+            self.vae_cache_path = Path(convert_windows_path(self.image_cache_dir / "latents.pt", make_absolute=True))
             
             # Clear cache if configured
             if config.global_config.cache.clear_cache_on_start:
