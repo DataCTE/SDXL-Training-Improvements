@@ -4,7 +4,8 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from .exceptions import (
     PreprocessingError, DataLoadError, PipelineConfigError,
-    GPUProcessingError, CacheError, DtypeError, DALIError
+    GPUProcessingError, CacheError, DtypeError, DALIError,
+    TensorValidationError, StreamError, MemoryError
 )
 from pathlib import Path
 from queue import Queue
@@ -206,7 +207,17 @@ class PreprocessingPipeline:
                     try:
                         processed = self.dali_pipeline.run()
                     except Exception as e:
-                        raise DALIError(f"DALI pipeline failed: {str(e)}") from e
+                        raise DALIError(
+                            f"DALI pipeline execution failed",
+                            context={
+                                "pipeline_id": id(self.dali_pipeline),
+                                "batch_size": self.dali_pipeline.batch_size,
+                                "num_threads": self.dali_pipeline.num_threads,
+                                "device_id": self.dali_pipeline.device_id,
+                                "original_error": str(e),
+                                "traceback": traceback.format_exc()
+                            }
+                        ) from e
 
                     # Move to GPU and apply transforms with proper dtype
                     futures = []
@@ -246,12 +257,27 @@ class PreprocessingPipeline:
             PreprocessingError: For other processing errors
         """
         if not isinstance(item, torch.Tensor):
-            raise TypeError(f"Expected torch.Tensor, got {type(item)}")
+            raise TensorValidationError(
+                f"Invalid tensor type",
+                context={
+                    "expected_type": "torch.Tensor",
+                    "actual_type": str(type(item)),
+                    "item_id": id(item)
+                }
+            )
             
         try:
             # Validate input tensor
             if item.dim() != 4:
-                raise ValueError(f"Expected 4D tensor, got {item.dim()}D")
+                raise TensorValidationError(
+                    f"Invalid tensor dimensions",
+                    context={
+                        "expected_dims": 4,
+                        "actual_dims": item.dim(),
+                        "tensor_shape": tuple(item.shape),
+                        "tensor_dtype": str(item.dtype)
+                    }
+                )
                 
             # Setup memory optimizations
             if torch.cuda.is_available():
@@ -263,7 +289,17 @@ class PreprocessingPipeline:
                         logger=logger
                     )
                 except Exception as e:
-                    raise GPUProcessingError(f"Failed to setup memory optimizations: {str(e)}") from e
+                    raise GPUProcessingError(
+                        f"Memory optimization verification failed",
+                        context={
+                            "device_id": torch.cuda.current_device(),
+                            "memory_allocated": torch.cuda.memory_allocated(),
+                            "memory_reserved": torch.cuda.memory_reserved(),
+                            "max_memory_allocated": torch.cuda.max_memory_allocated(),
+                            "original_error": str(e),
+                            "traceback": traceback.format_exc()
+                        }
+                    ) from e
             
             # Use multiple streams for pipelining
             compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
