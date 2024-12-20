@@ -15,18 +15,22 @@ def is_windows_path(path: Union[str, Path]) -> bool:
     # Match patterns like C:, D:\, \\server\share, relative Windows paths, and dot paths
     return bool(re.match(r'^[a-zA-Z]:|^\\\\|\\|^[\w.]+$', path_str))
 
-def convert_windows_path(path: Union[str, Path], make_absolute: bool = True) -> Path:
-    """Convert Windows path to WSL path if running in WSL.
+def convert_windows_path(path: Union[str, Path, List[Union[str, Path]]], make_absolute: bool = True) -> Union[Path, List[Path]]:
+    """Convert Windows path(s) to WSL path if running in WSL.
     
     Args:
-        path: Windows, Unix or dot-separated path
+        path: Windows, Unix or dot-separated path(s)
         make_absolute: Whether to convert to absolute path
         
     Returns:
-        Converted Path object
+        Converted Path object(s)
     """
+    # Handle list input
+    if isinstance(path, (list, tuple)):
+        return [convert_windows_path(p, make_absolute) for p in path]
+        
     if not isinstance(path, (str, Path)):
-        return path
+        raise ValueError(f"Path must be string, Path, or list of paths, not {type(path)}")
         
     path_str = str(path)
     
