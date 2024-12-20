@@ -54,8 +54,8 @@ A research-focused SDXL training framework implementing cutting-edge advances in
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/sdxl-training.git
-cd sdxl-training
+git clone https://github.com/DataCTE/SDXL-Training-Improvements.git
+cd SDXL-Training-Improvements
 pip install -e .
 python src/main.py --config config.yaml
 ```

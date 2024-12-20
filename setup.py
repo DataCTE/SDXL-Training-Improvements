@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     author="Alexander Izquierdo",
     author_email="izquierdoxanderl@gmail.com",
-    url="https://github.com/yourusername/sdxl-training",
+    url="https://github.com/DataCTE/SDXL-Training-Improvements",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     python_requires=">=3.8",
