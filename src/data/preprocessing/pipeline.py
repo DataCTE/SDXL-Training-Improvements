@@ -333,6 +333,16 @@ class PreprocessingPipeline:
                 }
             )
             
+        if not isinstance(item, torch.Tensor):
+            raise TensorValidationError(
+                f"Invalid tensor type",
+                context={
+                    "expected_type": "torch.Tensor",
+                    "actual_type": str(type(item)),
+                    "item_id": id(item)
+                }
+            )
+            
         try:
             # Validate input tensor
             if item.dim() != 4:
@@ -460,6 +470,9 @@ class PreprocessingPipeline:
                 except Exception as e:
                     logger.error(f"Error processing item: {str(e)}")
                     raise
+        except Exception as e:
+            logger.error(f"Error in _process_item: {str(e)}")
+            raise
 
     def _apply_transforms(self, tensor: torch.Tensor) -> torch.Tensor:
         """Apply transforms using custom CUDA kernels.
