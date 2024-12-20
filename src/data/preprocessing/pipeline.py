@@ -209,9 +209,8 @@ class PreprocessingPipeline:
             
             # Pre-allocate and use pinned memory buffer
             if self.use_pinned_memory and torch.cuda.is_available():
-                pinned_buffer = torch.empty_like(item, pin_memory=True)
-                pinned_buffer.copy_(item, non_blocking=True)
-                item = pinned_buffer
+                if not hasattr(item, 'is_pinned') or not item.is_pinned():
+                    pin_tensor_(item)
             
             with autocast(enabled=True):
                 # Optimize memory format
@@ -220,12 +219,13 @@ class PreprocessingPipeline:
                 # Use transfer stream for device moves
                 if transfer_stream is not None:
                     with torch.cuda.stream(transfer_stream):
-                        # Batch transfer to GPU
-                        tensors_to_device_(
-                            item,
-                            device=self.device_ids[0],
-                            non_blocking=True
-                        )
+                        # Only transfer if device mismatch
+                        if not device_equals(item.device, torch.device(self.device_ids[0])):
+                            tensors_to_device_(
+                                item,
+                                device=self.device_ids[0],
+                                non_blocking=True
+                            )
                         # Record stream for proper synchronization
                         if item.device.type == 'cuda':
                             tensors_record_stream(transfer_stream, item)
