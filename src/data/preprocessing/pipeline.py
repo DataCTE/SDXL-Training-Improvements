@@ -189,13 +189,15 @@ class PreprocessingPipeline:
 
                 # Process batch using DALI
                 processed = self.dali_pipeline.run()
-                
-                # Move to GPU and apply transforms
+            
+                # Move to GPU and apply transforms with proper dtype
                 futures = []
                 for item in processed:
+                    # Convert DALI output to torch tensor with target dtype
+                    tensor = torch.as_tensor(item, dtype=self.dtypes.train_dtype.to_torch_dtype())
                     future = self.gpu_pool.submit(
                         self._process_item,
-                        item
+                        tensor
                     )
                     futures.append(future)
 
@@ -288,6 +290,9 @@ class PreprocessingPipeline:
         # Ensure tensor is in correct format
         if tensor.dim() != 4:  # [B, C, H, W]
             raise ValueError(f"Expected 4D tensor, got {tensor.dim()}D")
+            
+        # Convert to target dtype before processing
+        tensor = tensor.to(dtype=self.dtypes.train_dtype.to_torch_dtype())
             
         # Apply transforms in compute stream
         with torch.cuda.stream(torch.cuda.current_stream()):
