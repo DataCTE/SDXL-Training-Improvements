@@ -13,29 +13,27 @@ if TYPE_CHECKING:
     from ...data.config import Config
 
 def setup_memory_optimizations(
-    model: torch.nn.Module,
-    config: "Config",  # type: ignore
-    device: torch.device,
+    model: Optional[torch.nn.Module] = None,
+    config: Optional["Config"] = None,  # type: ignore
+    device: Optional[torch.device] = None,
     batch_size: Optional[int] = None,
     micro_batch_size: Optional[int] = None
 ) -> bool:
     """Setup memory optimizations for training.
     
     Args:
-        model: Model to optimize (required)
-        config: Training config
-        device: Target device
+        model: Model to optimize (optional)
+        config: Training config (optional)
+        device: Target device (optional)
         batch_size: Training batch size
         micro_batch_size: Micro batch size for gradient accumulation
         
     Returns:
         bool: Whether optimizations were successful
-        
-    Raises:
-        ValueError: If model is None
     """
-    if model is None:
-        raise ValueError("Model cannot be None for memory optimizations")
+    # Early return if no config or device
+    if config is None or device is None:
+        return False
     """Setup memory and throughput optimizations."""
     """Setup memory optimizations for training.
     
