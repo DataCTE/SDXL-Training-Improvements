@@ -246,18 +246,40 @@ class LatentPreprocessor:
                 # Safely extract and validate text from batch
                 for text_item in batch["text"]:
                     try:
+                        # Handle list/tuple inputs
                         if isinstance(text_item, (list, tuple)):
                             # Take first non-empty caption if multiple
-                            valid_captions = [str(c).strip() for c in text_item if c is not None]
+                            valid_captions = []
+                            for caption in text_item:
+                                try:
+                                    if caption is not None:
+                                        text = str(caption).strip()
+                                        if text:
+                                            valid_captions.append(text)
+                                except (TypeError, ValueError) as e:
+                                    logger.debug(f"Skipping invalid caption: {str(e)}")
+                                    continue
+                            
                             if valid_captions:
                                 batch_texts.append(valid_captions[0])
                             else:
-                                logger.warning(f"No valid captions found in list/tuple")
+                                logger.warning("No valid captions found in list/tuple")
                                 batch_texts.append("")
-                        else:
-                            # Convert to string and strip
-                            text = str(text_item).strip() if text_item is not None else ""
+                        # Handle string inputs
+                        elif isinstance(text_item, str):
+                            text = text_item.strip()
                             batch_texts.append(text if text else "")
+                        # Handle None or other types
+                        else:
+                            if text_item is not None:
+                                try:
+                                    text = str(text_item).strip()
+                                    batch_texts.append(text if text else "")
+                                except (TypeError, ValueError) as e:
+                                    logger.warning(f"Could not convert to string: {str(e)}")
+                                    batch_texts.append("")
+                            else:
+                                batch_texts.append("")
                     except Exception as e:
                         logger.warning(f"Error processing text item: {str(e)}")
                         batch_texts.append("")
