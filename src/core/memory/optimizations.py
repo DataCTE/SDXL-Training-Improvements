@@ -62,9 +62,11 @@ def setup_memory_optimizations(
             logger.info("Setting up 24GB VRAM optimizations")
             
             # Configure layer offloading
-            if config.training.memory.layer_offload_fraction > 0:
+            if config.training.memory.layer_offload_fraction > 0 and model is not None:
                 model.layer_offload_fraction = config.training.memory.layer_offload_fraction
                 model.temp_device = torch.device(config.training.memory.temp_device)
+            elif model is None:
+                logger.info("Skipping layer offloading - no model provided")
                 
             # Enable activation offloading if configured
             if config.training.memory.enable_activation_offloading:
