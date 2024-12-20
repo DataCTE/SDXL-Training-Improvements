@@ -12,14 +12,14 @@ def is_wsl() -> bool:
 def is_windows_path(path: Union[str, Path]) -> bool:
     """Check if path is a Windows-style path."""
     path_str = str(path)
-    # Match patterns like C:, D:\, \\server\share, and relative Windows paths
-    return bool(re.match(r'^[a-zA-Z]:|^\\\\|\\', path_str))
+    # Match patterns like C:, D:\, \\server\share, relative Windows paths, and dot paths
+    return bool(re.match(r'^[a-zA-Z]:|^\\\\|\\|^[\w.]+$', path_str))
 
 def convert_windows_path(path: Union[str, Path], make_absolute: bool = True) -> Path:
     """Convert Windows path to WSL path if running in WSL.
     
     Args:
-        path: Windows or Unix style path
+        path: Windows, Unix or dot-separated path
         make_absolute: Whether to convert to absolute path
         
     Returns:
@@ -29,6 +29,10 @@ def convert_windows_path(path: Union[str, Path], make_absolute: bool = True) -> 
         return path
         
     path_str = str(path)
+    
+    # Handle dot-separated paths
+    if re.match(r'^[\w.]+$', path_str):
+        path_str = path_str.replace('.', os.path.sep)
     
     # Skip if not in WSL or not a Windows path
     if not is_wsl() or not is_windows_path(path_str):
