@@ -40,7 +40,7 @@ from src.models import (
 )
 
 from src.training.schedulers import configure_noise_scheduler
-from src.training import create_trainer
+from src.training.trainer import TrainerFactory
 
 logger = logging.getLogger(__name__)
 
