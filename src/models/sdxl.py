@@ -138,47 +138,84 @@ class StableDiffusionXLModel(BaseModel):
         self.sd_config_filename: Optional[str] = None
 
     def vae_to(self, device: torch.device) -> None:
-        """Move VAE to device."""
+        """Move VAE to device with optimized transfer."""
         if not tensors_match_device(self.vae.state_dict(), device):
-            tensors_to_device_(self.vae.state_dict(), device)
+            with create_stream_context(torch.cuda.current_stream()):
+                tensors_to_device_(self.vae.state_dict(), device, non_blocking=True)
+                if device.type == "cuda":
+                    tensors_record_stream(torch.cuda.current_stream(), self.vae.state_dict())
 
     def text_encoder_to(self, device: torch.device) -> None:
-        """Move both text encoders to device."""
-        self.text_encoder_1.to(device=device)
-        self.text_encoder_2.to(device=device)
+        """Move both text encoders to device with optimized transfer."""
+        with create_stream_context(torch.cuda.current_stream()):
+            # Move encoders
+            if not device_equals(self.text_encoder_1.device, device):
+                tensors_to_device_(self.text_encoder_1.state_dict(), device, non_blocking=True)
+            if not device_equals(self.text_encoder_2.device, device):
+                tensors_to_device_(self.text_encoder_2.state_dict(), device, non_blocking=True)
 
-        if self.text_encoder_1_lora is not None:
-            self.text_encoder_1_lora.to(device)
+            # Move LoRA if present
+            if self.text_encoder_1_lora is not None:
+                tensors_to_device_(self.text_encoder_1_lora.state_dict(), device, non_blocking=True)
+            if self.text_encoder_2_lora is not None:
+                tensors_to_device_(self.text_encoder_2_lora.state_dict(), device, non_blocking=True)
 
-        if self.text_encoder_2_lora is not None:
-            self.text_encoder_2_lora.to(device)
+            if device.type == "cuda":
+                tensors_record_stream(torch.cuda.current_stream(), self.text_encoder_1.state_dict())
+                tensors_record_stream(torch.cuda.current_stream(), self.text_encoder_2.state_dict())
 
     def text_encoder_1_to(self, device: torch.device) -> None:
-        """Move first text encoder to device."""
-        self.text_encoder_1.to(device=device)
-
-        if self.text_encoder_1_lora is not None:
-            self.text_encoder_1_lora.to(device)
+        """Move first text encoder to device with optimized transfer."""
+        with create_stream_context(torch.cuda.current_stream()):
+            if not device_equals(self.text_encoder_1.device, device):
+                tensors_to_device_(self.text_encoder_1.state_dict(), device, non_blocking=True)
+            if self.text_encoder_1_lora is not None:
+                tensors_to_device_(self.text_encoder_1_lora.state_dict(), device, non_blocking=True)
+            if device.type == "cuda":
+                tensors_record_stream(torch.cuda.current_stream(), self.text_encoder_1.state_dict())
 
     def text_encoder_2_to(self, device: torch.device) -> None:
-        """Move second text encoder to device."""
-        self.text_encoder_2.to(device=device)
-
-        if self.text_encoder_2_lora is not None:
-            self.text_encoder_2_lora.to(device)
+        """Move second text encoder to device with optimized transfer."""
+        with create_stream_context(torch.cuda.current_stream()):
+            if not device_equals(self.text_encoder_2.device, device):
+                tensors_to_device_(self.text_encoder_2.state_dict(), device, non_blocking=True)
+            if self.text_encoder_2_lora is not None:
+                tensors_to_device_(self.text_encoder_2_lora.state_dict(), device, non_blocking=True)
+            if device.type == "cuda":
+                tensors_record_stream(torch.cuda.current_stream(), self.text_encoder_2.state_dict())
 
     def unet_to(self, device: torch.device) -> None:
-        """Move UNet to device."""
-        self.unet.to(device=device)
-
-        if self.unet_lora is not None:
-            self.unet_lora.to(device)
+        """Move UNet to device with optimized transfer."""
+        with create_stream_context(torch.cuda.current_stream()):
+            if not device_equals(self.unet.device, device):
+                tensors_to_device_(self.unet.state_dict(), device, non_blocking=True)
+            if self.unet_lora is not None:
+                tensors_to_device_(self.unet_lora.state_dict(), device, non_blocking=True)
+            if device.type == "cuda":
+                tensors_record_stream(torch.cuda.current_stream(), self.unet.state_dict())
 
     def to(self, device: torch.device) -> None:
-        """Move all model components to device."""
-        self.vae_to(device)
-        self.text_encoder_to(device)
-        self.unet_to(device)
+        """Move all model components to device with optimized transfer."""
+        logger.info(f"Moving model components to {device}")
+        
+        # Use CUDA streams for pipelined transfers
+        if device.type == "cuda":
+            with create_stream_context(torch.cuda.current_stream()):
+                self.vae_to(device)
+                torch_gc()  # Clean up after VAE transfer
+                
+                self.text_encoder_to(device) 
+                torch_gc()  # Clean up after encoder transfer
+                
+                self.unet_to(device)
+                torch_gc()  # Final cleanup
+                
+            torch_sync()  # Ensure all transfers are complete
+        else:
+            # Sequential transfer for CPU
+            self.vae_to(device)
+            self.text_encoder_to(device)
+            self.unet_to(device)
 
     def eval(self) -> None:
         """Set all model components to evaluation mode."""
