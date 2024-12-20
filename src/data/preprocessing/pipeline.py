@@ -90,9 +90,36 @@ class PreprocessingPipeline:
             embedding=DataType.FLOAT_32
         )
         
-        # Initialize cache paths and manager
-        self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # Initialize and validate cache paths
+        try:
+            self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Validate cache directory is writable
+            test_file = self.cache_dir / ".write_test"
+            try:
+                test_file.touch()
+                test_file.unlink()
+            except Exception as e:
+                raise CacheError(
+                    "Cache directory is not writable",
+                    context={
+                        "cache_dir": str(self.cache_dir),
+                        "operation": "write_test",
+                        "error": str(e)
+                    }
+                )
+        except Exception as e:
+            if not isinstance(e, CacheError):
+                raise CacheError(
+                    "Failed to initialize cache directory",
+                    context={
+                        "cache_dir": str(self.cache_dir),
+                        "operation": "init",
+                        "error": str(e)
+                    }
+                ) from e
+            raise
         
         # Initialize cache manager if enabled
         self.cache_manager = None
@@ -103,7 +130,47 @@ class PreprocessingPipeline:
                 compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
             )
             
-        # Initialize config reference for _save_processed_batch
+        # Validate pipeline configuration
+        try:
+            if not isinstance(num_gpu_workers, int) or num_gpu_workers < 1:
+                raise PipelineConfigError(
+                    "Invalid GPU worker count",
+                    context={
+                        "config_key": "num_gpu_workers",
+                        "invalid_value": num_gpu_workers,
+                        "expected_type": "positive integer"
+                    }
+                )
+            
+            if not isinstance(prefetch_factor, int) or prefetch_factor < 1:
+                raise PipelineConfigError(
+                    "Invalid prefetch factor",
+                    context={
+                        "config_key": "prefetch_factor", 
+                        "invalid_value": prefetch_factor,
+                        "expected_type": "positive integer"
+                    }
+                )
+
+            if device_ids and not all(isinstance(d, int) for d in device_ids):
+                raise PipelineConfigError(
+                    "Invalid device IDs",
+                    context={
+                        "config_key": "device_ids",
+                        "invalid_value": device_ids,
+                        "expected_type": "list of integers"
+                    }
+                )
+                
+        except Exception as e:
+            if not isinstance(e, PipelineConfigError):
+                raise PipelineConfigError(
+                    "Failed to validate pipeline configuration",
+                    context={"error": str(e)}
+                ) from e
+            raise
+
+        # Store validated config
         self.config = config
 
         # Initialize queues
@@ -279,27 +346,52 @@ class PreprocessingPipeline:
                     }
                 )
                 
-            # Setup memory optimizations
+            # Setup and verify memory optimizations
             if torch.cuda.is_available():
                 try:
-                    verify_memory_optimizations(
-                        model=None,
-                        config=self.config,
-                        device=torch.device("cuda"),
-                        logger=logger
-                    )
+                    # Check available memory
+                    available = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
+                    allocated = torch.cuda.memory_allocated()
+                    if allocated > 0.95 * available:
+                        raise MemoryError(
+                            "Insufficient GPU memory for processing",
+                            context={
+                                "operation": "memory_check",
+                                "allocated": allocated,
+                                "available": available,
+                                "threshold": "95%"
+                            }
+                        )
+                    
+                    # Verify optimizations
+                    try:
+                        verify_memory_optimizations(
+                            model=None,
+                            config=self.config,
+                            device=torch.device("cuda"),
+                            logger=logger
+                        )
+                    except Exception as e:
+                        raise MemoryError(
+                            "Memory optimization verification failed",
+                            context={
+                                "operation": "verify_optimizations",
+                                "allocated": torch.cuda.memory_allocated(),
+                                "available": available,
+                                "error": str(e)
+                            }
+                        ) from e
+                        
                 except Exception as e:
-                    raise GPUProcessingError(
-                        f"Memory optimization verification failed",
-                        context={
-                            "device_id": torch.cuda.current_device(),
-                            "memory_allocated": torch.cuda.memory_allocated(),
-                            "memory_reserved": torch.cuda.memory_reserved(),
-                            "max_memory_allocated": torch.cuda.max_memory_allocated(),
-                            "original_error": str(e),
-                            "traceback": traceback.format_exc()
-                        }
-                    ) from e
+                    if not isinstance(e, MemoryError):
+                        raise MemoryError(
+                            "Failed to setup memory optimizations",
+                            context={
+                                "operation": "setup",
+                                "error": str(e)
+                            }
+                        ) from e
+                    raise
             
             # Use multiple streams for pipelining
             compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -329,10 +421,22 @@ class PreprocessingPipeline:
                             tensors_record_stream(transfer_stream, item)
                             transfer_stream.synchronize()
 
-                # Use compute stream for processing
+                # Use compute stream for processing with error handling
                 if compute_stream is not None:
-                    compute_stream.wait_stream(transfer_stream)
-                with torch.cuda.stream(compute_stream):
+                    try:
+                        compute_stream.wait_stream(transfer_stream)
+                    except Exception as e:
+                        raise StreamError(
+                            "Failed to synchronize CUDA streams",
+                            context={
+                                "stream_id": id(compute_stream),
+                                "operation": "wait_stream",
+                                "device_id": torch.cuda.current_device()
+                            }
+                        ) from e
+                        
+                try:
+                    with torch.cuda.stream(compute_stream):
                     # Process tensor with memory optimizations
                     processed = self._apply_transforms(item)
                 
