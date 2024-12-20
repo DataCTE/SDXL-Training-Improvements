@@ -19,6 +19,23 @@ def setup_memory_optimizations(
     batch_size: Optional[int] = None,
     micro_batch_size: Optional[int] = None
 ) -> bool:
+    """Setup memory optimizations for training.
+    
+    Args:
+        model: Model to optimize (required)
+        config: Training config
+        device: Target device
+        batch_size: Training batch size
+        micro_batch_size: Micro batch size for gradient accumulation
+        
+    Returns:
+        bool: Whether optimizations were successful
+        
+    Raises:
+        ValueError: If model is None
+    """
+    if model is None:
+        raise ValueError("Model cannot be None for memory optimizations")
     """Setup memory and throughput optimizations."""
     """Setup memory optimizations for training.
     
@@ -41,14 +58,12 @@ def setup_memory_optimizations(
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        # Enable gradient checkpointing if configured and model supports it
-        if config.training.gradient_checkpointing and model is not None:
+        # Enable gradient checkpointing if configured
+        if config.training.gradient_checkpointing:
             if hasattr(model, 'enable_gradient_checkpointing'):
                 model.enable_gradient_checkpointing()
             else:
                 logger.warning("Model does not support gradient checkpointing")
-        elif model is None:
-            logger.info("Skipping gradient checkpointing - no model provided")
 
         # Configure automatic mixed precision and throughput optimizations
         if config.training.mixed_precision:
@@ -61,24 +76,17 @@ def setup_memory_optimizations(
 
         # Setup 24GB VRAM optimizations if enabled
         if config.training.memory.enable_24gb_optimizations:
-            if model is not None:
-                logger.info("Setting up 24GB VRAM optimizations")
+            logger.info("Setting up 24GB VRAM optimizations")
+            
+            # Configure layer offloading
+            if config.training.memory.layer_offload_fraction > 0:
+                model.layer_offload_fraction = config.training.memory.layer_offload_fraction
+                model.temp_device = torch.device(config.training.memory.temp_device)
                 
-                # Configure layer offloading
-                if config.training.memory.layer_offload_fraction > 0:
-                    model.layer_offload_fraction = config.training.memory.layer_offload_fraction
-                    model.temp_device = torch.device(config.training.memory.temp_device)
-                    
-                # Enable activation offloading if configured
-                if config.training.memory.enable_activation_offloading:
-                    model.enable_activation_offloading = True
-                    model.enable_async_offloading = config.training.memory.enable_async_offloading
-            else:
-                # Only log if optimizations are actually enabled
-                if config.training.memory.layer_offload_fraction > 0:
-                    logger.info("Skipping layer offloading - no model provided")
-                if config.training.memory.enable_activation_offloading:
-                    logger.info("Skipping activation offloading - no model provided")
+            # Enable activation offloading if configured
+            if config.training.memory.enable_activation_offloading:
+                model.enable_activation_offloading = True
+                model.enable_async_offloading = config.training.memory.enable_async_offloading
 
             # Adjust batch size and gradient accumulation for memory constraints
             if batch_size and micro_batch_size and batch_size > 1:
