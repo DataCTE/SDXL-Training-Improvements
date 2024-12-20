@@ -34,19 +34,8 @@ def setup_memory_optimizations(
     # Early return if no config or device
     if config is None or device is None:
         return False
-    """Setup memory and throughput optimizations."""
-    """Setup memory optimizations for training.
-    
-    Args:
-        model: Model to optimize
-        config: Training config
-        device: Target device
-        batch_size: Training batch size
-        micro_batch_size: Micro batch size for gradient accumulation
-        
-    Returns:
-        bool: Whether optimizations were successful
-    """
+
+    """Setup memory optimizations for training."""
     try:
         if device.type != "cuda":
             logger.info("Memory optimizations only available for CUDA devices")
@@ -56,8 +45,8 @@ def setup_memory_optimizations(
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        # Enable gradient checkpointing if configured
-        if config.training.gradient_checkpointing:
+        # Enable gradient checkpointing if configured and model is provided
+        if model is not None and config.training.gradient_checkpointing:
             if hasattr(model, 'enable_gradient_checkpointing'):
                 model.enable_gradient_checkpointing()
             else:
@@ -76,15 +65,16 @@ def setup_memory_optimizations(
         if config.training.memory.enable_24gb_optimizations:
             logger.info("Setting up 24GB VRAM optimizations")
             
-            # Configure layer offloading
-            if config.training.memory.layer_offload_fraction > 0:
-                model.layer_offload_fraction = config.training.memory.layer_offload_fraction
-                model.temp_device = torch.device(config.training.memory.temp_device)
-                
-            # Enable activation offloading if configured
-            if config.training.memory.enable_activation_offloading:
-                model.enable_activation_offloading = True
-                model.enable_async_offloading = config.training.memory.enable_async_offloading
+            # Configure layer offloading if model is provided
+            if model is not None:
+                if config.training.memory.layer_offload_fraction > 0:
+                    model.layer_offload_fraction = config.training.memory.layer_offload_fraction
+                    model.temp_device = torch.device(config.training.memory.temp_device)
+                    
+                # Enable activation offloading if configured
+                if config.training.memory.enable_activation_offloading:
+                    model.enable_activation_offloading = True
+                    model.enable_async_offloading = config.training.memory.enable_async_offloading
 
             # Adjust batch size and gradient accumulation for memory constraints
             if batch_size and micro_batch_size and batch_size > 1:
