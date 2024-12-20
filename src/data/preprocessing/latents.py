@@ -53,14 +53,11 @@ class LatentPreprocessor:
             self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             
-            # Create subdirectories
+            # Create subdirectories for individual files
             self.text_cache_dir = Path(convert_windows_path(self.cache_dir / "text", make_absolute=True))
             self.image_cache_dir = Path(convert_windows_path(self.cache_dir / "image", make_absolute=True))
             self.text_cache_dir.mkdir(parents=True, exist_ok=True)
             self.image_cache_dir.mkdir(parents=True, exist_ok=True)
-            
-            self.text_cache_path = Path(convert_windows_path(self.text_cache_dir / "embeddings.pt", make_absolute=True))
-            self.vae_cache_path = Path(convert_windows_path(self.image_cache_dir / "latents.pt", make_absolute=True))
             
             # Clear cache if configured
             if config.global_config.cache.clear_cache_on_start:
@@ -199,32 +196,42 @@ class LatentPreprocessor:
         Returns:
             Dataset with added embeddings
         """
-        # Try loading from cache first
+        # Try loading individual cache files first
         if cache and self.use_cache:
             try:
-                if self.text_cache_path.exists() and self.vae_cache_path.exists():
-                    logger.info("Loading cached embeddings...")
-                    text_embeddings = torch.load(self.text_cache_path)
-                    vae_latents = torch.load(self.vae_cache_path)
+                all_prompt_embeds = []
+                all_pooled_embeds = []
+                all_vae_latents = []
+                cache_hit = True
+
+                for idx in range(len(dataset)):
+                    text_cache = self.text_cache_dir / f"{idx}_text.pt"
+                    vae_cache = self.image_cache_dir / f"{idx}_vae.pt"
                     
-                    # Verify cache contents
-                    required_keys = {
-                        "text": ["prompt_embeds", "pooled_prompt_embeds"],
-                        "vae": ["model_input"]
-                    }
-                    
-                    if all(k in text_embeddings for k in required_keys["text"]) and \
-                       all(k in vae_latents for k in required_keys["vae"]):
-                           
-                        dataset = dataset.add_column("prompt_embeds", text_embeddings["prompt_embeds"])
-                        dataset = dataset.add_column("pooled_prompt_embeds", text_embeddings["pooled_prompt_embeds"]) 
-                        dataset = dataset.add_column("model_input", vae_latents["model_input"])
+                    if text_cache.exists() and vae_cache.exists():
+                        text_data = torch.load(text_cache)
+                        vae_data = torch.load(vae_cache)
                         
-                        logger.info("Successfully loaded cached embeddings")
-                        return dataset
+                        if "prompt_embeds" in text_data and "pooled_prompt_embeds" in text_data:
+                            all_prompt_embeds.append(text_data["prompt_embeds"])
+                            all_pooled_embeds.append(text_data["pooled_prompt_embeds"])
+                            all_vae_latents.append(vae_data["model_input"])
+                        else:
+                            cache_hit = False
+                            break
                     else:
-                        logger.warning("Cache files exist but appear corrupted, recomputing...")
-                        
+                        cache_hit = False
+                        break
+
+                if cache_hit:
+                    logger.info("Successfully loaded individual cached embeddings")
+                    dataset = dataset.add_column("prompt_embeds", torch.stack(all_prompt_embeds))
+                    dataset = dataset.add_column("pooled_prompt_embeds", torch.stack(all_pooled_embeds))
+                    dataset = dataset.add_column("model_input", torch.stack(all_vae_latents))
+                    return dataset
+                else:
+                    logger.info("Some cache files missing, recomputing all embeddings")
+                    
             except Exception as e:
                 logger.warning(f"Error loading cache: {str(e)}, recomputing...")
 
@@ -265,22 +272,32 @@ class LatentPreprocessor:
             "model_input": torch.cat([l["model_input"] for l in vae_latents])
         }
 
-        # Cache results with compression
+        # Cache individual results with compression
         if cache and self.use_cache:
-            logger.info("Caching embeddings to disk...")
+            logger.info("Caching individual embeddings to disk...")
             try:
-                # Create cache directory if needed
-                self.cache_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Save with optional compression
-                if compression == "zstd":
-                    torch.save(text_embeddings, self.text_cache_path, _use_new_zipfile_serialization=True)
-                    torch.save(vae_latents, self.vae_cache_path, _use_new_zipfile_serialization=True)
-                else:
-                    torch.save(text_embeddings, self.text_cache_path)
-                    torch.save(vae_latents, self.vae_cache_path)
+                for idx in range(len(dataset)):
+                    text_cache = self.text_cache_dir / f"{idx}_text.pt"
+                    vae_cache = self.image_cache_dir / f"{idx}_vae.pt"
                     
-                logger.info(f"Successfully cached embeddings to {self.cache_dir}")
+                    # Prepare individual embeddings
+                    text_data = {
+                        "prompt_embeds": text_embeddings["prompt_embeds"][idx],
+                        "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"][idx]
+                    }
+                    vae_data = {
+                        "model_input": vae_latents["model_input"][idx]
+                    }
+                    
+                    # Save with optional compression
+                    if compression == "zstd":
+                        torch.save(text_data, text_cache, _use_new_zipfile_serialization=True)
+                        torch.save(vae_data, vae_cache, _use_new_zipfile_serialization=True)
+                    else:
+                        torch.save(text_data, text_cache)
+                        torch.save(vae_data, vae_cache)
+                        
+                logger.info(f"Successfully cached individual embeddings to {self.cache_dir}")
                 
             except Exception as e:
                 logger.error(f"Error saving cache: {str(e)}")
@@ -294,8 +311,11 @@ class LatentPreprocessor:
         return dataset
 
     def clear_cache(self):
-        """Clear the embedding caches."""
-        if self.text_cache_path.exists():
-            self.text_cache_path.unlink()
-        if self.vae_cache_path.exists():
-            self.vae_cache_path.unlink()
+        """Clear all embedding caches."""
+        import shutil
+        if self.text_cache_dir.exists():
+            shutil.rmtree(self.text_cache_dir)
+            self.text_cache_dir.mkdir(parents=True)
+        if self.image_cache_dir.exists():
+            shutil.rmtree(self.image_cache_dir)
+            self.image_cache_dir.mkdir(parents=True)
