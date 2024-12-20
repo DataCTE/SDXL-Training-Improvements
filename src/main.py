@@ -50,38 +50,16 @@ def parse_args():
 
 def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     """Load and configure all required models."""
-    # Load tokenizers
-    tokenizer_one = CLIPTokenizer.from_pretrained(
-        config.model.pretrained_model_name,
-        subfolder="tokenizer"
-    )
-    tokenizer_two = CLIPTokenizer.from_pretrained(
-        config.model.pretrained_model_name,
-        subfolder="tokenizer_2"
-    )
-
-    # Load text encoders
-    text_encoder_one = CLIPTextModel.from_pretrained(
-        config.model.pretrained_model_name,
-        subfolder="text_encoder"
-    )
-    text_encoder_two = CLIPTextModel.from_pretrained(
-        config.model.pretrained_model_name,
-        subfolder="text_encoder_2"
-    )
-
-    # Load VAE
-    vae = AutoencoderKL.from_pretrained(
-        config.model.pretrained_model_name,
-        subfolder="vae"
-    )
-
-    # Load SDXL model
+    # Initialize SDXL model
     sdxl_model = StableDiffusionXLModel(ModelType.BASE)
+    
+    # Load pipeline components into model
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
         torch_dtype=torch.float32
     )
+    
+    # Transfer pipeline components to our model
     sdxl_model.unet = pipeline.unet
     sdxl_model.vae = pipeline.vae
     sdxl_model.text_encoder_1 = pipeline.text_encoder
@@ -89,13 +67,17 @@ def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     sdxl_model.tokenizer_1 = pipeline.tokenizer
     sdxl_model.tokenizer_2 = pipeline.tokenizer_2
     sdxl_model.noise_scheduler = pipeline.scheduler
+    
+    # Clean up pipeline
+    del pipeline
+    torch_gc()
 
     return {
-        "tokenizer_one": tokenizer_one,
-        "tokenizer_two": tokenizer_two,
-        "text_encoder_one": text_encoder_one,
-        "text_encoder_two": text_encoder_two,
-        "vae": vae,
+        "tokenizer_one": sdxl_model.tokenizer_1,
+        "tokenizer_two": sdxl_model.tokenizer_2,
+        "text_encoder_one": sdxl_model.text_encoder_1,
+        "text_encoder_two": sdxl_model.text_encoder_2,
+        "vae": sdxl_model.vae,
         "model": sdxl_model
     }
 
