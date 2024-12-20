@@ -144,7 +144,6 @@ def main():
     captions = []
     train_dirs = config.data.train_data_dir if isinstance(config.data.train_data_dir, list) else [config.data.train_data_dir]
     
-    from utils.paths import convert_path_list
     train_dirs = convert_path_list(train_dirs)
     
     for data_dir in train_dirs:
