@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 
 from src.training.trainers.base import TrainingMethod
-from src.training.schedulers import get_scheduler_parameters, get_sigmas, get_add_time_ids
+from src.training.schedulers import get_add_time_ids
 
 logger = logging.getLogger(__name__)
 
