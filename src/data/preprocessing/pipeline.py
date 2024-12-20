@@ -207,9 +207,9 @@ class PreprocessingPipeline:
                         processed = self.dali_pipeline.run()
                     except Exception as e:
                         raise DALIError(f"DALI pipeline failed: {str(e)}") from e
-            
-                # Move to GPU and apply transforms with proper dtype
-                futures = []
+
+                    # Move to GPU and apply transforms with proper dtype
+                    futures = []
                 for item in processed:
                     # Convert DALI output to torch tensor with target dtype
                     tensor = torch.as_tensor(item, dtype=self.dtypes.train_dtype.to_torch_dtype())
