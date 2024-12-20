@@ -5,7 +5,7 @@ import torch
 from src.core.logging import WandbLogger
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
-from src.training.trainers.SDXLTrainer import SDXLTrainer
+from src.training.trainers.sdxl_trainer import SDXLTrainer
 
 def create_trainer(
     config: Config,

@@ -1,5 +1,5 @@
 from .trainer import create_trainer
-from .trainers.SDXLTrainer import SDXLTrainer
+from .trainers.sdxl_trainer import SDXLTrainer
 from .methods.base import TrainingMethod
 from .methods.ddpm_trainer import DDPMTrainer
 from .methods.flow_matching_trainer import FlowMatchingTrainer
