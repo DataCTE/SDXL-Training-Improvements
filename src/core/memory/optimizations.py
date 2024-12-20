@@ -41,9 +41,12 @@ def setup_memory_optimizations(
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        # Enable gradient checkpointing if configured
-        if config.training.gradient_checkpointing:
-            model.enable_gradient_checkpointing()
+        # Enable gradient checkpointing if configured and model supports it
+        if config.training.gradient_checkpointing and model is not None:
+            if hasattr(model, 'enable_gradient_checkpointing'):
+                model.enable_gradient_checkpointing()
+            else:
+                logger.warning("Model does not support gradient checkpointing")
 
         # Configure automatic mixed precision and throughput optimizations
         if config.training.mixed_precision:
