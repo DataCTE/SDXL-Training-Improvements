@@ -49,6 +49,21 @@ Improvements:
   - Adaptive noise spacing
   - Improved texture quality
 
+## Training Monitoring
+
+Training progress is monitored using Weights & Biases (wandb):
+- Real-time loss tracking
+- Generated sample visualization
+- Hyperparameter logging
+- Custom metric tracking
+- Experiment comparison
+
+Enable monitoring in config.yaml:
+```yaml
+training:
+  use_wandb: true
+```
+
 ## Image Quality Improvements
 
 - Enhanced Detail Preservation
