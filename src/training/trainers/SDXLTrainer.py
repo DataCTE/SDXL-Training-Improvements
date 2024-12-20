@@ -13,7 +13,6 @@ from src.core.memory import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
-from src.training.methods.base import BaseTrainingMethod
     torch_gc,
     setup_memory_optimizations,
     verify_memory_optimizations,
@@ -21,6 +20,7 @@ from src.training.methods.base import BaseTrainingMethod
     LayerOffloadConfig,
     ThroughputMonitor
 )
+from src.training.methods.base import BaseTrainingMethod
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
