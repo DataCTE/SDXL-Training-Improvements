@@ -58,11 +58,21 @@ class DDPMConfig:
     beta_end: float = 0.012
 
 @dataclass
+class DDPMConfig:
+    """DDPM configuration."""
+    prediction_type: str = "epsilon"  # epsilon, v_prediction
+    num_timesteps: int = 1000
+    beta_schedule: str = "scaled_linear"
+    beta_start: float = 0.00085
+    beta_end: float = 0.012
+
+@dataclass
 class FlowMatchingConfig:
     """Flow Matching configuration."""
     enabled: bool = False
     num_timesteps: int = 1000
     sigma: float = 1.0
+    time_sampling: str = "uniform"  # uniform, logit_normal
 
 @dataclass
 class MemoryConfig:
