@@ -67,7 +67,7 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 def setup_logging(
-    log_dir: str = "logs",
+    log_dir: str = "outputs/wslref/logs",
     level: int = logging.INFO,
     filename: Optional[str] = None,
     module_name: Optional[str] = None
