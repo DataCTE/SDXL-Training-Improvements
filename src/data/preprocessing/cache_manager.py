@@ -353,87 +353,86 @@ class CacheManager:
             
             for i, future in enumerate(futures):
                 try:
+                    tensor = future.result()
+                    img_path = chunk[i]
+                    caption_path = img_path.with_suffix(caption_ext)
+                    
+                    # Read caption with error handling
                     try:
-                        tensor = future.result()
-                        img_path = chunk[i]
-                        caption_path = img_path.with_suffix(caption_ext)
-                        
-                        # Read caption with error handling
-                        try:
-                            with open(caption_path, 'r', encoding='utf-8') as f:
-                                caption = f.read().strip()
-                        except Exception as e:
-                            error_context = {
-                                'image_path': str(img_path),
-                                'caption_path': str(caption_path),
-                                'error_type': type(e).__name__,
-                                'error_msg': str(e),
-                                'traceback': traceback.format_exc(),
-                                'stage': CacheStage.INITIALIZATION.name
-                            }
-                            logger.error(
-                                f"Error reading caption file:\n"
-                                f"Image path: {error_context['image_path']}\n"
-                                f"Caption path: {error_context['caption_path']}\n"
-                                f"Error type: {error_context['error_type']}\n"
-                                f"Error message: {error_context['error_msg']}\n"
-                                f"Stage: {error_context['stage']}\n"
-                                f"Traceback:\n{error_context['traceback']}"
-                            )
-                            stats.failed_items += 1
-                            continue
-                            
-                        # Validate tensor
-                        try:
-                            if not isinstance(tensor, torch.Tensor):
-                                raise CacheValidationError(
-                                    f"Invalid tensor type: {type(tensor)}",
-                                    {'image_path': str(img_path)}
-                                )
-                            if tensor.dim() != 4:  # [C, H, W] or [B, C, H, W]
-                                raise CacheValidationError(
-                                    f"Invalid tensor dimensions: {tensor.dim()}",
-                                    {'image_path': str(img_path)}
-                                )
-                            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
-                                raise CacheValidationError(
-                                    "Tensor contains NaN or Inf values",
-                                    {'image_path': str(img_path)}
-                                )
-                        except CacheValidationError as e:
-                            logger.error(
-                                f"Tensor validation failed:\n"
-                                f"Image path: {e.context.get('image_path')}\n"
-                                f"Error: {str(e)}"
-                            )
-                            stats.validation_errors += 1
-                            continue
-                            
-                        # Store tensor and metadata
-                        tensors.append(tensor)
-                        metadata[str(img_path)] = {
-                            "caption": caption,
-                            "hash": self._compute_hash(img_path) if self.verify_hashes else None
-                        }
-                        stats.processed_items += 1
-                        logger.debug(f"Successfully processed: {img_path}")
+                        with open(caption_path, 'r', encoding='utf-8') as f:
+                            caption = f.read().strip()
                     except Exception as e:
                         error_context = {
-                            'image_path': str(chunk[i]),
+                            'image_path': str(img_path),
+                            'caption_path': str(caption_path),
                             'error_type': type(e).__name__,
                             'error_msg': str(e),
                             'traceback': traceback.format_exc(),
-                            'stage': CacheStage.IMAGE_PROCESSING.name
+                            'stage': CacheStage.INITIALIZATION.name
                         }
                         logger.error(
-                            f"Error processing chunk item:\n"
+                            f"Error reading caption file:\n"
                             f"Image path: {error_context['image_path']}\n"
+                            f"Caption path: {error_context['caption_path']}\n"
                             f"Error type: {error_context['error_type']}\n"
                             f"Error message: {error_context['error_msg']}\n"
                             f"Stage: {error_context['stage']}\n"
                             f"Traceback:\n{error_context['traceback']}"
                         )
                         stats.failed_items += 1
+                        continue
+                        
+                    # Validate tensor
+                    try:
+                        if not isinstance(tensor, torch.Tensor):
+                            raise CacheValidationError(
+                                f"Invalid tensor type: {type(tensor)}",
+                                {'image_path': str(img_path)}
+                            )
+                        if tensor.dim() != 4:  # [C, H, W] or [B, C, H, W]
+                            raise CacheValidationError(
+                                f"Invalid tensor dimensions: {tensor.dim()}",
+                                {'image_path': str(img_path)}
+                            )
+                        if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                            raise CacheValidationError(
+                                "Tensor contains NaN or Inf values",
+                                {'image_path': str(img_path)}
+                            )
+                    except CacheValidationError as e:
+                        logger.error(
+                            f"Tensor validation failed:\n"
+                            f"Image path: {e.context.get('image_path')}\n"
+                            f"Error: {str(e)}"
+                        )
+                        stats.validation_errors += 1
+                        continue
+                        
+                    # Store tensor and metadata
+                    tensors.append(tensor)
+                    metadata[str(img_path)] = {
+                        "caption": caption,
+                        "hash": self._compute_hash(img_path) if self.verify_hashes else None
+                    }
+                    stats.processed_items += 1
+                    logger.debug(f"Successfully processed: {img_path}")
+                except Exception as e:
+                    error_context = {
+                        'image_path': str(chunk[i]),
+                        'error_type': type(e).__name__,
+                        'error_msg': str(e),
+                        'traceback': traceback.format_exc(),
+                        'stage': CacheStage.IMAGE_PROCESSING.name
+                    }
+                    logger.error(
+                        f"Error processing chunk item:\n"
+                        f"Image path: {error_context['image_path']}\n"
+                        f"Error type: {error_context['error_type']}\n"
+                        f"Error message: {error_context['error_msg']}\n"
+                        f"Stage: {error_context['stage']}\n"
+                        f"Traceback:\n{error_context['traceback']}"
+                    )
+                    stats.failed_items += 1
                     
             # Save chunk if not empty
             if tensors:
