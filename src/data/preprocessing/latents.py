@@ -183,13 +183,49 @@ class LatentPreprocessor:
                         raise ValueError(f"Invalid caption type at index {idx}: {type(caption)}")
                         
                 except Exception as e:
-                    logger.error(f"Error processing caption at index {idx}: {str(e)}")
+                    error_details = {
+                        'caption_type': type(caption).__name__,
+                        'caption_value': repr(caption),
+                        'error_type': type(e).__name__,
+                        'error_msg': str(e),
+                        'traceback': traceback.format_exc()
+                    }
+                    logger.error(
+                        f"Error processing caption at index {idx}:\n"
+                        f"Caption type: {error_details['caption_type']}\n"
+                        f"Caption value: {error_details['caption_value']}\n"
+                        f"Error type: {error_details['error_type']}\n"
+                        f"Error message: {error_details['error_msg']}\n"
+                        f"Traceback:\n{error_details['traceback']}"
+                    )
                     stats.failed_samples += 1
                     captions.append("")
                     
         except Exception as e:
-            logger.error(f"Failed to process prompts: {str(e)}")
-            raise TextEncodingError(f"Failed to process prompts: {str(e)}") from e
+            error_context = {
+                'total_samples': stats.total_samples,
+                'successful_samples': stats.successful_samples,
+                'failed_samples': stats.failed_samples,
+                'empty_captions': stats.empty_captions,
+                'error_type': type(e).__name__,
+                'error_msg': str(e),
+                'traceback': traceback.format_exc()
+            }
+            logger.error(
+                f"Failed to process prompts:\n"
+                f"Processing stats:\n"
+                f"- Total samples: {error_context['total_samples']}\n"
+                f"- Successful: {error_context['successful_samples']}\n"
+                f"- Failed: {error_context['failed_samples']}\n"
+                f"- Empty: {error_context['empty_captions']}\n"
+                f"Error type: {error_context['error_type']}\n"
+                f"Error message: {error_context['error_msg']}\n"
+                f"Traceback:\n{error_context['traceback']}"
+            )
+            raise TextEncodingError(
+                f"Failed to process prompts: {error_context['error_msg']}\n"
+                f"Stats: {stats.successful_samples}/{stats.total_samples} successful"
+            ) from e
 
         # Tokenize prompts
         try:
@@ -209,8 +245,31 @@ class LatentPreprocessor:
                 return_tensors="pt",
             ).input_ids.to(self.device)
         except Exception as e:
-            logger.error(f"Failed to tokenize prompts: {str(e)}")
-            raise TextEncodingError(f"Failed to tokenize prompts: {str(e)}") from e
+            tokenizer_context = {
+                'tokenizer_one_max_length': self.tokenizer_one.model_max_length,
+                'tokenizer_two_max_length': self.tokenizer_two.model_max_length,
+                'num_captions': len(captions),
+                'caption_lengths': [len(c) for c in captions],
+                'error_type': type(e).__name__,
+                'error_msg': str(e),
+                'traceback': traceback.format_exc()
+            }
+            logger.error(
+                f"Failed to tokenize prompts:\n"
+                f"Tokenizer context:\n"
+                f"- Tokenizer 1 max length: {tokenizer_context['tokenizer_one_max_length']}\n"
+                f"- Tokenizer 2 max length: {tokenizer_context['tokenizer_two_max_length']}\n"
+                f"- Number of captions: {tokenizer_context['num_captions']}\n"
+                f"- Caption lengths: {tokenizer_context['caption_lengths']}\n"
+                f"Error type: {tokenizer_context['error_type']}\n"
+                f"Error message: {tokenizer_context['error_msg']}\n"
+                f"Traceback:\n{tokenizer_context['traceback']}"
+            )
+            raise TextEncodingError(
+                f"Failed to tokenize prompts: {tokenizer_context['error_msg']}\n"
+                f"Caption lengths: min={min(tokenizer_context['caption_lengths'])}, "
+                f"max={max(tokenizer_context['caption_lengths'])}"
+            ) from e
 
         # Encode with both encoders
         with torch.no_grad():
