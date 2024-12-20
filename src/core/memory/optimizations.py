@@ -61,21 +61,24 @@ def setup_memory_optimizations(
 
         # Setup 24GB VRAM optimizations if enabled
         if config.training.memory.enable_24gb_optimizations:
-            logger.info("Setting up 24GB VRAM optimizations")
-            
-            # Configure layer offloading
-            if config.training.memory.layer_offload_fraction > 0 and model is not None:
-                model.layer_offload_fraction = config.training.memory.layer_offload_fraction
-                model.temp_device = torch.device(config.training.memory.temp_device)
-            elif model is None:
-                logger.info("Skipping layer offloading - no model provided")
+            if model is not None:
+                logger.info("Setting up 24GB VRAM optimizations")
                 
-            # Enable activation offloading if configured and model exists
-            if config.training.memory.enable_activation_offloading and model is not None:
-                model.enable_activation_offloading = True
-                model.enable_async_offloading = config.training.memory.enable_async_offloading
-            elif model is None:
-                logger.info("Skipping activation offloading - no model provided")
+                # Configure layer offloading
+                if config.training.memory.layer_offload_fraction > 0:
+                    model.layer_offload_fraction = config.training.memory.layer_offload_fraction
+                    model.temp_device = torch.device(config.training.memory.temp_device)
+                    
+                # Enable activation offloading if configured
+                if config.training.memory.enable_activation_offloading:
+                    model.enable_activation_offloading = True
+                    model.enable_async_offloading = config.training.memory.enable_async_offloading
+            else:
+                # Only log if optimizations are actually enabled
+                if config.training.memory.layer_offload_fraction > 0:
+                    logger.info("Skipping layer offloading - no model provided")
+                if config.training.memory.enable_activation_offloading:
+                    logger.info("Skipping activation offloading - no model provided")
 
             # Adjust batch size and gradient accumulation for memory constraints
             if batch_size and micro_batch_size and batch_size > 1:
