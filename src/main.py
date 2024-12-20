@@ -153,10 +153,14 @@ def main():
             logger.warning(f"Training directory not found: {data_dir}")
             continue
             
-        # Collect images and captions from this directory
-        dir_images = list(dir_path.glob("*.jpg"))
+        # Collect images with common image extensions
+        image_extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"]
+        dir_images = []
+        for ext in image_extensions:
+            dir_images.extend(list(dir_path.glob(ext)))
+            
         if not dir_images:
-            logger.warning(f"No jpg images found in {data_dir}")
+            logger.warning(f"No images found in {data_dir} (supported: {', '.join(image_extensions)})")
             continue
             
         # Check for corresponding caption files
