@@ -194,20 +194,23 @@ class LatentPreprocessor:
         # Tokenize prompts
         try:
             tokens_1 = self.tokenizer_one(
-            captions,
-            padding="max_length",
-            max_length=self.tokenizer_one.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        ).input_ids.to(self.device)
+                captions,
+                padding="max_length",
+                max_length=self.tokenizer_one.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            ).input_ids.to(self.device)
 
-        tokens_2 = self.tokenizer_two(
-            captions,
-            padding="max_length",
-            max_length=self.tokenizer_two.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        ).input_ids.to(self.device)
+            tokens_2 = self.tokenizer_two(
+                captions,
+                padding="max_length",
+                max_length=self.tokenizer_two.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            ).input_ids.to(self.device)
+        except Exception as e:
+            logger.error(f"Failed to tokenize prompts: {str(e)}")
+            raise TextEncodingError(f"Failed to tokenize prompts: {str(e)}") from e
 
         # Encode with both encoders
         with torch.no_grad():
