@@ -79,35 +79,11 @@ class SDXLTrainer:
             embedding=DataType.FLOAT_32
         )
         
-        # Setup memory optimizations
-        self.memory_optimized = setup_memory_optimizations(
-            model=self.model,
-            config=config,
-            device=device,
+        # Initialize memory management
+        self._setup_memory_management(
             batch_size=train_dataloader.batch_size,
             micro_batch_size=config.training.micro_batch_size
         )
-        
-        if self.memory_optimized:
-            verify_memory_optimizations(
-                model=self.model,
-                config=config,
-                device=device,
-                logger=logger
-            )
-            
-            # Configure layer offloading if enabled
-            if config.training.memory.enable_24gb_optimizations:
-                self.layer_offloader = LayerOffloader(
-                    model=self.model,
-                    config=LayerOffloadConfig(
-                        enabled=True,
-                        fraction=config.training.memory.layer_offload_fraction,
-                        temp_device=config.training.memory.temp_device,
-                        async_transfer=config.training.memory.enable_async_offloading
-                    ),
-                    device=device
-                )
         
         # Move model to device with proper memory handling
         if not tensors_match_device(self.model.state_dict(), device):
@@ -269,6 +245,53 @@ class SDXLTrainer:
                 
         return metrics
         
+    def _setup_memory_management(
+        self,
+        batch_size: Optional[int] = None,
+        micro_batch_size: Optional[int] = None
+    ) -> None:
+        """Initialize memory optimizations and management.
+        
+        Args:
+            batch_size: Training batch size
+            micro_batch_size: Micro batch size for gradient accumulation
+        """
+        # Setup core memory optimizations
+        self.memory_optimized = setup_memory_optimizations(
+            model=self.model,
+            config=self.config,
+            device=self.device,
+            batch_size=batch_size,
+            micro_batch_size=micro_batch_size
+        )
+        
+        if self.memory_optimized:
+            # Verify optimizations are active
+            verify_memory_optimizations(
+                model=self.model,
+                config=self.config,
+                device=self.device,
+                logger=logger
+            )
+            
+            # Configure layer offloading if enabled
+            if self.config.training.memory.enable_24gb_optimizations:
+                self.layer_offloader = LayerOffloader(
+                    model=self.model,
+                    config=LayerOffloadConfig(
+                        enabled=True,
+                        fraction=self.config.training.memory.layer_offload_fraction,
+                        temp_device=self.config.training.memory.temp_device,
+                        async_transfer=self.config.training.memory.enable_async_offloading
+                    ),
+                    device=self.device
+                )
+                
+        # Set up tensor cleanup hooks
+        def cleanup_hook():
+            torch_gc()
+        self.cleanup_hook = cleanup_hook
+
     def save_checkpoint(self) -> None:
         """Save training checkpoint."""
         if not is_main_process():

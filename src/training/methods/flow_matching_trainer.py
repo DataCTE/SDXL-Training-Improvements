@@ -206,7 +206,6 @@ class FlowMatchingTrainer(TrainingMethod):
         loss = loss.mean()
         
         # Clean up intermediate tensors
-        del x0, v_pred, v_true
         torch_gc()
         
         return {"loss": loss}

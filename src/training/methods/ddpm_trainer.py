@@ -105,8 +105,7 @@ class DDPMTrainer(TrainingMethod):
                 
             loss = loss.mean()
             
-            # Clean up intermediate tensors
-            del noise, noisy_latents, noise_pred, target
+            # Clean up intermediate tensors  
             torch_gc()
             
             return {"loss": loss}
