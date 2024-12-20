@@ -91,11 +91,12 @@ def main():
         init_process_group(backend="nccl")
         setup_distributed()
     
-    # Setup logging in outputs directory
+    # Setup logging in outputs/logs directory
     output_dir = Path(config.global_config.output_dir)
+    log_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(
-        log_dir=str(output_dir),
+        log_dir=str(log_dir),
         filename="train.log"
     )
     
