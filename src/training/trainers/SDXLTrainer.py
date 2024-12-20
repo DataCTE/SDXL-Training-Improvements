@@ -20,11 +20,10 @@ from src.core.memory import (
     LayerOffloadConfig,
     ThroughputMonitor
 )
-from src.training.methods.base import BaseTrainingMethod
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
-from src.training.methods.base import BaseTrainingMethod as TrainingMethod
+from src.training.methods.base import BaseTrainingMethod
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ class SDXLTrainer:
         model: StableDiffusionXLModel,
         optimizer: torch.optim.Optimizer,
         train_dataloader: DataLoader,
-        training_method: TrainingMethod,
+        training_method: BaseTrainingMethod,
         device: Union[str, torch.device],
         wandb_logger: Optional[WandbLogger] = None,
         validation_prompts: Optional[List[str]] = None
