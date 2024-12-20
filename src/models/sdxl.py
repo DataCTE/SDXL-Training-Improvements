@@ -20,7 +20,10 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
     tensors_record_stream,
-    create_stream_context
+    create_stream_context,
+    device_equals,
+    torch_gc,
+    torch_sync
 )
 from src.core.types import DataType
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
