@@ -186,9 +186,14 @@ class LatentPreprocessor:
                     logger.error(f"Error processing caption at index {idx}: {str(e)}")
                     stats.failed_samples += 1
                     captions.append("")
+                    
+        except Exception as e:
+            logger.error(f"Failed to process prompts: {str(e)}")
+            raise TextEncodingError(f"Failed to process prompts: {str(e)}") from e
 
         # Tokenize prompts
-        tokens_1 = self.tokenizer_one(
+        try:
+            tokens_1 = self.tokenizer_one(
             captions,
             padding="max_length",
             max_length=self.tokenizer_one.model_max_length,
