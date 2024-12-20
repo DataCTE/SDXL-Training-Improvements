@@ -1,6 +1,7 @@
 """High-performance cache management for large-scale dataset preprocessing."""
 import multiprocessing as mp
 from src.core.logging.logging import setup_logging
+from src.utils.paths import convert_windows_path
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -46,7 +47,6 @@ class CacheManager:
             compression: Compression algorithm (None, 'zstd', 'gzip')
             verify_hashes: Whether to verify content hashes
         """
-        from src.utils.paths import convert_windows_path
         self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
