@@ -70,10 +70,12 @@ def setup_memory_optimizations(
             elif model is None:
                 logger.info("Skipping layer offloading - no model provided")
                 
-            # Enable activation offloading if configured
-            if config.training.memory.enable_activation_offloading:
+            # Enable activation offloading if configured and model exists
+            if config.training.memory.enable_activation_offloading and model is not None:
                 model.enable_activation_offloading = True
                 model.enable_async_offloading = config.training.memory.enable_async_offloading
+            elif model is None:
+                logger.info("Skipping activation offloading - no model provided")
 
             # Adjust batch size and gradient accumulation for memory constraints
             if batch_size and micro_batch_size and batch_size > 1:
