@@ -123,7 +123,6 @@ class SDXLTrainer:
             prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
             text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
             text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
-            text_encoder_3=DataType.from_str(config.model.text_encoder_3_dtype or config.model.dtype),
             vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
             effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
             decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),

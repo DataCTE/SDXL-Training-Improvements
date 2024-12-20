@@ -43,7 +43,6 @@ class ModelWeightDtypes:
         prior: DataType,
         text_encoder: DataType,
         text_encoder_2: DataType,
-        text_encoder_3: DataType,
         vae: DataType,
         effnet_encoder: DataType,
         decoder: DataType,
@@ -61,7 +60,6 @@ class ModelWeightDtypes:
             prior: Prior model dtype
             text_encoder: Text encoder dtype
             text_encoder_2: Second text encoder dtype
-            text_encoder_3: Third text encoder dtype
             vae: VAE dtype
             effnet_encoder: EfficientNet encoder dtype
             decoder: Decoder dtype
@@ -77,7 +75,6 @@ class ModelWeightDtypes:
         self.prior = prior
         self.text_encoder = text_encoder
         self.text_encoder_2 = text_encoder_2
-        self.text_encoder_3 = text_encoder_3
         self.vae = vae
         self.effnet_encoder = effnet_encoder
         self.decoder = decoder
@@ -93,7 +90,6 @@ class ModelWeightDtypes:
             self.prior,
             self.text_encoder,
             self.text_encoder_2,
-            self.text_encoder_3,
             self.vae,
             self.effnet_encoder,
             self.decoder,
