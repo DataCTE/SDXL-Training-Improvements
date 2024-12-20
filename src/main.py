@@ -1,14 +1,14 @@
 """Main training script for SDXL fine-tuning."""
 import argparse
 import logging
-import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 # Third-party imports
 import torch
 from diffusers import AutoencoderKL, StableDiffusionXLPipeline
 from transformers import CLIPTokenizer, CLIPTextModel
+from torch.distributed import init_process_group
 
 # Local imports - core functionality
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
@@ -23,7 +23,6 @@ from src.core.memory.optimizations import (
     setup_memory_optimizations,
     verify_memory_optimizations
 )
-from src.core.types import DataType, ModelWeightDtypes
 
 # Local imports - data handling
 from src.data.config import Config
@@ -35,7 +34,6 @@ from src.models.sdxl import StableDiffusionXLModel
 from src.models.base import ModelType
 
 # Local imports - training components
-from src.training.schedulers import configure_noise_scheduler
 from src.training.trainer import create_trainer
 
 # Local imports - utilities
@@ -107,6 +105,11 @@ def main():
     
     # Load config
     config = Config.from_yaml(args.config)
+    
+    # Setup distributed training if needed
+    if args.local_rank != -1:
+        init_process_group(backend="nccl")
+        setup_distributed()
     
     # Setup logging
     setup_logging(
