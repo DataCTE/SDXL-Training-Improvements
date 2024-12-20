@@ -1,4 +1,4 @@
-"""SDXL trainer implementation with support for multiple training methods."""
+"""SDXL trainer implementation with factory support for multiple training methods."""
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -29,6 +29,54 @@ logger = logging.getLogger(__name__)
 
 class SDXLTrainer:
     """Base trainer class for SDXL supporting multiple training methods."""
+    
+    @classmethod
+    def create(
+        cls,
+        config: Config,
+        model: StableDiffusionXLModel,
+        optimizer: torch.optim.Optimizer,
+        train_dataloader: torch.utils.data.DataLoader,
+        device: Union[str, torch.device],
+        wandb_logger: Optional[WandbLogger] = None,
+        validation_prompts: Optional[List[str]] = None
+    ) -> 'SDXLTrainer':
+        """Factory method to create appropriate trainer instance.
+        
+        Args:
+            config: Training configuration
+            model: SDXL model
+            optimizer: Optimizer
+            train_dataloader: Training data loader
+            device: Target device
+            wandb_logger: Optional W&B logger
+            validation_prompts: Optional validation prompts
+            
+        Returns:
+            Configured trainer instance
+        """
+        # Get trainer class using metaclass registry
+        method = config.training.method.lower()
+        trainer_cls = BaseTrainingMethod.get_method(method)
+        logger.info(f"Creating trainer with method: {trainer_cls.__name__}")
+        
+        # Create training method instance
+        training_method = trainer_cls(
+            unet=model.unet,
+            config=config
+        )
+        
+        # Create and return trainer
+        return cls(
+            config=config,
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            training_method=training_method,
+            device=device,
+            wandb_logger=wandb_logger,
+            validation_prompts=validation_prompts
+        )
     
     def __init__(
         self,
