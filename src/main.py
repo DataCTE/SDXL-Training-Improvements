@@ -76,6 +76,7 @@ def load_models(config: Config) -> Dict[str, torch.nn.Module]:
         "text_encoder_one": sdxl_model.text_encoder_1,
         "text_encoder_two": sdxl_model.text_encoder_2,
         "vae": sdxl_model.vae,
+        "unet": sdxl_model.unet,
         "model": sdxl_model
     }
 
