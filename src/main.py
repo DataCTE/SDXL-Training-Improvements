@@ -6,8 +6,6 @@ from typing import Dict
 
 # Third-party imports
 import torch
-from diffusers import AutoencoderKL, StableDiffusionXLPipeline
-from transformers import CLIPTokenizer, CLIPTextModel
 from torch.distributed import init_process_group
 
 # Local imports - core functionality
