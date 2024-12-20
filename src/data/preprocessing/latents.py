@@ -4,8 +4,6 @@ from src.core.logging.logging import setup_logging
 import torch
 from typing import Dict, List, Optional, Union
 
-from src.core.memory.tensor import tensors_to_device_, torch_gc
-from src.core.types import DataType, ModelWeightDtypes
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers import AutoencoderKL
 from torch.utils.data import Dataset
