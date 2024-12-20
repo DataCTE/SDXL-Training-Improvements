@@ -41,21 +41,21 @@ from .models import (
 from .training import (
     SDXLTrainer,
     DDPMScheduler,
+    TrainingMethod,
+    DDPMTrainer,
+    FlowMatchingTrainer,
     configure_noise_scheduler,
     get_karras_sigmas,
     get_sigmas,
     get_scheduler_parameters,
-    generate_noise,
-    get_add_time_ids,
-    log_metrics,
-    sample_logit_normal,
-    optimal_transport_path,
-    compute_flow_matching_loss
+    get_add_time_ids
 )
 
 __version__ = "0.1.0"
 
-__all__ = [
+from typing import List
+
+__all__: List[str] = [
     # Core
     "DataType",
     "ModelWeightDtypes",
@@ -92,17 +92,15 @@ __all__ = [
     "AdditionalEmbeddingWrapper",
     "encode_clip",
 
-    # Training
+    # Training components
     "SDXLTrainer",
     "DDPMScheduler",
+    "TrainingMethod",
+    "DDPMTrainer",
+    "FlowMatchingTrainer", 
     "configure_noise_scheduler",
-    "get_karras_scalings", 
+    "get_karras_sigmas",
     "get_sigmas",
     "get_scheduler_parameters",
-    "generate_noise",
-    "get_add_time_ids",
-    "log_metrics",
-    "sample_logit_normal",
-    "optimal_transport_path",
-    "compute_flow_matching_loss"
+    "get_add_time_ids"
 ]
