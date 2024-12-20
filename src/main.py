@@ -130,7 +130,7 @@ def main():
     if is_main_process():
         verify_memory_optimizations(sdxl_model.unet, config, device, logger)
     
-    # Initialize latent preprocessor
+    # Initialize latent preprocessor with cache configuration
     latent_preprocessor = LatentPreprocessor(
         config,
         models["tokenizer_one"],
@@ -138,8 +138,14 @@ def main():
         models["text_encoder_one"],
         models["text_encoder_two"],
         models["vae"],
-        device
+        device,
+        use_cache=config.global_config.cache.use_cache
     )
+    
+    # Clear cache if configured
+    if config.global_config.cache.clear_cache_on_start:
+        logger.info("Clearing latent cache as configured...")
+        latent_preprocessor.clear_cache()
     
     # Load datasets
     logger.info("Creating datasets...")
@@ -192,6 +198,8 @@ def main():
         
     logger.info(f"Total training samples: {len(image_paths)} across {len(train_dirs)} directories")
     
+    # Create dataset with latent preprocessing and caching
+    logger.info("Creating training dataset with latent preprocessing...")
     train_dataset = create_dataset(
         config,
         image_paths,
@@ -199,6 +207,16 @@ def main():
         latent_preprocessor=latent_preprocessor,
         is_train=True
     )
+    
+    # Preprocess dataset with caching if enabled
+    if config.global_config.cache.use_cache:
+        logger.info("Preprocessing and caching dataset embeddings...")
+        train_dataset = latent_preprocessor.preprocess_dataset(
+            train_dataset,
+            batch_size=config.training.batch_size,
+            cache=True,
+            compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
+        )
     
     # Create data loaders
     train_dataloader = torch.utils.data.DataLoader(
