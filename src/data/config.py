@@ -76,13 +76,23 @@ class MemoryConfig:
 
 @dataclass 
 class DDPMConfig:
-    """DDPM-specific training configuration."""
-    prediction_type: str = "v_prediction"  # v_prediction or epsilon
-    snr_gamma: Optional[float] = 5.0
-    zero_terminal_snr: bool = True
-    sigma_min: float = 0.002
-    sigma_max: float = 20000.0
-    rho: float = 7.0
+    """DDPM-specific training configuration.
+    
+    Prediction Types:
+    - "epsilon": Original DDPM noise prediction, more stable but slower convergence
+    - "v_prediction": Velocity prediction (like NovelAI), faster convergence but needs tuning
+    - "sample": Direct sample prediction, experimental
+    
+    Compatible Methods:
+    - Works with: "ddpm", "ddim", "dpm-solver", "euler", "euler-ancestral"
+    - Best results with "ddpm" for training, "euler-ancestral" for inference
+    """
+    prediction_type: str = "v_prediction"  # v_prediction, epsilon, or sample
+    snr_gamma: Optional[float] = 5.0  # Signal-to-noise ratio gamma, None disables SNR weighting
+    zero_terminal_snr: bool = True    # Enable zero terminal SNR for better quality
+    sigma_min: float = 0.002         # Min noise level, lower = sharper but may be unstable
+    sigma_max: float = 20000.0       # Max noise level, higher = more diversity
+    rho: float = 7.0                 # Karras scheduler parameter
 
 @dataclass
 class TrainingConfig:

@@ -52,9 +52,13 @@ training:
   optimizer_betas: [0.9, 0.999]
   weight_decay: 1.0e-2
   optimizer_eps: 1.0e-8
-  method: "ddpm"  # Training method: ddpm or flow_matching
+  method: "ddpm"  # Available: ddpm, flow_matching, consistency, dpm
   ddpm:
-    prediction_type: "v_prediction"  # v_prediction or epsilon
+    # Prediction types:
+    # - v_prediction: Velocity prediction (NovelAI style), faster convergence
+    # - epsilon: Classic noise prediction, more stable
+    # - sample: Direct sample prediction (experimental)
+    prediction_type: "v_prediction"
     snr_gamma: 5.0
     zero_terminal_snr: true
     sigma_min: 0.002

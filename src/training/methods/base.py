@@ -9,7 +9,20 @@ from diffusers import DDPMScheduler
 from src.data.config import Config
 
 class TrainingMethodMeta(ABCMeta):
-    """Metaclass for training methods to handle registration."""
+    """Metaclass for training methods to handle registration.
+    
+    Supported Training Methods:
+    - "ddpm": Classic Denoising Diffusion (supports v-prediction/epsilon)
+    - "flow_matching": Flow Matching approach (continuous time)
+    - "consistency": Consistency Training (experimental)
+    - "dpm": DPM-Solver training (experimental)
+    
+    Method-Prediction Type Compatibility:
+    - ddpm: v-prediction, epsilon, sample
+    - flow_matching: velocity only
+    - consistency: v-prediction only
+    - dpm: v-prediction, epsilon
+    """
     
     _methods: Dict[str, Type['TrainingMethod']] = {}
     
