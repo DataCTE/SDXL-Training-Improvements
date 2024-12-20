@@ -115,32 +115,20 @@ class CacheManager:
             logger.error(f"Error processing {image_path}: {str(e)}")
             return None
             
-    def _save_chunk(
+    def _save_processed_batch(
         self,
-        chunk_id: int,
+        batch_id: int,
         tensors: List[torch.Tensor],
         metadata: Dict
     ) -> bool:
-        """Save processed chunk to disk."""
+        """Save processed batch using cache manager."""
+        if self.cache_manager is None:
+            return False
+            
         try:
-            chunk_path = Path(convert_windows_path(self.cache_dir / f"chunk_{chunk_id:06d}.pt", make_absolute=True))
-            
-            # Save tensors with optional compression
-            if self.compression == "zstd":
-                torch.save(tensors, chunk_path, _use_new_zipfile_serialization=True)
-            else:
-                torch.save(tensors, chunk_path)
-                
-            # Update index
-            self.cache_index["chunks"][str(chunk_id)] = {
-                "path": str(chunk_path),
-                "size": len(tensors),
-                "metadata": metadata
-            }
-            
-            return True
+            return self.cache_manager._save_chunk(batch_id, tensors, metadata)
         except Exception as e:
-            logger.error(f"Error saving chunk {chunk_id}: {str(e)}")
+            logger.error(f"Error saving batch {batch_id}: {str(e)}")
             return False
             
     def process_dataset(

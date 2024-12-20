@@ -43,9 +43,7 @@ class PreprocessingPipeline:
         num_io_workers: int = 2,
         prefetch_factor: int = 2,
         device_ids: Optional[List[int]] = None,
-        cache_dir: Optional[Union[str, Path]] = None,
-        use_pinned_memory: bool = True,
-        compression: Optional[str] = "zstd"
+        use_pinned_memory: bool = True
     ):
         """Initialize preprocessing pipeline.
         
@@ -79,9 +77,16 @@ class PreprocessingPipeline:
         self.num_io_workers = num_io_workers
         self.prefetch_factor = prefetch_factor
         self.device_ids = device_ids or list(range(torch.cuda.device_count()))
-        self.cache_dir = Path(cache_dir) if cache_dir else None
         self.use_pinned_memory = use_pinned_memory
-        self.compression = compression
+        
+        # Initialize cache manager if enabled
+        self.cache_manager = None
+        if config.global_config.cache.use_cache:
+            from .cache_manager import CacheManager
+            self.cache_manager = CacheManager(
+                cache_dir=config.global_config.cache.cache_dir,
+                compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
+            )
 
         # Initialize queues
         self.input_queue = Queue(maxsize=prefetch_factor)
