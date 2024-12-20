@@ -237,6 +237,10 @@ class PreprocessingPipeline:
                 with torch.cuda.stream(compute_stream):
                     # Process tensor with memory optimizations
                     processed = self._apply_transforms(item)
+                
+                    # Replace with optimized tensor if needed
+                    if hasattr(processed, 'data_ptr'):
+                        replace_tensors_(item, processed)
                     
                     # Move back to CPU if needed, with proper cleanup
                     if self.cache_dir:
@@ -279,6 +283,13 @@ class PreprocessingPipeline:
         self.stop_event.set()
         self.input_queue.put(None)
         self.prefetch_thread.join()
+        
+        # Cleanup pinned memory
+        if self.use_pinned_memory:
+            for item in list(self.input_queue.queue):
+                if isinstance(item, torch.Tensor):
+                    unpin_tensor_(item)
+                    
         self.gpu_pool.shutdown()
         self.cpu_pool.shutdown()
         self.io_pool.shutdown()
