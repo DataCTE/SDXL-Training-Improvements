@@ -1,4 +1,4 @@
-"""SDXL trainer factory and base implementation."""
+"""SDXL trainer factory implementation."""
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Type
@@ -25,60 +25,83 @@ from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 logger = logging.getLogger(__name__)
 
-def create_trainer(
-    config: Config,
-    model: StableDiffusionXLModel,
-    optimizer: torch.optim.Optimizer,
-    train_dataloader: torch.utils.data.DataLoader,
-    device: Union[str, torch.device],
-    wandb_logger: Optional[WandbLogger] = None,
-    validation_prompts: Optional[List[str]] = None
-) -> SDXLTrainer:
-    """Create appropriate trainer based on config.
+class TrainerFactory:
+    """Factory class for creating SDXL trainers."""
     
-    Args:
-        config: Training configuration
-        model: SDXL model
-        optimizer: Optimizer
-        train_dataloader: Training data loader
-        device: Target device
-        wandb_logger: Optional W&B logger
-        validation_prompts: Optional validation prompts
-        
-    Returns:
-        Configured trainer instance
-    """
-    # Map method names to trainer classes
-    trainer_map = {
+    _trainer_map = {
         "ddpm": DDPMTrainer,
         "flow_matching": FlowMatchingTrainer
     }
     
-    # Get trainer class
-    method = config.training.method.lower()
-    if method not in trainer_map:
-        raise ValueError(f"Unknown training method: {method}")
-    
-    trainer_cls = trainer_map[method]
-    logger.info(f"Using {trainer_cls.__name__} for training")
-    
-    # Create trainer instance
-    # Create training method instance
-    training_method = trainer_cls(
-        unet=model.unet,
-        config=config
-    )
-    
-    # Create and return trainer
-    return SDXLTrainer(
-        config=config,
-        model=model,
-        optimizer=optimizer,
-        train_dataloader=train_dataloader,
-        training_method=training_method,
-        device=device,
-        wandb_logger=wandb_logger,
-        validation_prompts=validation_prompts
-    )
-    
+    @classmethod
+    def register_trainer(cls, name: str, trainer_cls: Type[TrainingMethod]) -> None:
+        """Register a new training method.
         
+        Args:
+            name: Name of the training method
+            trainer_cls: Trainer class implementation
+        """
+        cls._trainer_map[name.lower()] = trainer_cls
+        logger.info(f"Registered trainer: {trainer_cls.__name__}")
+        
+    @classmethod
+    def create_trainer(
+        cls,
+        config: Config,
+        model: StableDiffusionXLModel,
+        optimizer: torch.optim.Optimizer,
+        train_dataloader: torch.utils.data.DataLoader,
+        device: Union[str, torch.device],
+        wandb_logger: Optional[WandbLogger] = None,
+        validation_prompts: Optional[List[str]] = None
+    ) -> SDXLTrainer:
+        """Create appropriate trainer based on config.
+        
+        Args:
+            config: Training configuration
+            model: SDXL model
+            optimizer: Optimizer
+            train_dataloader: Training data loader
+            device: Target device
+            wandb_logger: Optional W&B logger
+            validation_prompts: Optional validation prompts
+            
+        Returns:
+            Configured trainer instance
+            
+        Raises:
+            ValueError: If training method is not registered
+        """
+        # Get trainer class
+        method = config.training.method.lower()
+        if method not in cls._trainer_map:
+            raise ValueError(
+                f"Unknown training method: {method}. "
+                f"Available methods: {list(cls._trainer_map.keys())}"
+            )
+        
+        trainer_cls = cls._trainer_map[method]
+        logger.info(f"Creating trainer: {trainer_cls.__name__}")
+        
+        # Create training method instance
+        training_method = trainer_cls(
+            unet=model.unet,
+            config=config
+        )
+        
+        # Create and return trainer
+        return SDXLTrainer(
+            config=config,
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            training_method=training_method,
+            device=device,
+            wandb_logger=wandb_logger,
+            validation_prompts=validation_prompts
+        )
+
+# Convenience function for backward compatibility
+def create_trainer(*args, **kwargs) -> SDXLTrainer:
+    """Wrapper around TrainerFactory.create_trainer."""
+    return TrainerFactory.create_trainer(*args, **kwargs)

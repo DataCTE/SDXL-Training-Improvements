@@ -254,8 +254,8 @@ def main():
         # Log initial model architecture
         wandb_logger.log_model(models["unet"])
     
-    # Create appropriate trainer based on method
-    trainer = create_trainer(
+    # Create trainer using factory
+    trainer = TrainerFactory.create_trainer(
         config=config,
         model=sdxl_model,
         optimizer=optimizer,
