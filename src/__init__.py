@@ -18,7 +18,7 @@ from .core import (
 
 from .data import (
     Config,
-    SDXLDataset,
+    AspectBucketDataset,
     create_dataset,
     LatentPreprocessor,
     CacheManager,
@@ -74,7 +74,7 @@ __all__ = [
 
     # Data
     "Config",
-    "SDXLDataset",
+    "AspectBucketDataset",
     "create_dataset",
     "LatentPreprocessor",
     "CacheManager", 

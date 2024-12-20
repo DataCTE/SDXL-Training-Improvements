@@ -32,7 +32,7 @@ from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
 logger = setup_logging(__name__)
 
-class SDXLDataset(Dataset):
+class AspectBucketDataset(Dataset):
     def __init__(
         self,
         config: Config,
@@ -316,7 +316,7 @@ def create_dataset(
     latent_preprocessor: Optional[LatentPreprocessor] = None,
     tag_weighter: Optional[TagWeighter] = None,
     is_train: bool = True
-) -> SDXLDataset:
+) -> AspectBucketDataset:
     """Create SDXL dataset with validation.
     
     Args:
@@ -335,7 +335,7 @@ def create_dataset(
     assert all(Path(p).exists() for p in image_paths), "All image paths must exist"
     
     # Create dataset
-    dataset = SDXLDataset(
+    dataset = AspectBucketDataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
