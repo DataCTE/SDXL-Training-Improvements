@@ -3,20 +3,18 @@ import argparse
 import logging
 import os
 from pathlib import Path
+from typing import Dict, Optional
 
 # Third-party imports
 import torch
 from diffusers import AutoencoderKL, StableDiffusionXLPipeline
 from transformers import CLIPTokenizer, CLIPTextModel
+from torch.utils.data import DataLoader
 
-# Local imports
-from src.core.distributed import (
-    setup_distributed,
-    cleanup_distributed,
-    is_main_process
-)
+# Local imports - core functionality
+from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from src.core.logging import setup_logging, WandbLogger
-from src.core.memory import (
+from src.core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
@@ -28,19 +26,21 @@ from src.core.memory.optimizations import (
 )
 from src.core.types import DataType, ModelWeightDtypes
 
-from src.data import (
-    Config,
-    create_dataset,
-    LatentPreprocessor
-)
+# Local imports - data handling
+from src.data.config import Config
+from src.data.dataset import create_dataset
+from src.data.preprocessing import LatentPreprocessor
 
-from src.models import (
-    StableDiffusionXLModel,
-    ModelType
-)
+# Local imports - model components
+from src.models.sdxl import StableDiffusionXLModel
+from src.models.base import ModelType
 
+# Local imports - training components
 from src.training.schedulers import configure_noise_scheduler
-from src.training.trainer import TrainerFactory
+from src.training.trainer import create_trainer
+
+# Local imports - utilities
+from src.utils.paths import convert_path_list
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument("--local_rank", type=int, default=-1, help="Local rank for distributed training")
     return parser.parse_args()
 
-def load_models(config: Config):
+def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     """Load and configure all required models."""
     # Load tokenizers
     tokenizer_one = CLIPTokenizer.from_pretrained(
@@ -254,8 +254,8 @@ def main():
         # Log initial model architecture
         wandb_logger.log_model(models["unet"])
     
-    # Create trainer using factory
-    trainer = TrainerFactory.create_trainer(
+    # Create trainer
+    trainer = create_trainer(
         config=config,
         model=sdxl_model,
         optimizer=optimizer,
