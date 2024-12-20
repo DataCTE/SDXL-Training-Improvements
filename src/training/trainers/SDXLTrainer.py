@@ -13,6 +13,7 @@ from src.core.memory import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
+from src.training.methods.base import BaseTrainingMethod
     torch_gc,
     setup_memory_optimizations,
     verify_memory_optimizations,
