@@ -162,10 +162,15 @@ class CacheManager:
                     tensor = tensor.contiguous(memory_format=torch.channels_last)
                 # Pin memory if using CUDA
                 if torch.cuda.is_available():
-                    tensor = tensor.pin_memory()
+                    pin_tensor_(tensor)
                 optimized_tensors.append(tensor)
                 
-            return self.cache_manager._save_chunk(batch_id, optimized_tensors, metadata)
+            # Get cache path from config
+            cache_dir = Path(convert_windows_path(
+                self.config.global_config.cache.cache_dir,
+                make_absolute=True
+            ))
+            return self.cache_manager._save_chunk(batch_id, optimized_tensors, metadata, cache_dir)
         except Exception as e:
             logger.error(f"Error saving batch {batch_id}: {str(e)}")
             return False
