@@ -241,20 +241,35 @@ class LatentPreprocessor:
         for idx in tqdm(range(0, len(dataset), batch_size)):
             try:
                 batch = dataset[idx:idx + batch_size]
+                # Handle both string and list text inputs
+                batch_texts = []
+                for text in batch["text"]:
+                    if isinstance(text, (list, tuple)):
+                        batch_texts.append(text[0])  # Take first caption if multiple
+                    else:
+                        batch_texts.append(text)
+                        
                 embeddings = self.encode_prompt(
-                    batch["text"],
+                    batch_texts,
                     proportion_empty_prompts=self.config.data.proportion_empty_prompts
                 )
-                text_embeddings.append(embeddings)
+                if embeddings is not None:
+                    text_embeddings.append(embeddings)
             except Exception as e:
                 logger.error(f"Error processing text batch {idx}: {str(e)}")
                 continue
 
-        # Combine text embedding batches
-        text_embeddings = {
-            "prompt_embeds": torch.cat([e["prompt_embeds"] for e in text_embeddings]),
-            "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in text_embeddings])
-        }
+        # Combine text embedding batches with empty list check
+        if not text_embeddings:
+            raise RuntimeError("No valid text embeddings were generated")
+            
+        try:
+            text_embeddings = {
+                "prompt_embeds": torch.cat([e["prompt_embeds"] for e in text_embeddings if e is not None]),
+                "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in text_embeddings if e is not None])
+            }
+        except Exception as e:
+            raise RuntimeError(f"Failed to concatenate text embeddings: {str(e)}")
 
         # Process VAE latents
         logger.info("Computing VAE latents...")
