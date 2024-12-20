@@ -241,33 +241,58 @@ class LatentPreprocessor:
         for idx in tqdm(range(0, len(dataset), batch_size)):
             try:
                 batch = dataset[idx:idx + batch_size]
-                # Handle both string and list text inputs
                 batch_texts = []
-                for text in batch["text"]:
-                    if isinstance(text, (list, tuple)):
-                        batch_texts.append(text[0])  # Take first caption if multiple
+                
+                # Safely extract text from batch
+                for text_item in batch["text"]:
+                    if isinstance(text_item, (list, tuple)):
+                        # Take first non-empty caption if multiple
+                        valid_captions = [c for c in text_item if c and isinstance(c, str)]
+                        batch_texts.append(valid_captions[0] if valid_captions else "")
+                    elif isinstance(text_item, str):
+                        batch_texts.append(text_item)
                     else:
-                        batch_texts.append(text)
-                        
+                        logger.warning(f"Unexpected text type: {type(text_item)}, using empty string")
+                        batch_texts.append("")
+                
+                if not any(batch_texts):  # Skip if all empty
+                    logger.warning(f"Skipping batch {idx}: all empty captions")
+                    continue
+                    
                 embeddings = self.encode_prompt(
                     batch_texts,
                     proportion_empty_prompts=self.config.data.proportion_empty_prompts
                 )
-                if embeddings is not None:
+                if embeddings is not None and all(t is not None for t in embeddings.values()):
                     text_embeddings.append(embeddings)
+                else:
+                    logger.warning(f"Skipping batch {idx}: invalid embeddings generated")
             except Exception as e:
                 logger.error(f"Error processing text batch {idx}: {str(e)}")
                 continue
 
-        # Combine text embedding batches with empty list check
+        # Combine text embedding batches with validation
         if not text_embeddings:
-            raise RuntimeError("No valid text embeddings were generated")
+            raise RuntimeError("No valid text embeddings were generated. Check input captions and logs for details.")
             
         try:
+            # Validate embeddings before concatenation
+            valid_embeds = [e for e in text_embeddings if e is not None 
+                          and "prompt_embeds" in e 
+                          and "pooled_prompt_embeds" in e
+                          and e["prompt_embeds"] is not None
+                          and e["pooled_prompt_embeds"] is not None]
+            
+            if not valid_embeds:
+                raise RuntimeError("No valid embeddings found after filtering")
+                
             text_embeddings = {
-                "prompt_embeds": torch.cat([e["prompt_embeds"] for e in text_embeddings if e is not None]),
-                "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in text_embeddings if e is not None])
+                "prompt_embeds": torch.cat([e["prompt_embeds"] for e in valid_embeds]),
+                "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in valid_embeds])
             }
+            
+            logger.info(f"Successfully generated embeddings for {len(valid_embeds)} batches")
+            
         except Exception as e:
             raise RuntimeError(f"Failed to concatenate text embeddings: {str(e)}")
 
