@@ -1,6 +1,11 @@
 """High-performance preprocessing pipeline for SDXL training."""
 import logging
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import traceback
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
+from .exceptions import (
+    PreprocessingError, DataLoadError, PipelineConfigError,
+    GPUProcessingError, CacheError, DtypeError, DALIError
+)
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
@@ -180,16 +185,28 @@ class PreprocessingPipeline:
         Continuously pulls batches from input queue, processes them
         through DALI pipeline and GPU transforms, then puts results
         in output queue. Runs in separate thread.
+        
+        Raises:
+            DALIError: If DALI pipeline processing fails
+            PreprocessingError: For other processing errors
         """
         try:
             while not self.stop_event.is_set():
-                # Get next batch from input queue
-                batch = self.input_queue.get()
-                if batch is None:
-                    break
+                try:
+                    # Get next batch from input queue with timeout
+                    batch = self.input_queue.get(timeout=1.0)
+                    if batch is None:
+                        break
 
-                # Process batch using DALI
-                processed = self.dali_pipeline.run()
+                    # Validate batch
+                    if not isinstance(batch, (list, tuple)):
+                        raise DataLoadError(f"Expected list or tuple, got {type(batch)}")
+
+                    # Process batch using DALI
+                    try:
+                        processed = self.dali_pipeline.run()
+                    except Exception as e:
+                        raise DALIError(f"DALI pipeline failed: {str(e)}") from e
             
                 # Move to GPU and apply transforms with proper dtype
                 futures = []
@@ -211,16 +228,38 @@ class PreprocessingPipeline:
             self.stop_event.set()
 
     def _process_item(self, item: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Process single item with GPU acceleration and memory optimizations."""
+        """Process single item with GPU acceleration and memory optimizations.
+        
+        Args:
+            item: Input tensor to process
+            
+        Returns:
+            Dictionary containing processed tensor
+            
+        Raises:
+            GPUProcessingError: If GPU processing fails
+            DtypeError: If dtype conversion fails
+            PreprocessingError: For other processing errors
+        """
+        if not isinstance(item, torch.Tensor):
+            raise TypeError(f"Expected torch.Tensor, got {type(item)}")
+            
         try:
+            # Validate input tensor
+            if item.dim() != 4:
+                raise ValueError(f"Expected 4D tensor, got {item.dim()}D")
+                
             # Setup memory optimizations
             if torch.cuda.is_available():
-                verify_memory_optimizations(
-                    model=None,
-                    config=self.config,
-                    device=torch.device("cuda"),
-                    logger=logger
-                )
+                try:
+                    verify_memory_optimizations(
+                        model=None,
+                        config=self.config,
+                        device=torch.device("cuda"),
+                        logger=logger
+                    )
+                except Exception as e:
+                    raise GPUProcessingError(f"Failed to setup memory optimizations: {str(e)}") from e
             
             # Use multiple streams for pipelining
             compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -287,13 +326,25 @@ class PreprocessingPipeline:
             
         Returns:
             Transformed tensor
+            
+        Raises:
+            DtypeError: If dtype conversion fails
+            GPUProcessingError: If GPU operations fail
+            ValueError: If tensor format is invalid
         """
+        # Validate input
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError(f"Expected torch.Tensor, got {type(tensor)}")
+            
         # Ensure tensor is in correct format
         if tensor.dim() != 4:  # [B, C, H, W]
             raise ValueError(f"Expected 4D tensor, got {tensor.dim()}D")
             
         # Convert to target dtype before processing
-        tensor = tensor.to(dtype=self.dtypes.train_dtype.to_torch_dtype())
+        try:
+            tensor = tensor.to(dtype=self.dtypes.train_dtype.to_torch_dtype())
+        except Exception as e:
+            raise DtypeError(f"Failed to convert tensor to {self.dtypes.train_dtype}: {str(e)}") from e
             
         # Apply transforms in compute stream
         with torch.cuda.stream(torch.cuda.current_stream()):
