@@ -243,21 +243,28 @@ class LatentPreprocessor:
                 batch = dataset[idx:idx + batch_size]
                 batch_texts = []
                 
-                # Safely extract text from batch
+                # Safely extract and validate text from batch
                 for text_item in batch["text"]:
                     if isinstance(text_item, (list, tuple)):
                         # Take first non-empty caption if multiple
-                        valid_captions = [c for c in text_item if c and isinstance(c, str)]
-                        batch_texts.append(valid_captions[0] if valid_captions else "")
-                    elif isinstance(text_item, str):
-                        batch_texts.append(text_item)
+                        valid_captions = [c.strip() for c in text_item if c and isinstance(c, str) and c.strip()]
+                        if valid_captions:
+                            batch_texts.append(valid_captions[0])
+                        else:
+                            logger.warning(f"No valid captions found in list/tuple: {text_item}")
+                            batch_texts.append("")
+                    elif isinstance(text_item, str) and text_item.strip():
+                        batch_texts.append(text_item.strip())
                     else:
-                        logger.warning(f"Unexpected text type: {type(text_item)}, using empty string")
+                        logger.warning(f"Invalid text item type or empty: {type(text_item)}")
                         batch_texts.append("")
                 
-                if not any(batch_texts):  # Skip if all empty
-                    logger.warning(f"Skipping batch {idx}: all empty captions")
+                # Count valid captions
+                valid_count = sum(1 for t in batch_texts if t)
+                if valid_count == 0:
+                    logger.warning(f"Skipping batch {idx}: all captions empty or invalid")
                     continue
+                logger.debug(f"Processing batch {idx} with {valid_count}/{len(batch_texts)} valid captions")
                     
                 embeddings = self.encode_prompt(
                     batch_texts,
@@ -276,15 +283,35 @@ class LatentPreprocessor:
             raise RuntimeError("No valid text embeddings were generated. Check input captions and logs for details.")
             
         try:
-            # Validate embeddings before concatenation
-            valid_embeds = [e for e in text_embeddings if e is not None 
-                          and "prompt_embeds" in e 
-                          and "pooled_prompt_embeds" in e
-                          and e["prompt_embeds"] is not None
-                          and e["pooled_prompt_embeds"] is not None]
-            
+            # Thorough embedding validation
+            valid_embeds = []
+            for e in text_embeddings:
+                try:
+                    if (e is not None and 
+                        isinstance(e, dict) and
+                        "prompt_embeds" in e and 
+                        "pooled_prompt_embeds" in e and
+                        isinstance(e["prompt_embeds"], torch.Tensor) and
+                        isinstance(e["pooled_prompt_embeds"], torch.Tensor) and
+                        e["prompt_embeds"].dim() == 3 and  # [batch, seq_len, hidden_dim]
+                        e["pooled_prompt_embeds"].dim() == 2):  # [batch, hidden_dim]
+                        
+                        # Validate tensor shapes
+                        if (e["prompt_embeds"].size(0) > 0 and 
+                            e["pooled_prompt_embeds"].size(0) > 0 and
+                            e["prompt_embeds"].size(0) == e["pooled_prompt_embeds"].size(0)):
+                            valid_embeds.append(e)
+                        else:
+                            logger.warning(f"Invalid embedding shapes: prompt={e['prompt_embeds'].shape}, pooled={e['pooled_prompt_embeds'].shape}")
+                    else:
+                        logger.warning("Embedding validation failed: incorrect types or missing keys")
+                except Exception as err:
+                    logger.error(f"Error validating embedding: {str(err)}")
+                    
             if not valid_embeds:
-                raise RuntimeError("No valid embeddings found after filtering")
+                raise RuntimeError("No valid embeddings found after thorough validation")
+                
+            logger.info(f"Validated {len(valid_embeds)}/{len(text_embeddings)} embedding batches")
                 
             text_embeddings = {
                 "prompt_embeds": torch.cat([e["prompt_embeds"] for e in valid_embeds]),
