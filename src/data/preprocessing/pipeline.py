@@ -269,7 +269,35 @@ class PreprocessingPipeline:
         Returns:
             Transformed tensor
         """
-        # TODO: Implement custom CUDA kernels
+        # Ensure tensor is in correct format
+        if tensor.dim() != 4:  # [B, C, H, W]
+            raise ValueError(f"Expected 4D tensor, got {tensor.dim()}D")
+            
+        # Apply transforms in compute stream
+        with torch.cuda.stream(torch.cuda.current_stream()):
+            # Convert to channels last for better performance
+            tensor = tensor.contiguous(memory_format=torch.channels_last)
+            
+            # Normalize if needed (assuming input is in [0,1])
+            if tensor.max() <= 1.0:
+                tensor = tensor * 2.0 - 1.0
+                
+            # Apply custom transforms based on config
+            if hasattr(self.config, 'transforms'):
+                if self.config.transforms.get('random_flip', False):
+                    if torch.rand(1).item() < 0.5:
+                        tensor = tensor.flip(-1)  # Horizontal flip
+                        
+                if self.config.transforms.get('normalize', True):
+                    # Apply mean/std normalization
+                    mean = torch.tensor([0.5, 0.5, 0.5], device=tensor.device).view(1, 3, 1, 1)
+                    std = torch.tensor([0.5, 0.5, 0.5], device=tensor.device).view(1, 3, 1, 1)
+                    tensor = (tensor - mean) / std
+                    
+            # Ensure compute stream is synchronized
+            if tensor.device.type == 'cuda':
+                torch.cuda.current_stream().synchronize()
+                
         return tensor
 
     def process_batch(
