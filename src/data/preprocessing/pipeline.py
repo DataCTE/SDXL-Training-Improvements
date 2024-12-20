@@ -245,8 +245,14 @@ class PreprocessingPipeline:
                     # Move back to CPU if needed, with proper cleanup
                     if self.cache_dir:
                         with create_stream_context(compute_stream):
-                            processed = processed.cpu()
-                            torch_gc()
+                            # Only transfer if device mismatch
+                            if not device_equals(processed.device, torch.device('cpu')):
+                                processed = processed.cpu()
+                                torch_gc()
+                            
+                            # Pin memory for faster transfers if enabled
+                            if self.use_pinned_memory:
+                                pin_tensor_(processed)
                             
                     return {"tensor": processed}
 
