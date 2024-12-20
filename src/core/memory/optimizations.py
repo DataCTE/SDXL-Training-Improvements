@@ -47,6 +47,8 @@ def setup_memory_optimizations(
                 model.enable_gradient_checkpointing()
             else:
                 logger.warning("Model does not support gradient checkpointing")
+        elif model is None:
+            logger.info("Skipping gradient checkpointing - no model provided")
 
         # Configure automatic mixed precision and throughput optimizations
         if config.training.mixed_precision:
