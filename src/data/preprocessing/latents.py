@@ -245,18 +245,21 @@ class LatentPreprocessor:
                 
                 # Safely extract and validate text from batch
                 for text_item in batch["text"]:
-                    if isinstance(text_item, (list, tuple)):
-                        # Take first non-empty caption if multiple
-                        valid_captions = [c.strip() for c in text_item if c and isinstance(c, str) and c.strip()]
-                        if valid_captions:
-                            batch_texts.append(valid_captions[0])
+                    try:
+                        if isinstance(text_item, (list, tuple)):
+                            # Take first non-empty caption if multiple
+                            valid_captions = [str(c).strip() for c in text_item if c is not None]
+                            if valid_captions:
+                                batch_texts.append(valid_captions[0])
+                            else:
+                                logger.warning(f"No valid captions found in list/tuple")
+                                batch_texts.append("")
                         else:
-                            logger.warning(f"No valid captions found in list/tuple: {text_item}")
-                            batch_texts.append("")
-                    elif isinstance(text_item, str) and text_item.strip():
-                        batch_texts.append(text_item.strip())
-                    else:
-                        logger.warning(f"Invalid text item type or empty: {type(text_item)}")
+                            # Convert to string and strip
+                            text = str(text_item).strip() if text_item is not None else ""
+                            batch_texts.append(text if text else "")
+                    except Exception as e:
+                        logger.warning(f"Error processing text item: {str(e)}")
                         batch_texts.append("")
                 
                 # Count valid captions
