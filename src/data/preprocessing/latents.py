@@ -284,21 +284,56 @@ class LatentPreprocessor:
                         logger.warning(f"Error processing text item: {str(e)}")
                         batch_texts.append("")
                 
-                # Count valid captions
+                # Count and log details about valid/invalid captions
                 valid_count = sum(1 for t in batch_texts if t)
+                invalid_texts = [(i, txt) for i, txt in enumerate(batch_texts) if not txt]
+                
                 if valid_count == 0:
-                    logger.warning(f"Skipping batch {idx}: all captions empty or invalid")
+                    logger.error(f"Skipping batch {idx}: all captions empty or invalid")
+                    for i, txt in invalid_texts:
+                        logger.error(f"  Invalid caption at position {i}, original input: {repr(batch['text'][i])}")
                     continue
-                logger.debug(f"Processing batch {idx} with {valid_count}/{len(batch_texts)} valid captions")
                     
-                embeddings = self.encode_prompt(
-                    batch_texts,
-                    proportion_empty_prompts=self.config.data.proportion_empty_prompts
-                )
-                if embeddings is not None and all(t is not None for t in embeddings.values()):
-                    text_embeddings.append(embeddings)
-                else:
-                    logger.warning(f"Skipping batch {idx}: invalid embeddings generated")
+                logger.info(f"Processing batch {idx} with {valid_count}/{len(batch_texts)} valid captions")
+                if invalid_texts:
+                    logger.warning(f"Found {len(invalid_texts)} invalid captions in batch {idx}:")
+                    for i, txt in invalid_texts:
+                        logger.warning(f"  Position {i}, original input: {repr(batch['text'][i])}")
+                    
+                try:
+                    embeddings = self.encode_prompt(
+                        batch_texts,
+                        proportion_empty_prompts=self.config.data.proportion_empty_prompts
+                    )
+                    if embeddings is not None and all(t is not None for t in embeddings.values()):
+                        # Validate embedding shapes and content
+                        prompt_embeds = embeddings["prompt_embeds"]
+                        pooled_embeds = embeddings["pooled_prompt_embeds"]
+                        
+                        if not isinstance(prompt_embeds, torch.Tensor):
+                            raise ValueError(f"prompt_embeds is {type(prompt_embeds)}, expected torch.Tensor")
+                        if not isinstance(pooled_embeds, torch.Tensor):
+                            raise ValueError(f"pooled_prompt_embeds is {type(pooled_embeds)}, expected torch.Tensor")
+                            
+                        if prompt_embeds.dim() != 3:
+                            raise ValueError(f"prompt_embeds has {prompt_embeds.dim()} dimensions, expected 3")
+                        if pooled_embeds.dim() != 2:
+                            raise ValueError(f"pooled_prompt_embeds has {pooled_embeds.dim()} dimensions, expected 2")
+                            
+                        text_embeddings.append(embeddings)
+                        logger.debug(f"Successfully processed batch {idx} with shapes: "
+                                   f"prompt_embeds={prompt_embeds.shape}, "
+                                   f"pooled_embeds={pooled_embeds.shape}")
+                    else:
+                        logger.error(f"Skipping batch {idx}: embeddings validation failed")
+                        if embeddings is None:
+                            logger.error("  encode_prompt returned None")
+                        else:
+                            for k, v in embeddings.items():
+                                logger.error(f"  {k}: {type(v)} = {v}")
+                except Exception as e:
+                    logger.error(f"Error generating embeddings for batch {idx}: {str(e)}")
+                    logger.error(f"Problematic texts: {repr(batch_texts)}")
             except Exception as e:
                 logger.error(f"Error processing text batch {idx}: {str(e)}")
                 continue
