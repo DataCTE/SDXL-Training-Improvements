@@ -74,6 +74,16 @@ class MemoryConfig:
     enable_async_offloading: bool = True
     temp_device: str = "cpu"
 
+@dataclass 
+class DDPMConfig:
+    """DDPM-specific training configuration."""
+    prediction_type: str = "v_prediction"  # v_prediction or epsilon
+    snr_gamma: Optional[float] = 5.0
+    zero_terminal_snr: bool = True
+    sigma_min: float = 0.002
+    sigma_max: float = 20000.0
+    rho: float = 7.0
+
 @dataclass
 class TrainingConfig:
     """Training configuration."""
@@ -82,28 +92,27 @@ class TrainingConfig:
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
     memory: MemoryConfig = field(default_factory=MemoryConfig)
-    learning_rate: float = 1e-5
+    learning_rate: float = 4.0e-7
     max_grad_norm: float = 1.0
     num_epochs: int = 100
     warmup_steps: int = 500
     save_steps: int = 500
     log_steps: int = 10
-    eval_steps: int = 100,
+    eval_steps: int = 100
     validation_steps: int = 1000
     validation_samples: int = 4
     validation_guidance_scale: float = 7.5
     validation_inference_steps: int = 30
     max_train_steps: Optional[int] = None
-    lr_scheduler: str = "cosine"
+    lr_scheduler: str = "linear"
     optimizer_betas: Tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 1e-2
     optimizer_eps: float = 1e-8
-    prediction_type: str = "epsilon"
-    snr_gamma: Optional[float] = 5.0
     use_wandb: bool = True
     random_flip: bool = True
     center_crop: bool = True
-    method: str = "ddpm"
+    method: str = "ddpm"  # ddpm or flow_matching
+    ddpm: DDPMConfig = field(default_factory=DDPMConfig)
     flow_matching: FlowMatchingConfig = field(default_factory=FlowMatchingConfig)
     
 @dataclass

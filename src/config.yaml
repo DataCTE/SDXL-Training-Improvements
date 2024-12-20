@@ -52,16 +52,14 @@ training:
   optimizer_betas: [0.9, 0.999]
   weight_decay: 1.0e-2
   optimizer_eps: 1.0e-8
-  prediction_type: "v_prediction"  # Using v-prediction as per NovelAI V3
-  snr_gamma: 5.0
-  use_wandb: true
-  random_flip: true
-  center_crop: true
-  method: "ddpm"  # Using standard DDPM with v-prediction
-  zero_terminal_snr: true  # Enable Zero Terminal SNR
-  sigma_max: 20000.0  # High sigma for ZTSNR approximation
-  sigma_min: 0.002  # Minimum sigma
-  rho: 7.0  # Karras schedule parameter
+  method: "ddpm"  # Training method: ddpm or flow_matching
+  ddpm:
+    prediction_type: "v_prediction"  # v_prediction or epsilon
+    snr_gamma: 5.0
+    zero_terminal_snr: true
+    sigma_min: 0.002
+    sigma_max: 20000.0
+    rho: 7.0
 
 data:
   # Supports both Windows and Unix paths
