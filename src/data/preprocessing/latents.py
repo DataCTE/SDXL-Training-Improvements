@@ -298,7 +298,7 @@ class LatentPreprocessor:
                 if invalid_texts:
                     logger.warning(f"Found {len(invalid_texts)} invalid captions in batch {idx}:")
                     for i, txt in invalid_texts:
-                        logger.warning(f"  Position {i}, original input: {repr(batch['text'][i])}")
+                        logger.warning(f"  Position {i}, original input: {repr(text_item)}")
                     
                 try:
                     embeddings = self.encode_prompt(
