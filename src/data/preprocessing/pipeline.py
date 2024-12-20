@@ -457,10 +457,9 @@ class PreprocessingPipeline:
                                     pin_tensor_(processed)
                             
                     return {"tensor": processed}
-
-        except Exception as e:
-            logger.error(f"Error processing item: {str(e)}")
-            raise
+                except Exception as e:
+                    logger.error(f"Error processing item: {str(e)}")
+                    raise
 
     def _apply_transforms(self, tensor: torch.Tensor) -> torch.Tensor:
         """Apply transforms using custom CUDA kernels.
