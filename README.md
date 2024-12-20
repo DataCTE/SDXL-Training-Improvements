@@ -5,25 +5,49 @@
 
 A research-focused SDXL training framework implementing cutting-edge advances in diffusion model training, with emphasis on image quality and training stability.
 
-## Novel Research Methods
+## Training Methods
 
 ### Flow Matching with Logit-Normal Sampling [[4]](#references)
-- Implements nyaflow-xl's logit-normal time sampling approach
-- Provides 30% faster convergence through optimal transport paths
-- Reduces training instability via direct velocity field learning
-- Eliminates noise schedule dependencies through optimal transport
 
-### NovelAI V3 UNet Improvements [[7]](#references)
-- Zero Terminal SNR (ZTSNR) training with infinite noise approximation
-  - Uses high sigma_max (~20000) for better high-noise region handling
-  - Significantly reduces image artifacts and improves detail preservation
-  - Enhanced contrast and color fidelity in generated images
-- v-prediction parameterization for more stable gradients
-  - Better handling of high-frequency details
-  - Reduced color shifting during sampling
-- Karras noise schedule with dynamic sigma spacing
-  - Improved sampling quality at all noise levels
-  - Better preservation of fine textures and patterns
+Advanced training method that eliminates noise scheduling:
+
+```python
+# Configure Flow Matching training
+training:
+  method: "flow_matching"
+  batch_size: 4
+  learning_rate: 1.0e-6
+```
+
+Key benefits:
+- 30% faster convergence via optimal transport paths
+- Direct velocity field learning reduces instability
+- No noise schedule dependencies
+- Logit-normal time sampling for better coverage
+
+### NovelAI V3 UNet Architecture [[7]](#references)
+
+State-of-the-art model improvements:
+
+```python
+# Enable NovelAI V3 features
+training:
+  prediction_type: "v_prediction"
+  zero_terminal_snr: true
+  sigma_max: 20000.0
+```
+
+Improvements:
+- Zero Terminal SNR training
+  - Infinite noise approximation (σ_max ≈ 20000)
+  - Better artifact handling
+  - Enhanced detail preservation
+- V-prediction parameterization
+  - Stable high-frequency gradients
+  - Reduced color shifting
+- Dynamic Karras schedule
+  - Adaptive noise spacing
+  - Improved texture quality
 
 ## Image Quality Improvements
 
@@ -51,13 +75,60 @@ A research-focused SDXL training framework implementing cutting-edge advances in
 | CUDA      | 11.7+ |
 | VRAM      | 24GB+ |
 
-## Quick Start
+## Installation
 
 ```bash
+# Clone repository
 git clone https://github.com/DataCTE/SDXL-Training-Improvements.git
 cd SDXL-Training-Improvements
-pip install -e .
+
+# Install in development mode with all extras
+pip install -e ".[dev,docs]"
+
+# Verify installation
+python -c "import src; print(src.__version__)"
+```
+
+## Configuration
+
+The training framework is configured through a YAML file. Key configuration sections:
+
+```yaml
+# Model configuration
+model:
+  pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
+  num_timesteps: 1000
+  sigma_min: 0.002
+  sigma_max: 80.0
+
+# Training parameters  
+training:
+  batch_size: 4
+  learning_rate: 4.0e-7
+  method: "ddpm"  # or "flow_matching"
+  zero_terminal_snr: true
+  
+# Dataset configuration
+data:
+  train_data_dir: 
+    - "path/to/dataset1"
+    - "path/to/dataset2"
+```
+
+See [config.yaml](src/config.yaml) for full configuration options.
+
+## Usage Examples
+
+Basic training:
+```bash
+# Train with default config
 python src/main.py --config config.yaml
+
+# Train with custom config
+python src/main.py --config my_config.yaml
+
+# Distributed training
+torchrun --nproc_per_node=2 src/main.py --config config.yaml
 ```
 
 ## References
