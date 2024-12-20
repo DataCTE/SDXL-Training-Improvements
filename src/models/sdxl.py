@@ -11,7 +11,7 @@ from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
     DiffusionPipeline,
-    StableDiffusionXLPipeline,
+    StableDiffusionXLPipeline as BasePipeline,
     UNet2DConditionModel
 )
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
@@ -56,6 +56,40 @@ class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
         self.text_encoder_1_vector = text_encoder_1_vector
         self.text_encoder_2_vector = text_encoder_2_vector
 
+
+class StableDiffusionXLPipeline(BasePipeline):
+    """Custom SDXL pipeline implementation."""
+    
+    def __init__(
+        self,
+        vae: AutoencoderKL,
+        text_encoder: CLIPTextModel,
+        text_encoder_2: CLIPTextModelWithProjection,
+        tokenizer: CLIPTokenizer,
+        tokenizer_2: CLIPTokenizer,
+        unet: UNet2DConditionModel,
+        scheduler: DDIMScheduler,
+    ):
+        """Initialize custom SDXL pipeline.
+        
+        Args:
+            vae: VAE model
+            text_encoder: First text encoder
+            text_encoder_2: Second text encoder
+            tokenizer: First tokenizer
+            tokenizer_2: Second tokenizer
+            unet: UNet model
+            scheduler: Noise scheduler
+        """
+        super().__init__(
+            vae=vae,
+            text_encoder=text_encoder,
+            text_encoder_2=text_encoder_2,
+            tokenizer=tokenizer,
+            tokenizer_2=tokenizer_2,
+            unet=unet,
+            scheduler=scheduler,
+        )
 
 class StableDiffusionXLModel(BaseModel):
     """StableDiffusionXL model with training optimizations."""
