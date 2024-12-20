@@ -181,8 +181,8 @@ class SDXLDataset(Dataset):
             - target_size: Target size after bucketing
             - loss_weight: Optional tag-based loss weight
         """
-        # Load and process image
-        image_path = self.image_paths[idx]
+        # Load and process image with WSL path handling
+        image_path = convert_windows_path(self.image_paths[idx], make_absolute=True)
         image = Image.open(image_path).convert('RGB')
         original_size = image.size
         

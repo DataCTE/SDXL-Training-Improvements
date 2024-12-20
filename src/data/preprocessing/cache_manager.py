@@ -46,7 +46,8 @@ class CacheManager:
             compression: Compression algorithm (None, 'zstd', 'gzip')
             verify_hashes: Whether to verify content hashes
         """
-        self.cache_dir = Path(cache_dir)
+        from src.utils.paths import convert_windows_path
+        self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         self.num_proc = num_proc or mp.cpu_count()
@@ -55,7 +56,7 @@ class CacheManager:
         self.verify_hashes = verify_hashes
         
         # Setup cache index
-        self.index_path = self.cache_dir / "cache_index.json"
+        self.index_path = Path(convert_windows_path(self.cache_dir / "cache_index.json", make_absolute=True))
         self.cache_index = self._load_cache_index()
         
         # Setup process pools
@@ -77,7 +78,8 @@ class CacheManager:
     def _compute_hash(self, file_path: Path) -> str:
         """Compute file hash for verification."""
         hasher = hashlib.sha256()
-        with open(file_path, 'rb') as f:
+        converted_path = convert_windows_path(file_path, make_absolute=True)
+        with open(converted_path, 'rb') as f:
             for chunk in iter(lambda: f.read(65536), b''):
                 hasher.update(chunk)
         return hasher.hexdigest()
@@ -134,7 +136,7 @@ class CacheManager:
     ) -> bool:
         """Save processed chunk to disk."""
         try:
-            chunk_path = self.cache_dir / f"chunk_{chunk_id:06d}.pt"
+            chunk_path = Path(convert_windows_path(self.cache_dir / f"chunk_{chunk_id:06d}.pt", make_absolute=True))
             
             # Save tensors with optional compression
             if self.compression == "zstd":
