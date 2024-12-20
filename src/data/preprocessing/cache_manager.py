@@ -1,5 +1,8 @@
 """High-performance cache management for large-scale dataset preprocessing."""
 import multiprocessing as mp
+import traceback
+from dataclasses import dataclass
+from enum import Enum, auto
 from src.core.logging.logging import setup_logging
 from src.utils.paths import convert_windows_path
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -18,6 +21,44 @@ import torch
 import numpy as np
 from PIL import Image
 from tqdm.auto import tqdm
+
+class CacheError(Exception):
+    """Base exception for cache-related errors."""
+    def __init__(self, message: str, context: dict = None):
+        super().__init__(message)
+        self.context = context or {}
+
+class CacheIOError(CacheError):
+    """Raised when cache I/O operations fail."""
+    pass
+
+class CacheValidationError(CacheError):
+    """Raised when cache validation fails."""
+    pass
+
+class CacheProcessingError(CacheError):
+    """Raised when processing cache items fails."""
+    pass
+
+class CacheStage(Enum):
+    """Enum for tracking cache processing stages."""
+    INITIALIZATION = auto()
+    IMAGE_PROCESSING = auto()
+    TENSOR_VALIDATION = auto()
+    CHUNK_SAVING = auto()
+    INDEX_UPDATE = auto()
+
+@dataclass
+class CacheStats:
+    """Statistics for cache operations."""
+    total_items: int = 0
+    processed_items: int = 0
+    failed_items: int = 0
+    skipped_items: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    corrupted_items: int = 0
+    validation_errors: int = 0
 
 logger = setup_logging(__name__, level="INFO")
 
@@ -79,7 +120,17 @@ class CacheManager:
         return hasher.hexdigest()
         
     def _process_image(self, image_path: Path) -> Optional[torch.Tensor]:
-        """Process single image with optimized memory handling and CUDA streams."""
+        """Process single image with optimized memory handling and CUDA streams.
+        
+        Args:
+            image_path: Path to image file
+            
+        Returns:
+            Processed tensor or None if processing failed
+            
+        Raises:
+            CacheProcessingError: If image processing fails
+        """
         try:
             # Create streams for pipelined operations
             compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -140,8 +191,22 @@ class CacheManager:
                 
             return tensor
         except Exception as e:
-            logger.error(f"Error processing {image_path}: {str(e)}")
-            return None
+            error_context = {
+                'image_path': str(image_path),
+                'error_type': type(e).__name__,
+                'error_msg': str(e),
+                'traceback': traceback.format_exc(),
+                'stage': CacheStage.IMAGE_PROCESSING.name
+            }
+            logger.error(
+                f"Error processing image:\n"
+                f"Image path: {error_context['image_path']}\n"
+                f"Error type: {error_context['error_type']}\n"
+                f"Error message: {error_context['error_msg']}\n"
+                f"Processing stage: {error_context['stage']}\n"
+                f"Traceback:\n{error_context['traceback']}"
+            )
+            raise CacheProcessingError("Failed to process image", context=error_context)
             
     def _save_processed_batch(
         self,
@@ -181,7 +246,7 @@ class CacheManager:
         image_exts: List[str] = [".jpg", ".jpeg", ".png"],
         caption_ext: str = ".txt", 
         num_workers: Optional[int] = None
-    ) -> Dict[str, int]:
+    ) -> CacheStats:
         """Process dataset with performance metrics logging.
         
         Args:
@@ -209,7 +274,7 @@ class CacheManager:
             Processing statistics
         """
         data_dir = Path(data_dir)
-        stats = {"processed": 0, "failed": 0, "skipped": 0}
+        stats = CacheStats()
         
         # Get all image files with WSL path handling
         image_files = []
@@ -236,14 +301,27 @@ class CacheManager:
             # Process images in parallel
             futures = []
             for img_path in chunk:
-                if str(img_path) in self.cache_index["files"]:
-                    stats["skipped"] += 1
-                    continue
+                try:
+                    if str(img_path) in self.cache_index["files"]:
+                        stats.skipped_items += 1
+                        logger.debug(f"Skipping already cached image: {img_path}")
+                        continue
                     
-                caption_path = img_path.with_suffix(caption_ext)
-                if not caption_path.exists():
-                    stats["failed"] += 1
-                    continue
+                    caption_path = img_path.with_suffix(caption_ext)
+                    if not caption_path.exists():
+                        error_context = {
+                            'image_path': str(img_path),
+                            'caption_path': str(caption_path),
+                            'stage': CacheStage.INITIALIZATION.name
+                        }
+                        logger.error(
+                            f"Missing caption file:\n"
+                            f"Image path: {error_context['image_path']}\n"
+                            f"Caption path: {error_context['caption_path']}\n"
+                            f"Stage: {error_context['stage']}"
+                        )
+                        stats.failed_items += 1
+                        continue
                     
                 futures.append(
                     self.image_pool.submit(
@@ -258,14 +336,61 @@ class CacheManager:
             
             for i, future in enumerate(futures):
                 try:
-                    tensor = future.result()
-                    if tensor is not None:
+                    try:
+                        tensor = future.result()
                         img_path = chunk[i]
                         caption_path = img_path.with_suffix(caption_ext)
                         
-                        # Read caption
-                        with open(caption_path, 'r', encoding='utf-8') as f:
-                            caption = f.read().strip()
+                        # Read caption with error handling
+                        try:
+                            with open(caption_path, 'r', encoding='utf-8') as f:
+                                caption = f.read().strip()
+                        except Exception as e:
+                            error_context = {
+                                'image_path': str(img_path),
+                                'caption_path': str(caption_path),
+                                'error_type': type(e).__name__,
+                                'error_msg': str(e),
+                                'traceback': traceback.format_exc(),
+                                'stage': CacheStage.INITIALIZATION.name
+                            }
+                            logger.error(
+                                f"Error reading caption file:\n"
+                                f"Image path: {error_context['image_path']}\n"
+                                f"Caption path: {error_context['caption_path']}\n"
+                                f"Error type: {error_context['error_type']}\n"
+                                f"Error message: {error_context['error_msg']}\n"
+                                f"Stage: {error_context['stage']}\n"
+                                f"Traceback:\n{error_context['traceback']}"
+                            )
+                            stats.failed_items += 1
+                            continue
+                            
+                        # Validate tensor
+                        try:
+                            if not isinstance(tensor, torch.Tensor):
+                                raise CacheValidationError(
+                                    f"Invalid tensor type: {type(tensor)}",
+                                    {'image_path': str(img_path)}
+                                )
+                            if tensor.dim() != 4:  # [C, H, W] or [B, C, H, W]
+                                raise CacheValidationError(
+                                    f"Invalid tensor dimensions: {tensor.dim()}",
+                                    {'image_path': str(img_path)}
+                                )
+                            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                                raise CacheValidationError(
+                                    "Tensor contains NaN or Inf values",
+                                    {'image_path': str(img_path)}
+                                )
+                        except CacheValidationError as e:
+                            logger.error(
+                                f"Tensor validation failed:\n"
+                                f"Image path: {e.context.get('image_path')}\n"
+                                f"Error: {str(e)}"
+                            )
+                            stats.validation_errors += 1
+                            continue
                             
                         # Store tensor and metadata
                         tensors.append(tensor)
@@ -273,12 +398,25 @@ class CacheManager:
                             "caption": caption,
                             "hash": self._compute_hash(img_path) if self.verify_hashes else None
                         }
-                        stats["processed"] += 1
-                    else:
-                        stats["failed"] += 1
-                except Exception as e:
-                    logger.error(f"Error processing chunk item: {str(e)}")
-                    stats["failed"] += 1
+                        stats.processed_items += 1
+                        logger.debug(f"Successfully processed: {img_path}")
+                    except Exception as e:
+                        error_context = {
+                            'image_path': str(chunk[i]),
+                            'error_type': type(e).__name__,
+                            'error_msg': str(e),
+                            'traceback': traceback.format_exc(),
+                            'stage': CacheStage.IMAGE_PROCESSING.name
+                        }
+                        logger.error(
+                            f"Error processing chunk item:\n"
+                            f"Image path: {error_context['image_path']}\n"
+                            f"Error type: {error_context['error_type']}\n"
+                            f"Error message: {error_context['error_msg']}\n"
+                            f"Stage: {error_context['stage']}\n"
+                            f"Traceback:\n{error_context['traceback']}"
+                        )
+                        stats.failed_items += 1
                     
             # Save chunk if not empty
             if tensors:
