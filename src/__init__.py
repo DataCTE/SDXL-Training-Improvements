@@ -42,7 +42,7 @@ from .training import (
     SDXLTrainer,
     DDPMScheduler,
     configure_noise_scheduler,
-    get_karras_scalings,
+    get_karras_sigmas,
     get_sigmas,
     get_scheduler_parameters,
     generate_noise,
