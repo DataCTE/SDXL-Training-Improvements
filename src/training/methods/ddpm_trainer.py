@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Optional
 
 import torch
+from src.core.memory import torch_gc, create_stream_context
 from torch import Tensor
 import torch.nn.functional as F
 
@@ -104,8 +105,13 @@ class DDPMTrainer(TrainingMethod):
                 
             loss = loss.mean()
             
+            # Clean up intermediate tensors
+            del noise, noisy_latents, noise_pred, target
+            torch_gc()
+            
             return {"loss": loss}
             
         except Exception as e:
             logger.error(f"Error computing DDPM loss: {str(e)}")
+            torch_gc()  # Clean up on error
             raise

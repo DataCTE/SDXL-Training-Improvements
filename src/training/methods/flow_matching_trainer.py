@@ -4,6 +4,7 @@ import math
 from typing import Dict, Optional, Tuple
 
 import torch
+from src.core.memory import torch_gc, create_stream_context
 import torch.nn.functional as F
 
 from src.training.trainers.base import TrainingMethod
@@ -203,5 +204,9 @@ class FlowMatchingTrainer(TrainingMethod):
             loss = loss * batch["loss_weights"]
             
         loss = loss.mean()
+        
+        # Clean up intermediate tensors
+        del x0, v_pred, v_true
+        torch_gc()
         
         return {"loss": loss}

@@ -9,7 +9,16 @@ from tqdm.auto import tqdm
 
 from src.core.distributed import is_main_process, get_world_size
 from src.core.logging import WandbLogger, log_metrics
-from src.core.memory.tensor import tensors_to_device_, tensors_match_device, create_stream_context, torch_gc
+from src.core.memory import (
+    tensors_to_device_,
+    tensors_match_device,
+    create_stream_context,
+    torch_gc,
+    setup_memory_optimizations,
+    verify_memory_optimizations,
+    LayerOffloader,
+    LayerOffloadConfig
+)
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
@@ -70,14 +79,44 @@ class SDXLTrainer:
             embedding=DataType.FLOAT_32
         )
         
-        # Move model to device
+        # Setup memory optimizations
+        self.memory_optimized = setup_memory_optimizations(
+            model=self.model,
+            config=config,
+            device=device,
+            batch_size=train_dataloader.batch_size,
+            micro_batch_size=config.training.micro_batch_size
+        )
+        
+        if self.memory_optimized:
+            verify_memory_optimizations(
+                model=self.model,
+                config=config,
+                device=device,
+                logger=logger
+            )
+            
+            # Configure layer offloading if enabled
+            if config.training.memory.enable_24gb_optimizations:
+                self.layer_offloader = LayerOffloader(
+                    model=self.model,
+                    config=LayerOffloadConfig(
+                        enabled=True,
+                        fraction=config.training.memory.layer_offload_fraction,
+                        temp_device=config.training.memory.temp_device,
+                        async_transfer=config.training.memory.enable_async_offloading
+                    ),
+                    device=device
+                )
+        
+        # Move model to device with proper memory handling
         if not tensors_match_device(self.model.state_dict(), device):
             with create_stream_context(torch.cuda.current_stream()):
                 tensors_to_device_(self.model.state_dict(), device)
                 if hasattr(self.optimizer, 'state'):
                     tensors_to_device_(self.optimizer.state, device)
             torch.cuda.current_stream().synchronize()
-            torch_gc()
+        torch_gc()
             
         # Training state
         self.global_step = 0
