@@ -48,13 +48,17 @@ def parse_args():
 
 def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     """Load and configure all required models."""
+    # Initialize device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # Initialize SDXL model
     sdxl_model = StableDiffusionXLModel(ModelType.BASE)
     
-    # Load pipeline components into model
+    # Load pipeline components into model with device placement
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
-        torch_dtype=torch.float32
+        torch_dtype=torch.float32,
+        device_map={"": device}
     )
     
     # Transfer pipeline components to our model
@@ -92,6 +96,9 @@ def main():
         init_process_group(backend="nccl")
         setup_distributed()
     
+    # Initialize device early
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # Setup logging in outputs/logs directory
     output_dir = Path(config.global_config.output_dir)
     log_dir = output_dir / "logs"
@@ -101,11 +108,11 @@ def main():
         filename="train.log"
     )
     
-    # Initialize device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
     if is_main_process():
         logger.info(f"Using device: {device}")
+        if device.type == "cuda":
+            logger.info(f"CUDA Device: {torch.cuda.get_device_name()}")
+            logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(device).total_memory / 1024**3:.1f} GB")
         
     # Load and configure models
     logger.info("Loading models...")
