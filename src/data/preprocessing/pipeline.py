@@ -210,18 +210,22 @@ class PreprocessingPipeline:
 
                     # Move to GPU and apply transforms with proper dtype
                     futures = []
-                for item in processed:
-                    # Convert DALI output to torch tensor with target dtype
-                    tensor = torch.as_tensor(item, dtype=self.dtypes.train_dtype.to_torch_dtype())
-                    future = self.gpu_pool.submit(
-                        self._process_item,
-                        tensor
-                    )
-                    futures.append(future)
+                    for item in processed:
+                        # Convert DALI output to torch tensor with target dtype
+                        tensor = torch.as_tensor(item, dtype=self.dtypes.train_dtype.to_torch_dtype())
+                        future = self.gpu_pool.submit(
+                            self._process_item,
+                            tensor
+                        )
+                        futures.append(future)
 
-                # Get results and put in output queue
-                results = [f.result() for f in futures]
-                self.output_queue.put(results)
+                    # Get results and put in output queue
+                    results = [f.result() for f in futures]
+                    self.output_queue.put(results)
+
+                except Exception as e:
+                    logger.error(f"Error in prefetch worker: {str(e)}")
+                    self.stop_event.set()
 
         except Exception as e:
             logger.error(f"Error in prefetch worker: {str(e)}")
