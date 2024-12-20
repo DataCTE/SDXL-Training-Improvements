@@ -284,7 +284,7 @@ class PreprocessingPipeline:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *_):
         """Context manager exit with cleanup."""
         self.stop_event.set()
         self.input_queue.put(None)
