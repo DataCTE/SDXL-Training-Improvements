@@ -280,11 +280,15 @@ class CacheManager:
         image_files = []
         for ext in image_exts:
             found_files = list(data_dir.glob(f"*{ext}"))
-            # Convert any Windows paths
-            image_files.extend([
-                Path(str(convert_windows_path(f, make_absolute=True)))
-                for f in found_files
-            ])
+            # Convert any Windows paths and handle list inputs
+            for f in found_files:
+                if isinstance(f, (list, tuple)):
+                    # Take first path if given a list
+                    if f:
+                        path = f[0] if isinstance(f[0], (str, Path)) else str(f[0])
+                        image_files.append(Path(str(convert_windows_path(path, make_absolute=True))))
+                else:
+                    image_files.append(Path(str(convert_windows_path(f, make_absolute=True))))
             
         logger.info(f"Found {len(image_files)} images to process")
         
@@ -354,11 +358,28 @@ class CacheManager:
             for i, future in enumerate(futures):
                 try:
                     tensor = future.result()
-                    img_path = chunk[i]
-                    caption_path = img_path.with_suffix(caption_ext)
-                    
-                    # Read caption with error handling
                     try:
+                        img_path = chunk[i]
+                        if isinstance(img_path, (list, tuple)):
+                            # Handle list of paths by taking first valid one
+                            valid_path = None
+                            for p in img_path:
+                                try:
+                                    test_path = Path(str(p))
+                                    if test_path.exists():
+                                        valid_path = test_path
+                                        break
+                                except Exception:
+                                    continue
+                            if valid_path is None:
+                                raise ValueError(f"No valid path found in list: {img_path}")
+                            img_path = valid_path
+                        else:
+                            img_path = Path(str(img_path))
+                
+                        caption_path = img_path.with_suffix(caption_ext)
+                
+                        # Read caption with error handling
                         with open(caption_path, 'r', encoding='utf-8') as f:
                             caption = f.read().strip()
                     except Exception as e:
