@@ -437,24 +437,24 @@ class PreprocessingPipeline:
                         
                 try:
                     with torch.cuda.stream(compute_stream):
-                    # Process tensor with memory optimizations
-                    processed = self._apply_transforms(item)
-                
-                    # Replace with optimized tensor if needed
-                    if hasattr(processed, 'data_ptr'):
-                        replace_tensors_(item, processed)
+                        # Process tensor with memory optimizations
+                        processed = self._apply_transforms(item)
                     
-                    # Move back to CPU if needed, with proper cleanup
-                    if self.cache_dir:
-                        with create_stream_context(compute_stream):
-                            # Only transfer if device mismatch
-                            if not device_equals(processed.device, torch.device('cpu')):
-                                processed = processed.cpu()
-                                torch_gc()
-                            
-                            # Pin memory for faster transfers if enabled
-                            if self.use_pinned_memory:
-                                pin_tensor_(processed)
+                        # Replace with optimized tensor if needed
+                        if hasattr(processed, 'data_ptr'):
+                            replace_tensors_(item, processed)
+                        
+                        # Move back to CPU if needed, with proper cleanup
+                        if self.cache_dir:
+                            with create_stream_context(compute_stream):
+                                # Only transfer if device mismatch
+                                if not device_equals(processed.device, torch.device('cpu')):
+                                    processed = processed.cpu()
+                                    torch_gc()
+                                
+                                # Pin memory for faster transfers if enabled
+                                if self.use_pinned_memory:
+                                    pin_tensor_(processed)
                             
                     return {"tensor": processed}
 
