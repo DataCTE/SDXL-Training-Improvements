@@ -255,7 +255,9 @@ class SDXLDataset(Dataset):
             # Move to GPU with channels-last optimization if using CUDA
             if pinned_buffer is not None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                tensors_to_device_(pinned_buffer, device, non_blocking=True)
+                # Verify device before transfer
+                if not device_equals(pinned_buffer.device, device):
+                    tensors_to_device_(pinned_buffer, device, non_blocking=True)
                 pixel_values = pinned_buffer.to(memory_format=torch.channels_last)
                 
                 if torch.cuda.is_available():
