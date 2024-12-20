@@ -4,13 +4,14 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
-from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from ...data.config import Config
 import torch
 import torch.cuda
 from torch.cuda.amp import autocast
+from src.core.types import DataType, ModelWeightDtypes
 from src.core.memory.tensor import (
     tensors_to_device_,
     create_stream_context,
@@ -43,7 +44,8 @@ class PreprocessingPipeline:
         num_io_workers: int = 2,
         prefetch_factor: int = 2,
         device_ids: Optional[List[int]] = None,
-        use_pinned_memory: bool = True
+        use_pinned_memory: bool = True,
+        dtypes: Optional[ModelWeightDtypes] = None
     ):
         """Initialize preprocessing pipeline.
         
@@ -63,6 +65,23 @@ class PreprocessingPipeline:
         self.prefetch_factor = prefetch_factor
         self.device_ids = device_ids or list(range(torch.cuda.device_count()))
         self.use_pinned_memory = use_pinned_memory
+        
+        # Setup default dtypes if not provided
+        self.dtypes = dtypes or ModelWeightDtypes(
+            train_dtype=DataType.FLOAT_32,
+            fallback_train_dtype=DataType.FLOAT_16,
+            unet=DataType.FLOAT_32,
+            prior=DataType.FLOAT_32,
+            text_encoder=DataType.FLOAT_32,
+            text_encoder_2=DataType.FLOAT_32,
+            vae=DataType.FLOAT_32,
+            effnet_encoder=DataType.FLOAT_32,
+            decoder=DataType.FLOAT_32,
+            decoder_text_encoder=DataType.FLOAT_32,
+            decoder_vqgan=DataType.FLOAT_32,
+            lora=DataType.FLOAT_32,
+            embedding=DataType.FLOAT_32
+        )
         
         # Initialize cache paths and manager
         self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
