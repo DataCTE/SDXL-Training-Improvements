@@ -7,18 +7,15 @@ from src.core.memory import torch_gc, create_stream_context
 from torch import Tensor
 import torch.nn.functional as F
 
-from src.training.trainers.base import TrainingMethod
+from src.training.methods.base import BaseTrainingMethod
 from src.training.schedulers.noise_scheduler import get_add_time_ids
 
 logger = logging.getLogger(__name__)
 
-class DDPMTrainer(TrainingMethod):
+class DDPMTrainer(BaseTrainingMethod):
     """SDXL trainer using DDPM method with v-prediction."""
     
-    @property
-    def name(self) -> str:
-        """Get training method name."""
-        return "ddpm"
+    name = "ddpm"  # Class attribute for registration
 
     def compute_loss(
         self,

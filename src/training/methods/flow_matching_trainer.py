@@ -7,17 +7,15 @@ import torch
 from src.core.memory import torch_gc, create_stream_context
 import torch.nn.functional as F
 
-from src.training.trainers.base import TrainingMethod
+from src.training.methods.base import BaseTrainingMethod
 from src.training.schedulers import get_add_time_ids
 
 logger = logging.getLogger(__name__)
 
-class FlowMatchingTrainer(TrainingMethod):
+class FlowMatchingTrainer(BaseTrainingMethod):
     """SDXL trainer using Flow Matching method."""
     
-    @property
-    def name(self) -> str:
-        return "flow_matching"
+    name = "flow_matching"  # Class attribute for registration
 
     def sample_logit_normal(
         self,

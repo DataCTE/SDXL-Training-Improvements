@@ -28,23 +28,7 @@ logger = logging.getLogger(__name__)
 class TrainerFactory:
     """Factory class for creating SDXL trainers."""
     
-    _trainer_map = {
-        "ddpm": DDPMTrainer,
-        "flow_matching": FlowMatchingTrainer
-    }
-    
-    @classmethod
-    def register_trainer(cls, name: str, trainer_cls: Type[TrainingMethod]) -> None:
-        """Register a new training method.
-        
-        Args:
-            name: Name of the training method
-            trainer_cls: Trainer class implementation
-        """
-        cls._trainer_map[name.lower()] = trainer_cls
-        logger.info(f"Registered trainer: {trainer_cls.__name__}")
-        
-    @classmethod
+    @staticmethod
     def create_trainer(
         cls,
         config: Config,
@@ -72,15 +56,9 @@ class TrainerFactory:
         Raises:
             ValueError: If training method is not registered
         """
-        # Get trainer class
+        # Get trainer class using metaclass registry
         method = config.training.method.lower()
-        if method not in cls._trainer_map:
-            raise ValueError(
-                f"Unknown training method: {method}. "
-                f"Available methods: {list(cls._trainer_map.keys())}"
-            )
-        
-        trainer_cls = cls._trainer_map[method]
+        trainer_cls = BaseTrainingMethod.get_method(method)
         logger.info(f"Creating trainer: {trainer_cls.__name__}")
         
         # Create training method instance
