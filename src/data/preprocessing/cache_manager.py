@@ -301,34 +301,51 @@ class CacheManager:
             # Process images in parallel
             futures = []
             for img_path in chunk:
+                if str(img_path) in self.cache_index["files"]:
+                    stats.skipped_items += 1
+                    logger.debug(f"Skipping already cached image: {img_path}")
+                    continue
+                
+                caption_path = img_path.with_suffix(caption_ext)
+                if not caption_path.exists():
+                    error_context = {
+                        'image_path': str(img_path),
+                        'caption_path': str(caption_path),
+                        'stage': CacheStage.INITIALIZATION.name
+                    }
+                    logger.error(
+                        f"Missing caption file:\n"
+                        f"Image path: {error_context['image_path']}\n"
+                        f"Caption path: {error_context['caption_path']}\n"
+                        f"Stage: {error_context['stage']}"
+                    )
+                    stats.failed_items += 1
+                    continue
+                
                 try:
-                    if str(img_path) in self.cache_index["files"]:
-                        stats.skipped_items += 1
-                        logger.debug(f"Skipping already cached image: {img_path}")
-                        continue
-                    
-                    caption_path = img_path.with_suffix(caption_ext)
-                    if not caption_path.exists():
-                        error_context = {
-                            'image_path': str(img_path),
-                            'caption_path': str(caption_path),
-                            'stage': CacheStage.INITIALIZATION.name
-                        }
-                        logger.error(
-                            f"Missing caption file:\n"
-                            f"Image path: {error_context['image_path']}\n"
-                            f"Caption path: {error_context['caption_path']}\n"
-                            f"Stage: {error_context['stage']}"
-                        )
-                        stats.failed_items += 1
-                        continue
-                    
-                futures.append(
-                    self.image_pool.submit(
-                        self._process_image, 
-                        img_path
-                    ) if workers > 1 else self._process_image(img_path)
-                )
+                    futures.append(
+                        self.image_pool.submit(
+                            self._process_image, 
+                            img_path
+                        ) if workers > 1 else self._process_image(img_path)
+                    )
+                except Exception as e:
+                    error_context = {
+                        'image_path': str(img_path),
+                        'error_type': type(e).__name__,
+                        'error_msg': str(e),
+                        'traceback': traceback.format_exc(),
+                        'stage': CacheStage.INITIALIZATION.name
+                    }
+                    logger.error(
+                        f"Error submitting processing job:\n"
+                        f"Image path: {error_context['image_path']}\n"
+                        f"Error type: {error_context['error_type']}\n"
+                        f"Error message: {error_context['error_msg']}\n"
+                        f"Stage: {error_context['stage']}\n"
+                        f"Traceback:\n{error_context['traceback']}"
+                    )
+                    stats.failed_items += 1
                 
             # Collect results
             tensors = []
