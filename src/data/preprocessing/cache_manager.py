@@ -5,6 +5,13 @@ from src.utils.paths import convert_windows_path
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+from src.core.memory.tensor import (
+    tensors_record_stream,
+    pin_tensor_,
+    unpin_tensor_,
+    device_equals,
+    replace_tensors_
+)
 import hashlib
 import json
 import torch
