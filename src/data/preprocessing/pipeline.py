@@ -345,6 +345,16 @@ class PreprocessingPipeline:
             
         try:
             # Validate input tensor
+            if not torch.cuda.is_available():
+                raise GPUProcessingError(
+                    "CUDA device not available for tensor processing",
+                    context={
+                        "device_type": "cpu",
+                        "operation": "validate_device",
+                        "tensor_id": id(item)
+                    }
+                )
+
             if item.dim() != 4:
                 raise TensorValidationError(
                     f"Invalid tensor dimensions",
@@ -471,8 +481,27 @@ class PreprocessingPipeline:
                     logger.error(f"Error processing item: {str(e)}")
                     raise
         except Exception as e:
-            logger.error(f"Error in _process_item: {str(e)}")
-            raise
+            if isinstance(e, (TensorValidationError, DtypeError, StreamError, MemoryError)):
+                raise PreprocessingError(
+                    "Failed to process tensor item",
+                    context={
+                        "error_type": e.__class__.__name__,
+                        "original_error": str(e),
+                        "tensor_id": id(item) if isinstance(item, torch.Tensor) else None,
+                        "device": str(torch.cuda.current_device()) if torch.cuda.is_available() else "cpu"
+                    }
+                ) from e
+            elif isinstance(e, Exception):
+                raise GPUProcessingError(
+                    "GPU processing failed",
+                    context={
+                        "device_id": torch.cuda.current_device() if torch.cuda.is_available() else None,
+                        "cuda_version": torch.version.cuda if torch.cuda.is_available() else None,
+                        "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                        "operation": "_process_item",
+                        "original_error": str(e)
+                    }
+                ) from e
 
     def _apply_transforms(self, tensor: torch.Tensor) -> torch.Tensor:
         """Apply transforms using custom CUDA kernels.
