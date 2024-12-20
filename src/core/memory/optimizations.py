@@ -18,6 +18,7 @@ def setup_memory_optimizations(
     batch_size: Optional[int] = None,
     micro_batch_size: Optional[int] = None
 ) -> bool:
+    """Setup memory and throughput optimizations."""
     """Setup memory optimizations for training.
     
     Args:
@@ -43,10 +44,14 @@ def setup_memory_optimizations(
         if config.training.gradient_checkpointing:
             model.enable_gradient_checkpointing()
 
-        # Configure automatic mixed precision
+        # Configure automatic mixed precision and throughput optimizations
         if config.training.mixed_precision:
-            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+            if torch.cuda.is_available():
+                if torch.cuda.is_bf16_supported():
+                    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cudnn.deterministic = False
 
         # Setup 24GB VRAM optimizations if enabled
         if config.training.memory.enable_24gb_optimizations:

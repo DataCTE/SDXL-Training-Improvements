@@ -17,7 +17,8 @@ from src.core.memory import (
     setup_memory_optimizations,
     verify_memory_optimizations,
     LayerOffloader,
-    LayerOffloadConfig
+    LayerOffloadConfig,
+    ThroughputMonitor
 )
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
@@ -94,17 +95,24 @@ class SDXLTrainer:
             torch.cuda.current_stream().synchronize()
         torch_gc()
             
-        # Training state
+        # Training state and monitoring
         self.global_step = 0
         self.epoch = 0
         self.max_steps = config.training.max_train_steps or (
             len(train_dataloader) * config.training.num_epochs
         )
+        self.throughput_monitor = ThroughputMonitor()
+        
+        # Setup gradient accumulation
+        self.gradient_accumulation_steps = (
+            batch_size // micro_batch_size if micro_batch_size else 1
+        )
 
     def train_step(
         self,
         batch: Dict[str, torch.Tensor],
-        generator: Optional[torch.Generator] = None
+        generator: Optional[torch.Generator] = None,
+        accumulation_step: int = 0
     ) -> Dict[str, float]:
         """Execute single training step.
         
@@ -122,18 +130,19 @@ class SDXLTrainer:
             generator=generator
         )
         
-        # Backpropagate
-        loss_dict["loss"].backward()
+        # Scale loss for gradient accumulation
+        loss = loss_dict["loss"] / self.gradient_accumulation_steps
+        loss.backward()
         
-        # Gradient clipping
-        if self.config.training.max_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
-                self.unet.parameters(),
-                self.config.training.max_grad_norm
-            )
-            
-        self.optimizer.step()
-        self.optimizer.zero_grad()
+        # Only update on last accumulation step
+        if accumulation_step == self.gradient_accumulation_steps - 1:
+            if self.config.training.max_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.unet.parameters(),
+                    self.config.training.max_grad_norm
+                )
+            self.optimizer.step()
+            self.optimizer.zero_grad()
         
         return {k: v.detach().item() for k, v in loss_dict.items()}
         
@@ -160,9 +169,18 @@ class SDXLTrainer:
             if self.global_step >= self.max_steps:
                 break
                 
-            # Training step
+            # Process micro-batches
             try:
-                step_metrics = self.train_step(batch)
+                micro_batches = self._prepare_micro_batches(batch)
+                step_metrics = {}
+                
+                for i, micro_batch in enumerate(micro_batches):
+                    metrics = self.train_step(micro_batch, accumulation_step=i)
+                    step_metrics.update(metrics)
+                
+                # Update throughput monitoring
+                self.throughput_monitor.update(batch["model_input"].shape[0])
+                step_metrics.update(self.throughput_monitor.get_metrics())
             except RuntimeError as e:
                 if "out of memory" in str(e):
                     logger.error(f"GPU OOM at step {self.global_step}. Attempting recovery...")
@@ -245,6 +263,30 @@ class SDXLTrainer:
                 
         return metrics
         
+    def _prepare_micro_batches(
+        self,
+        batch: Dict[str, torch.Tensor]
+    ) -> List[Dict[str, torch.Tensor]]:
+        """Split batch into micro-batches for gradient accumulation."""
+        if self.gradient_accumulation_steps == 1:
+            return [batch]
+            
+        micro_batches = []
+        batch_size = batch["model_input"].shape[0]
+        micro_batch_size = batch_size // self.gradient_accumulation_steps
+        
+        for i in range(self.gradient_accumulation_steps):
+            start_idx = i * micro_batch_size
+            end_idx = start_idx + micro_batch_size
+            
+            micro_batch = {
+                k: v[start_idx:end_idx] if torch.is_tensor(v) else v
+                for k, v in batch.items()
+            }
+            micro_batches.append(micro_batch)
+            
+        return micro_batches
+
     def _setup_memory_management(
         self,
         batch_size: Optional[int] = None,
