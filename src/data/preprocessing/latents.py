@@ -179,54 +179,108 @@ class LatentPreprocessor:
         self,
         dataset: Dataset,
         batch_size: int = 8,
-        cache: bool = True
+        cache: bool = True,
+        compression: Optional[str] = "zstd"
     ) -> Dataset:
-        """Preprocess and cache embeddings for a dataset."""
-        if cache and self.text_cache_path.exists() and self.vae_cache_path.exists():
-            logger.info("Loading cached embeddings...")
-            text_embeddings = torch.load(self.text_cache_path)
-            vae_latents = torch.load(self.vae_cache_path)
+        """Preprocess and cache embeddings for a dataset.
+        
+        Args:
+            dataset: Input dataset
+            batch_size: Batch size for processing
+            cache: Whether to use disk caching
+            compression: Compression format ("zstd", "gzip", or None)
             
-            dataset = dataset.add_column("prompt_embeds", text_embeddings["prompt_embeds"])
-            dataset = dataset.add_column("pooled_prompt_embeds", text_embeddings["pooled_prompt_embeds"]) 
-            dataset = dataset.add_column("model_input", vae_latents["model_input"])
-            
-            return dataset
+        Returns:
+            Dataset with added embeddings
+        """
+        # Try loading from cache first
+        if cache and self.use_cache:
+            try:
+                if self.text_cache_path.exists() and self.vae_cache_path.exists():
+                    logger.info("Loading cached embeddings...")
+                    text_embeddings = torch.load(self.text_cache_path)
+                    vae_latents = torch.load(self.vae_cache_path)
+                    
+                    # Verify cache contents
+                    required_keys = {
+                        "text": ["prompt_embeds", "pooled_prompt_embeds"],
+                        "vae": ["model_input"]
+                    }
+                    
+                    if all(k in text_embeddings for k in required_keys["text"]) and \
+                       all(k in vae_latents for k in required_keys["vae"]):
+                           
+                        dataset = dataset.add_column("prompt_embeds", text_embeddings["prompt_embeds"])
+                        dataset = dataset.add_column("pooled_prompt_embeds", text_embeddings["pooled_prompt_embeds"]) 
+                        dataset = dataset.add_column("model_input", vae_latents["model_input"])
+                        
+                        logger.info("Successfully loaded cached embeddings")
+                        return dataset
+                    else:
+                        logger.warning("Cache files exist but appear corrupted, recomputing...")
+                        
+            except Exception as e:
+                logger.warning(f"Error loading cache: {str(e)}, recomputing...")
 
+        # Process text embeddings
         logger.info("Computing text embeddings...")
         text_embeddings = []
         for idx in tqdm(range(0, len(dataset), batch_size)):
-            batch = dataset[idx:idx + batch_size]
-            embeddings = self.encode_prompt(
-                batch["text"],
-                proportion_empty_prompts=self.config.data.proportion_empty_prompts
-            )
-            text_embeddings.append(embeddings)
+            try:
+                batch = dataset[idx:idx + batch_size]
+                embeddings = self.encode_prompt(
+                    batch["text"],
+                    proportion_empty_prompts=self.config.data.proportion_empty_prompts
+                )
+                text_embeddings.append(embeddings)
+            except Exception as e:
+                logger.error(f"Error processing text batch {idx}: {str(e)}")
+                continue
 
-        # Combine batches
+        # Combine text embedding batches
         text_embeddings = {
             "prompt_embeds": torch.cat([e["prompt_embeds"] for e in text_embeddings]),
             "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in text_embeddings])
         }
 
+        # Process VAE latents
         logger.info("Computing VAE latents...")
         vae_latents = []
         for idx in tqdm(range(0, len(dataset), batch_size)):
-            batch = dataset[idx:idx + batch_size]
-            latents = self.encode_images(batch["pixel_values"], batch_size=batch_size)
-            vae_latents.append(latents)
+            try:
+                batch = dataset[idx:idx + batch_size]
+                latents = self.encode_images(batch["pixel_values"], batch_size=batch_size)
+                vae_latents.append(latents)
+            except Exception as e:
+                logger.error(f"Error processing VAE batch {idx}: {str(e)}")
+                continue
 
         vae_latents = {
             "model_input": torch.cat([l["model_input"] for l in vae_latents])
         }
 
-        # Cache results
-        if cache:
-            logger.info("Caching embeddings...")
-            torch.save(text_embeddings, self.text_cache_path)
-            torch.save(vae_latents, self.vae_cache_path)
+        # Cache results with compression
+        if cache and self.use_cache:
+            logger.info("Caching embeddings to disk...")
+            try:
+                # Create cache directory if needed
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save with optional compression
+                if compression == "zstd":
+                    torch.save(text_embeddings, self.text_cache_path, _use_new_zipfile_serialization=True)
+                    torch.save(vae_latents, self.vae_cache_path, _use_new_zipfile_serialization=True)
+                else:
+                    torch.save(text_embeddings, self.text_cache_path)
+                    torch.save(vae_latents, self.vae_cache_path)
+                    
+                logger.info(f"Successfully cached embeddings to {self.cache_dir}")
+                
+            except Exception as e:
+                logger.error(f"Error saving cache: {str(e)}")
+                # Continue even if caching fails
 
-        # Add to dataset
+        # Add processed embeddings to dataset
         dataset = dataset.add_column("prompt_embeds", text_embeddings["prompt_embeds"])
         dataset = dataset.add_column("pooled_prompt_embeds", text_embeddings["pooled_prompt_embeds"])
         dataset = dataset.add_column("model_input", vae_latents["model_input"])
