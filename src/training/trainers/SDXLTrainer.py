@@ -20,6 +20,8 @@ from src.core.memory import (
     LayerOffloadConfig,
     ThroughputMonitor
 )
+from typing import Dict, List, Optional, Union
+import torch
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
@@ -110,22 +112,25 @@ class SDXLTrainer:
         self.device = device
         self.wandb_logger = wandb_logger
         
-        # Configure model dtypes
+        # Configure model dtypes based on config
+        base_dtype = DataType.from_str(config.model.dtype)
+        fallback_dtype = DataType.from_str(config.model.fallback_dtype)
+        
         self.model_dtypes = ModelWeightDtypes(
-            train_dtype=DataType.FLOAT_32,
-            fallback_train_dtype=DataType.FLOAT_16,
-            unet=DataType.FLOAT_32,
-            prior=DataType.FLOAT_32,
-            text_encoder=DataType.FLOAT_32,
-            text_encoder_2=DataType.FLOAT_32,
-            text_encoder_3=DataType.FLOAT_32,
-            vae=DataType.FLOAT_32,
-            effnet_encoder=DataType.FLOAT_32,
-            decoder=DataType.FLOAT_32,
-            decoder_text_encoder=DataType.FLOAT_32,
-            decoder_vqgan=DataType.FLOAT_32,
-            lora=DataType.FLOAT_32,
-            embedding=DataType.FLOAT_32
+            train_dtype=base_dtype,
+            fallback_train_dtype=fallback_dtype,
+            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
+            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
+            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
+            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
+            text_encoder_3=DataType.from_str(config.model.text_encoder_3_dtype or config.model.dtype),
+            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
+            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
+            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
+            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
+            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
+            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
+            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
         )
         
         # Initialize memory management
