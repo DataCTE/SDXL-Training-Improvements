@@ -9,7 +9,6 @@ from typing import Dict, Optional
 import torch
 from diffusers import AutoencoderKL, StableDiffusionXLPipeline
 from transformers import CLIPTokenizer, CLIPTextModel
-from torch.utils.data import DataLoader
 
 # Local imports - core functionality
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
