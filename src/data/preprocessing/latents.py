@@ -1,5 +1,46 @@
 """Latent preprocessing utilities for SDXL training."""
+import traceback
 from pathlib import Path
+from dataclasses import dataclass
+from enum import Enum, auto
+
+class LatentPreprocessingError(Exception):
+    """Base exception for latent preprocessing errors."""
+    pass
+
+class TextEncodingError(LatentPreprocessingError):
+    """Raised when text encoding fails."""
+    pass
+
+class VAEEncodingError(LatentPreprocessingError):
+    """Raised when VAE encoding fails."""
+    pass
+
+class CacheError(LatentPreprocessingError):
+    """Raised when cache operations fail."""
+    pass
+
+class ValidationError(LatentPreprocessingError):
+    """Raised when tensor validation fails."""
+    pass
+
+class ProcessingStage(Enum):
+    """Enum for tracking processing stages."""
+    TEXT_ENCODING = auto()
+    VAE_ENCODING = auto()
+    CACHING = auto()
+    VALIDATION = auto()
+
+@dataclass
+class ProcessingStats:
+    """Statistics for preprocessing operations."""
+    total_samples: int = 0
+    successful_samples: int = 0
+    failed_samples: int = 0
+    empty_captions: int = 0
+    invalid_tensors: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
 from src.core.logging.logging import setup_logging
 import torch
 from typing import Dict, List, Optional, Union
@@ -63,6 +104,28 @@ class LatentPreprocessor:
             if config.global_config.cache.clear_cache_on_start:
                 self.clear_cache()
 
+    def _validate_tensor(self, tensor: torch.Tensor, name: str, expected_dims: int, 
+                        expected_shape: Optional[tuple] = None) -> None:
+        """Validate tensor properties."""
+        if not isinstance(tensor, torch.Tensor):
+            raise ValidationError(f"{name} is {type(tensor)}, expected torch.Tensor")
+        
+        if tensor.dim() != expected_dims:
+            raise ValidationError(
+                f"{name} has {tensor.dim()} dimensions, expected {expected_dims}"
+            )
+            
+        if expected_shape and tensor.shape != expected_shape:
+            raise ValidationError(
+                f"{name} has shape {tensor.shape}, expected {expected_shape}"
+            )
+            
+        if torch.isnan(tensor).any():
+            raise ValidationError(f"{name} contains NaN values")
+            
+        if torch.isinf(tensor).any():
+            raise ValidationError(f"{name} contains infinite values")
+
     def encode_prompt(
         self,
         prompt_batch: List[str],
@@ -81,16 +144,48 @@ class LatentPreprocessor:
         Returns:
             Dict with prompt_embeds and pooled_prompt_embeds
         """
-        # Process prompts
-        captions = []
-        for caption in prompt_batch:
-            if torch.rand(1).item() < proportion_empty_prompts:
-                captions.append("")
-            elif isinstance(caption, str):
-                captions.append(caption)
-            else:
-                # Take random caption if multiple provided during training
-                captions.append(torch.randint(0, len(caption), (1,)).item() if is_train else caption[0])
+        try:
+            # Process prompts with validation
+            captions = []
+            stats = ProcessingStats()
+            stats.total_samples = len(prompt_batch)
+            
+            for idx, caption in enumerate(prompt_batch):
+                try:
+                    if torch.rand(1).item() < proportion_empty_prompts:
+                        captions.append("")
+                        stats.empty_captions += 1
+                        continue
+                        
+                    if isinstance(caption, str):
+                        if not caption.strip():
+                            logger.warning(f"Empty caption at index {idx}")
+                            stats.empty_captions += 1
+                            captions.append("")
+                        else:
+                            captions.append(caption)
+                            stats.successful_samples += 1
+                    elif isinstance(caption, (list, tuple)):
+                        if is_train:
+                            selected_idx = torch.randint(0, len(caption), (1,)).item()
+                            selected_caption = caption[selected_idx]
+                        else:
+                            selected_caption = caption[0]
+                            
+                        if not selected_caption.strip():
+                            logger.warning(f"Empty selected caption at index {idx}")
+                            stats.empty_captions += 1
+                            captions.append("")
+                        else:
+                            captions.append(selected_caption)
+                            stats.successful_samples += 1
+                    else:
+                        raise ValueError(f"Invalid caption type at index {idx}: {type(caption)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing caption at index {idx}: {str(e)}")
+                    stats.failed_samples += 1
+                    captions.append("")
 
         # Tokenize prompts
         tokens_1 = self.tokenizer_one(
@@ -148,6 +243,9 @@ class LatentPreprocessor:
         pixel_values: torch.Tensor,
         batch_size: int = 8
     ) -> Dict[str, torch.Tensor]:
+        """Encode images to VAE latents with enhanced error handling."""
+        stats = ProcessingStats()
+        stats.total_samples = len(pixel_values) if isinstance(pixel_values, torch.Tensor) else len(list(pixel_values))
         """Encode images to VAE latents with optimized memory handling."""
         if not isinstance(pixel_values, torch.Tensor):
             pixel_values = torch.stack(list(pixel_values))
@@ -203,7 +301,8 @@ class LatentPreprocessor:
         dataset: Dataset,
         batch_size: int = 8,
         cache: bool = True,
-        compression: Optional[str] = "zstd"
+        compression: Optional[str] = "zstd",
+        max_retries: int = 3
     ) -> Dataset:
         """Preprocess and cache embeddings for a dataset.
         
