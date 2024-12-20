@@ -74,6 +74,10 @@ class CacheManager:
     def _process_image(self, image_path: Path) -> Optional[torch.Tensor]:
         """Process single image with optimized memory handling and CUDA streams."""
         try:
+            # Create streams for pipelined operations
+            compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            
             # Use NVIDIA DALI for faster image loading if available
             try:
                 import nvidia.dali as dali
@@ -96,19 +100,36 @@ class CacheManager:
                     )
                     pipe.set_outputs(normalized)
                 pipe.build()
-                tensor = pipe.run()[0].as_tensor()
+                
+                # Use compute stream for DALI processing
+                if compute_stream is not None:
+                    with torch.cuda.stream(compute_stream):
+                        tensor = pipe.run()[0].as_tensor()
+                else:
+                    tensor = pipe.run()[0].as_tensor()
             else:
                 # Fallback to PIL with optimizations
                 image = Image.open(image_path).convert('RGB')
                 tensor = torch.from_numpy(np.array(image)).float() / 255.0
                 tensor = tensor.permute(2, 0, 1)  # CHW format
                 
-            # Optimize memory format
-            tensor = tensor.contiguous(memory_format=torch.channels_last)
-            
-            # Pin memory if CUDA is available
-            if torch.cuda.is_available():
-                tensor = tensor.pin_memory()
+            # Optimize memory format and transfer
+            if transfer_stream is not None:
+                with torch.cuda.stream(transfer_stream):
+                    tensor = tensor.contiguous(memory_format=torch.channels_last)
+                    if torch.cuda.is_available():
+                        tensor = tensor.pin_memory()
+                        tensors_record_stream(transfer_stream, tensor)
+            else:
+                tensor = tensor.contiguous(memory_format=torch.channels_last)
+                if torch.cuda.is_available():
+                    tensor = tensor.pin_memory()
+                    
+            # Synchronize streams if used
+            if compute_stream is not None:
+                compute_stream.synchronize()
+            if transfer_stream is not None:
+                transfer_stream.synchronize()
                 
             return tensor
         except Exception as e:
@@ -126,7 +147,18 @@ class CacheManager:
             return False
             
         try:
-            return self.cache_manager._save_chunk(batch_id, tensors, metadata)
+            # Optimize tensors before saving
+            optimized_tensors = []
+            for tensor in tensors:
+                # Convert to channels last format
+                if tensor.dim() == 4:  # [B, C, H, W]
+                    tensor = tensor.contiguous(memory_format=torch.channels_last)
+                # Pin memory if using CUDA
+                if torch.cuda.is_available():
+                    tensor = tensor.pin_memory()
+                optimized_tensors.append(tensor)
+                
+            return self.cache_manager._save_chunk(batch_id, optimized_tensors, metadata)
         except Exception as e:
             logger.error(f"Error saving batch {batch_id}: {str(e)}")
             return False
