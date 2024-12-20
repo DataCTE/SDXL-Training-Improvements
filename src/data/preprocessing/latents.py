@@ -177,10 +177,19 @@ class LatentPreprocessor:
                             
                     finally:
                         # Ensure streams are properly synchronized and destroyed
-                        compute_stream.synchronize()
-                        transfer_stream.synchronize()
+                        if compute_stream is not None:
+                            compute_stream.synchronize()
+                        if transfer_stream is not None:
+                            transfer_stream.synchronize()
+                            
+                        # Clean up tensors
+                        if hasattr(batch_latents, 'detach'):
+                            batch_latents = batch_latents.detach()
+                            
+                        # Delete streams explicitly
                         del compute_stream
                         del transfer_stream
+                        torch.cuda.empty_cache()
                 else:
                     batch_latents = self.vae.encode(batch).latent_dist.sample()
                     batch_latents = batch_latents * self.vae.config.scaling_factor

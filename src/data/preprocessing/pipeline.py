@@ -76,6 +76,9 @@ class PreprocessingPipeline:
                 cache_dir=self.cache_dir,
                 compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
             )
+            
+        # Initialize config reference for _save_processed_batch
+        self.config = config
 
         # Initialize queues
         self.input_queue = Queue(maxsize=prefetch_factor)
