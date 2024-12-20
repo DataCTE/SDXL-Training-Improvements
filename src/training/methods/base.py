@@ -1,5 +1,5 @@
 """Base classes for SDXL training methods."""
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from typing import Dict, Optional, Type
 
 import torch
@@ -8,7 +8,7 @@ from diffusers import DDPMScheduler
 
 from src.data.config import Config
 
-class TrainingMethodMeta(type):
+class TrainingMethodMeta(ABCMeta):
     """Metaclass for training methods to handle registration."""
     
     _methods: Dict[str, Type['TrainingMethod']] = {}
@@ -30,7 +30,7 @@ class TrainingMethodMeta(type):
             )
         return mcs._methods[name]
 
-class TrainingMethod(ABC, metaclass=TrainingMethodMeta):
+class TrainingMethod(metaclass=TrainingMethodMeta):
     """Abstract base class for SDXL training methods."""
     
     name: str = None  # Must be defined by subclasses
