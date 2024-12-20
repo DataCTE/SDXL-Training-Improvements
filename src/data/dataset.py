@@ -53,23 +53,38 @@ class AspectBucketDataset(Dataset):
             tag_weighter: Optional tag weighter
             is_train: Whether this is training data
         """
-        # Setup memory optimizations first
-        if torch.cuda.is_available():
-            setup_memory_optimizations(
-                model=None,
-                config=config,
-                device=torch.device("cuda"),
-                batch_size=config.training.batch_size
-            )
-        # Convert and validate paths for WSL/Windows compatibility
-        converted_paths = []
-        for path in image_paths:
-            converted = convert_windows_path(path, make_absolute=True)
-            if not os.path.exists(str(converted)):
-                logger.warning(f"Path does not exist after conversion: {path} -> {converted}")
-            else:
-                converted_paths.append(str(converted))
-        image_paths = converted_paths
+        # Setup memory optimizations and validate paths
+        try:
+            if torch.cuda.is_available():
+                success = setup_memory_optimizations(
+                    model=None,
+                    config=config,
+                    device=torch.device("cuda"),
+                    batch_size=config.training.batch_size
+                )
+                if not success:
+                    logger.warning("Memory optimizations setup failed, continuing with defaults")
+                    
+            # Convert and validate paths with detailed error tracking
+            converted_paths = []
+            for path in image_paths:
+                try:
+                    converted = convert_windows_path(path, make_absolute=True)
+                    if not os.path.exists(str(converted)):
+                        logger.warning(f"Path does not exist after conversion: {path} -> {converted}")
+                        continue
+                    converted_paths.append(str(converted))
+                except Exception as e:
+                    logger.error(f"Error converting path {path}: {str(e)}")
+                    
+            if not converted_paths:
+                raise RuntimeError("No valid image paths found after conversion")
+                
+            image_paths = converted_paths
+            
+        except Exception as e:
+            logger.error(f"Error during initialization: {str(e)}")
+            raise
         """SDXL Dataset with bucketing and aspect ratio preservation.
         
         Args:
@@ -104,14 +119,25 @@ class AspectBucketDataset(Dataset):
             transforms.Normalize([0.5], [0.5])
         ])
         
-        # Setup cache manager if enabled
+        # Setup cache manager with proper error handling
         self.cache_manager = None
         if config.global_config.cache.use_cache:
-            from .preprocessing.cache_manager import CacheManager
-            self.cache_manager = CacheManager(
-                cache_dir=config.global_config.cache.cache_dir,
-                compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
-            )
+            try:
+                from .preprocessing.cache_manager import CacheManager
+                cache_dir = convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True)
+                compression = getattr(config.global_config.cache, 'compression', 'zstd')
+                
+                self.cache_manager = CacheManager(
+                    cache_dir=cache_dir,
+                    compression=compression,
+                    num_proc=config.global_config.cache.num_workers if hasattr(config.global_config.cache, 'num_workers') else None,
+                    chunk_size=config.global_config.cache.chunk_size if hasattr(config.global_config.cache, 'chunk_size') else 1000,
+                    verify_hashes=config.global_config.cache.verify_hashes if hasattr(config.global_config.cache, 'verify_hashes') else True
+                )
+                logger.info(f"Cache manager initialized with directory: {cache_dir}")
+            except Exception as e:
+                logger.error(f"Failed to initialize cache manager: {str(e)}")
+                logger.warning("Continuing without caching enabled")
             
         # Initialize tag weighter if enabled but not provided
         if self.tag_weighter is None and config.tag_weighting.enable_tag_weighting:
@@ -194,19 +220,40 @@ class AspectBucketDataset(Dataset):
             - target_size: Target size after bucketing
             - loss_weight: Optional tag-based loss weight
         """
-        # Try loading from cache first
+        # Try loading from cache with proper error handling and memory optimization
         if self.cache_manager is not None:
-            cached_item = self.cache_manager.get_cached_item(self.image_paths[idx])
-            if cached_item is not None:
-                tensor, caption = cached_item
-                return {
-                    "pixel_values": tensor,
-                    "text": caption,
-                    "original_size": tensor.shape[-2:],
-                    "crop_top_left": (0, 0),  # Cached items are already processed
-                    "target_size": tensor.shape[-2:],
-                    "loss_weight": self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
-                }
+            try:
+                cached_item = self.cache_manager.get_cached_item(self.image_paths[idx])
+                if cached_item is not None:
+                    tensor, caption = cached_item
+                    
+                    # Validate cached tensor
+                    if not isinstance(tensor, torch.Tensor):
+                        raise ValueError(f"Invalid cached tensor type: {type(tensor)}")
+                    if tensor.dim() != 4:
+                        raise ValueError(f"Invalid cached tensor dimensions: {tensor.dim()}")
+                        
+                    # Optimize memory layout
+                    if torch.cuda.is_available():
+                        tensor = tensor.to(memory_format=torch.channels_last)
+                        pin_tensor_(tensor)
+                        
+                    loss_weight = (
+                        self.tag_weighter.get_caption_weight(caption)
+                        if self.tag_weighter is not None else 1.0
+                    )
+                    
+                    return {
+                        "pixel_values": tensor,
+                        "text": caption,
+                        "original_size": tensor.shape[-2:],
+                        "crop_top_left": (0, 0),  # Cached items are already processed
+                        "target_size": tensor.shape[-2:],
+                        "loss_weight": loss_weight
+                    }
+            except Exception as e:
+                logger.warning(f"Error loading cached item {idx}: {str(e)}")
+                # Continue to load from disk
         
         # Load and process image with WSL path handling if not cached
         image_path = convert_windows_path(self.image_paths[idx], make_absolute=True)
