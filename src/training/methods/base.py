@@ -11,7 +11,7 @@ from src.data.config import Config
 class TrainingMethodMeta(type):
     """Metaclass for training methods to handle registration."""
     
-    _methods: Dict[str, Type['BaseTrainingMethod']] = {}
+    _methods: Dict[str, Type['TrainingMethod']] = {}
     
     def __new__(mcs, name, bases, attrs):
         """Create new training method class and register it."""
@@ -21,7 +21,7 @@ class TrainingMethodMeta(type):
         return cls
     
     @classmethod
-    def get_method(mcs, name: str) -> Type['BaseTrainingMethod']:
+    def get_method(mcs, name: str) -> Type['TrainingMethod']:
         """Get training method class by name."""
         if name not in mcs._methods:
             raise ValueError(
