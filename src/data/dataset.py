@@ -104,6 +104,15 @@ class AspectBucketDataset(Dataset):
             transforms.Normalize([0.5], [0.5])
         ])
         
+        # Setup cache manager if enabled
+        self.cache_manager = None
+        if config.global_config.cache.use_cache:
+            from .preprocessing.cache_manager import CacheManager
+            self.cache_manager = CacheManager(
+                cache_dir=config.global_config.cache.cache_dir,
+                compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
+            )
+            
         # Initialize tag weighter if enabled but not provided
         if self.tag_weighter is None and config.tag_weighting.enable_tag_weighting:
             self.tag_weighter = create_tag_weighter(config, captions)
@@ -175,7 +184,7 @@ class AspectBucketDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, str, Tuple[int, int], float]]:
-        """Get dataset item with bucketing.
+        """Get dataset item with bucketing and caching.
         
         Returns dict with:
             - pixel_values: Processed image tensor
@@ -185,7 +194,21 @@ class AspectBucketDataset(Dataset):
             - target_size: Target size after bucketing
             - loss_weight: Optional tag-based loss weight
         """
-        # Load and process image with WSL path handling
+        # Try loading from cache first
+        if self.cache_manager is not None:
+            cached_item = self.cache_manager.get_cached_item(self.image_paths[idx])
+            if cached_item is not None:
+                tensor, caption = cached_item
+                return {
+                    "pixel_values": tensor,
+                    "text": caption,
+                    "original_size": tensor.shape[-2:],
+                    "crop_top_left": (0, 0),  # Cached items are already processed
+                    "target_size": tensor.shape[-2:],
+                    "loss_weight": self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
+                }
+        
+        # Load and process image with WSL path handling if not cached
         image_path = convert_windows_path(self.image_paths[idx], make_absolute=True)
         image = Image.open(image_path).convert('RGB')
         original_size = image.size
