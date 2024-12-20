@@ -23,7 +23,7 @@ from src.core.memory import (
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
-from src.training.methods.base import BaseTrainingMethod
+from src.training.methods.base import TrainingMethod
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class SDXLTrainer:
         """
         # Get trainer class using metaclass registry
         method = config.training.method.lower()
-        trainer_cls = BaseTrainingMethod.get_method(method)
+        trainer_cls = TrainingMethod.get_method(method)
         logger.info(f"Creating trainer with method: {trainer_cls.__name__}")
         
         # Create training method instance
@@ -84,7 +84,7 @@ class SDXLTrainer:
         model: StableDiffusionXLModel,
         optimizer: torch.optim.Optimizer,
         train_dataloader: DataLoader,
-        training_method: BaseTrainingMethod,
+        training_method: TrainingMethod,
         device: Union[str, torch.device],
         wandb_logger: Optional[WandbLogger] = None,
         validation_prompts: Optional[List[str]] = None

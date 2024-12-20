@@ -30,7 +30,7 @@ class TrainingMethodMeta(type):
             )
         return mcs._methods[name]
 
-class BaseTrainingMethod(ABC, metaclass=TrainingMethodMeta):
+class TrainingMethod(ABC, metaclass=TrainingMethodMeta):
     """Abstract base class for SDXL training methods."""
     
     name: str = None  # Must be defined by subclasses
