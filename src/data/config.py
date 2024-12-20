@@ -59,6 +59,14 @@ class MemoryConfig:
     enable_async_offloading: bool = True
     temp_device: str = "cpu"
 
+@dataclass
+class FlowMatchingConfig:
+    """Flow Matching configuration."""
+    enabled: bool = False
+    num_timesteps: int = 1000
+    sigma: float = 1.0
+    time_sampling: str = "uniform"  # uniform, logit_normal
+
 @dataclass 
 class DDPMConfig:
     """DDPM-specific training configuration.
