@@ -85,9 +85,10 @@ def setup_logging(
     """
     # Create log directory only for file logging
     log_path = Path(log_dir)
-    if filename:
-        log_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Created log directory: {log_path}")
+    try:
+        if filename:
+            log_path.mkdir(parents=True, exist_ok=True)
+            logging.info(f"Created log directory: {log_path}")
     except Exception as e:
         print(f"{Fore.RED}Failed to create log directory: {str(e)}{Style.RESET_ALL}")
         raise
