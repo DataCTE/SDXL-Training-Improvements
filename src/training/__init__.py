@@ -1,25 +1,34 @@
-from .trainer import SDXLTrainer
+from .trainer import create_trainer
+from .trainers.SDXLTrainer import SDXLTrainer
+from .methods.base import TrainingMethod
+from .methods.ddpm_trainer import DDPMTrainer
+from .methods.flow_matching_trainer import FlowMatchingTrainer
 from .schedulers import (
     NoiseSchedulerConfig,
     configure_noise_scheduler,
     get_karras_sigmas,
     get_sigmas,
-    get_scheduler_parameters
+    get_scheduler_parameters,
+    get_add_time_ids
 )
-from .methods.base import TrainingMethod
-from .methods.ddpm import DDPMMethod
-from .methods.flow_matching import FlowMatchingMethod
-from ..core.logging import log_metrics
 
 __all__ = [
+    # Main trainer factory
+    "create_trainer",
+    
+    # Trainer implementations
     "SDXLTrainer",
+    
+    # Training methods
+    "TrainingMethod",
+    "DDPMTrainer", 
+    "FlowMatchingTrainer",
+    
+    # Scheduler utilities
     "NoiseSchedulerConfig",
     "configure_noise_scheduler",
     "get_karras_sigmas",
-    "get_sigmas",
+    "get_sigmas", 
     "get_scheduler_parameters",
-    "log_metrics",
-    "TrainingMethod",
-    "DDPMMethod",
-    "FlowMatchingMethod"
+    "get_add_time_ids"
 ]
