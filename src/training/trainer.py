@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 import torch
 from src.core.logging import WandbLogger
 from src.data.config import Config
-from src.models import StableDiffusionXLModel
+from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
 from src.training.trainers.SDXLTrainer import SDXLTrainer
 
 def create_trainer(

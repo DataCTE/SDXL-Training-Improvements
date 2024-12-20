@@ -28,7 +28,7 @@ from src.data.dataset import create_dataset
 from src.data.preprocessing import LatentPreprocessor
 
 # Local imports - model components
-from src.models.sdxl import StableDiffusionXLModel
+from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
 from src.models.base import ModelType
 
 # Local imports - training components

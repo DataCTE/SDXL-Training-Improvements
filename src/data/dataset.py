@@ -23,6 +23,7 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     device_equals
 )
+from src.models.sdxl import StableDiffusionXLPipeline
 from src.core.memory.optimizations import (
     setup_memory_optimizations,
     verify_memory_optimizations
