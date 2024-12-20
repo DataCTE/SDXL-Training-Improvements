@@ -64,12 +64,16 @@ class PreprocessingPipeline:
         self.device_ids = device_ids or list(range(torch.cuda.device_count()))
         self.use_pinned_memory = use_pinned_memory
         
+        # Initialize cache paths and manager
+        self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
         # Initialize cache manager if enabled
         self.cache_manager = None
         if config.global_config.cache.use_cache:
             from .cache_manager import CacheManager
             self.cache_manager = CacheManager(
-                cache_dir=config.global_config.cache.cache_dir,
+                cache_dir=self.cache_dir,
                 compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
             )
 

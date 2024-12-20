@@ -163,13 +163,24 @@ class LatentPreprocessor:
             with torch.no_grad():
                 # Use CUDA streams for pipelined compute and transfer
                 if torch.cuda.is_available():
-                    with torch.cuda.stream(torch.cuda.Stream()) as compute_stream:
-                        batch_latents = self.vae.encode(batch).latent_dist.sample()
-                        batch_latents = batch_latents * self.vae.config.scaling_factor
-                        
-                    with torch.cuda.stream(torch.cuda.Stream()) as transfer_stream:
-                        transfer_stream.wait_stream(compute_stream)
-                        latents.append(batch_latents.cpu())
+                    compute_stream = torch.cuda.Stream()
+                    transfer_stream = torch.cuda.Stream()
+                    
+                    try:
+                        with torch.cuda.stream(compute_stream):
+                            batch_latents = self.vae.encode(batch).latent_dist.sample()
+                            batch_latents = batch_latents * self.vae.config.scaling_factor
+                            
+                        with torch.cuda.stream(transfer_stream):
+                            transfer_stream.wait_stream(compute_stream)
+                            latents.append(batch_latents.cpu())
+                            
+                    finally:
+                        # Ensure streams are properly synchronized and destroyed
+                        compute_stream.synchronize()
+                        transfer_stream.synchronize()
+                        del compute_stream
+                        del transfer_stream
                 else:
                     batch_latents = self.vae.encode(batch).latent_dist.sample()
                     batch_latents = batch_latents * self.vae.config.scaling_factor
