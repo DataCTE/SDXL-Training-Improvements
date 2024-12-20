@@ -222,9 +222,6 @@ def main():
         collate_fn=train_dataset.collate_fn
     )
     
-    # Configure noise scheduler
-    noise_scheduler_config = configure_noise_scheduler(config, device)
-    
     # Create optimizer
     optimizer = torch.optim.AdamW(
         models["unet"].parameters(),
