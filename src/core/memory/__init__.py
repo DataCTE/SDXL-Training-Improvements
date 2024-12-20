@@ -17,7 +17,7 @@ from .tensor import (
     unpin_tensor_
 )
 from .optimizations import setup_memory_optimizations, verify_memory_optimizations
-
+from .throughput import ThroughputMonitor
 __all__ = [
     "LayerOffloader",
     "LayerOffloadConfig",
@@ -38,4 +38,5 @@ __all__ = [
     "unpin_tensor_",
     "setup_memory_optimizations",
     "verify_memory_optimizations"
+    "ThroughputMonitor"
 ]
