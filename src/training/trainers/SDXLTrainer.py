@@ -24,7 +24,7 @@ from src.training.methods.base import BaseTrainingMethod
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
-from src.training.trainers.base import TrainingMethod
+from src.training.methods.base import BaseTrainingMethod as TrainingMethod
 
 logger = logging.getLogger(__name__)
 
