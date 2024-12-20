@@ -1,3 +1,4 @@
+from diffusers import DDPMScheduler
 from .trainer import create_trainer
 from .trainers.sdxl_trainer import SDXLTrainer
 from .methods.base import TrainingMethod
@@ -30,5 +31,8 @@ __all__ = [
     "get_karras_sigmas",
     "get_sigmas", 
     "get_scheduler_parameters",
-    "get_add_time_ids"
+    "get_add_time_ids",
+    
+    # External components
+    "DDPMScheduler"
 ]
