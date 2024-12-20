@@ -83,9 +83,9 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
-    # Use the provided log_dir directly, don't append "logs"
-    try:
-        log_path = Path(log_dir)
+    # Create log directory only for file logging
+    log_path = Path(log_dir)
+    if filename:
         log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Created log directory: {log_path}")
     except Exception as e:
@@ -126,8 +126,9 @@ def setup_logging(
     for logger_name in ["PIL", "torch", "transformers"]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
     
-    # Log initialization
-    logger.info(f"Logging system initialized for {logger_name} at level {logging.getLevelName(level)}")
+    # Log initialization only once
+    if not logger.handlers:
+        logger.info(f"Logging system initialized for {logger_name} at level {logging.getLevelName(level)}")
     
     return logger
     
