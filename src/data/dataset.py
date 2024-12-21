@@ -252,7 +252,12 @@ class AspectBucketDataset(Dataset):
                 return tensor
                 
         except Exception as e:
-            logger.error(f"Error processing image: {str(e)}")
+            logger.error(
+                f"Error processing image: {str(e)}\n"
+                f"Traceback:\n{traceback.format_exc()}\n"
+                f"Image shape: {getattr(image, 'size', 'Unknown')}\n"
+                f"Target size: {target_size}"
+            )
             # Return zero tensor of correct shape as fallback
             return torch.zeros((3, target_size[1], target_size[0]), 
                              dtype=torch.float32)
