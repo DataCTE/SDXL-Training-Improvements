@@ -150,10 +150,10 @@ def setup_logging(
         logger.removeHandler(handler)
     
     try:
-        # Create console handler with detailed colored output
+        # Create console handler with simplified colored output
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(ColoredFormatter(
-            '%(levelname)s | %(name)s | %(processName)s:%(threadName)s | %(message)s'
+            '%(levelname)s | %(name)s | %(message)s'
         ))
         console_handler.setLevel(level)
         logger.addHandler(console_handler)
