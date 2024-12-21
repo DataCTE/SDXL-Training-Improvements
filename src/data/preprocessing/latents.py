@@ -681,26 +681,22 @@ class LatentPreprocessor:
                 latents = self.encode_images(batch_pixels, batch_size=chunk_size)
                 vae_latents.append(latents)
                 
-                # Save batch using cache manager
-                # Save individual latents for each item in batch
+                # Save individual latents using cache manager
                 for i, (latent, embedding) in enumerate(zip(latents["model_input"], embeddings)):
                     item_idx = batch_indices[i]
                     if self.cache_manager is not None:
-                        # Save individual latent and embedding
-                        item_data = {
-                            "vae_latent": latent.unsqueeze(0),  # Add batch dim back
+                        latent_data = {
+                            "vae_latent": latent.unsqueeze(0),
                             "text_embedding": {
                                 "prompt_embeds": embedding["prompt_embeds"].unsqueeze(0),
                                 "pooled_prompt_embeds": embedding["pooled_prompt_embeds"].unsqueeze(0)
-                            },
-                            "metadata": {
-                                "index": item_idx,
-                                "timestamp": time.time()
                             }
                         }
-                        # Save to individual cache files
-                        latent_path = self.cache_dir / f"latent_{item_idx}.pt"
-                        torch.save(item_data, latent_path, _use_new_zipfile_serialization=True)
+                        metadata = {
+                            "index": item_idx,
+                            "timestamp": time.time()
+                        }
+                        self.cache_manager._save_latent(latent_data, metadata, item_idx)
                 
                 # Clean up intermediate tensors
                 del batch_pixels, latents, embeddings

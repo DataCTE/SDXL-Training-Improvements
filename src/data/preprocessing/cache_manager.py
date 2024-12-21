@@ -209,12 +209,11 @@ class CacheManager:
             )
             raise CacheProcessingError("Failed to process image", context=error_context)
             
-    def _save_chunk(
+    def _save_latent(
         self,
-        chunk_id: int,
-        tensors: List[torch.Tensor],
+        latent_data: Dict[str, torch.Tensor],
         metadata: Dict,
-        cache_dir: Path
+        index: int
     ) -> bool:
         """Save chunk of processed tensors to disk.
         
@@ -228,23 +227,27 @@ class CacheManager:
             bool indicating success
         """
         try:
-            # Create chunk directory
-            chunk_dir = cache_dir / f"chunk_{chunk_id}"
-            chunk_dir.mkdir(parents=True, exist_ok=True)
+            # Create latent file path
+            latent_path = self.cache_dir / f"latent_{index}.pt"
+            latent_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Save tensors with compression
-            chunk_path = chunk_dir / "data.pt"
+            # Save latent data with compression
             torch.save(
-                {"tensors": tensors, "metadata": metadata},
-                chunk_path,
+                {
+                    "latent": latent_data,
+                    "metadata": metadata,
+                    "timestamp": time.time()
+                },
+                latent_path,
                 _use_new_zipfile_serialization=True
             )
             
             # Update index
-            self.cache_index["chunks"][str(chunk_id)] = {
-                "path": str(chunk_path),
-                "size": chunk_path.stat().st_size,
-                "timestamp": time.time()
+            self.cache_index["files"][str(index)] = {
+                "path": str(latent_path),
+                "size": latent_path.stat().st_size,
+                "timestamp": time.time(),
+                "metadata": metadata
             }
             
             return True
@@ -486,47 +489,27 @@ class CacheManager:
         
         return stats
         
-    def get_cached_item(
+    def get_cached_latent(
         self,
-        image_path: Union[str, Path, List[Union[str, Path]]]
-    ) -> Optional[Tuple[torch.Tensor, str]]:
+        index: int
+    ) -> Optional[Dict[str, torch.Tensor]]:
         """Retrieve cached item by image path."""
-        # Convert input to Path object
+        """Get cached latent by index."""
+        if str(index) not in self.cache_index["files"]:
+            return None
+            
+        file_info = self.cache_index["files"][str(index)]
+        latent_path = Path(file_info["path"])
+        
+        if not latent_path.exists():
+            return None
+            
         try:
-            if isinstance(image_path, (list, tuple)):
-                # Try each path in the list until we find a valid one
-                for p in image_path:
-                    try:
-                        converted_path = convert_windows_path(p, make_absolute=True)
-                        if Path(converted_path).exists():
-                            image_path = converted_path
-                            break
-                    except Exception:
-                        continue
-                else:  # No valid path found
-                    return None
-            else:
-                image_path = convert_windows_path(image_path, make_absolute=True)
+            cached_data = torch.load(latent_path)
+            return cached_data["latent"]
         except Exception as e:
-            logger.warning(f"Error converting path: {str(e)}")
+            logger.error(f"Error loading cached latent {index}: {str(e)}")
             return None
-        
-        if image_path not in self.cache_index["files"]:
-            return None
-            
-        file_info = self.cache_index["files"][image_path]
-        chunk_id = file_info["chunk_id"]
-        chunk_info = self.cache_index["chunks"][str(chunk_id)]
-        
-        # Load chunk
-        chunk_path = Path(chunk_info["path"])
-        if not chunk_path.exists():
-            return None
-            
-        tensors = torch.load(chunk_path)
-        caption = file_info["metadata"]["caption"]
-        
-        return tensors, caption
         
     def verify_cache(self) -> Dict[str, int]:
         """Verify cache integrity."""
