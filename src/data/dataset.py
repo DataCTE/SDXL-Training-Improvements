@@ -272,22 +272,34 @@ class AspectBucketDataset(Dataset):
             - loss_weight: Optional tag-based loss weight
         """
         try:
-            # Validate index with detailed error tracking
+            # Validate index with detailed error tracking and context
             if not isinstance(idx, (int, slice)):
-                error_msg = f"Dataset indices must be integers or slices, not {type(idx)}"
+                error_context = {
+                    'expected_type': 'int or slice',
+                    'actual_type': type(idx).__name__,
+                    'value': repr(idx),
+                    'function': '__getitem__',
+                    'line_number': traceback.extract_stack()[-1].lineno,
+                    'file_path': __file__,
+                    'traceback': traceback.format_exc(),
+                    'dataset_size': len(self.image_paths),
+                    'valid_range': f'[0, {len(self.image_paths)})',
+                    'process': os.getpid(),
+                    'thread': threading.get_ident()
+                }
                 logger.error(
-                    "Invalid index type",
-                    extra={
-                        'expected_type': 'int or slice',
-                        'actual_type': type(idx).__name__,
-                        'value': repr(idx),
-                        'function': '__getitem__',
-                        'line_number': traceback.extract_stack()[-1].lineno,
-                        'file_path': __file__,
-                        'traceback': traceback.format_exc()
-                    }
+                    f"Invalid index type:\n"
+                    f"Expected: {error_context['expected_type']}\n"
+                    f"Got: {error_context['actual_type']}\n"
+                    f"Value: {error_context['value']}\n"
+                    f"Dataset size: {error_context['dataset_size']}\n"
+                    f"Valid range: {error_context['valid_range']}",
+                    extra=error_context
                 )
-                raise TypeError(error_msg)
+                raise TypeError(
+                    f"Dataset indices must be integers or slices, not {type(idx)}. "
+                    f"Valid range is [0, {len(self.image_paths)})"
+                )
                 
             if isinstance(idx, int):
                 if idx < 0 or idx >= len(self.image_paths):
