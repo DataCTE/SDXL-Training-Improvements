@@ -479,8 +479,17 @@ class LatentPreprocessor:
                         continue
                 
                 if not batch:
-                    logger.warning(f"No valid items in batch {idx}, skipping")
-                    continue
+                    error_msg = f"No valid items found in batch {idx}"
+                    logger.error(error_msg)
+                    raise ValidationError(
+                        error_msg,
+                        context={
+                            'batch_index': idx,
+                            'batch_size': batch_size,
+                            'stage': ProcessingStage.VALIDATION.name,
+                            'traceback': traceback.format_exc()
+                        }
+                    )
                 batch_texts = []
                 valid_count = 0
                 
@@ -531,10 +540,19 @@ class LatentPreprocessor:
                 invalid_texts = [(i, txt) for i, txt in enumerate(batch_texts) if not txt]
                 
                 if valid_count == 0:
-                    logger.error(f"Skipping batch {idx}: all captions empty or invalid")
+                    error_msg = f"All captions empty or invalid in batch {idx}"
+                    logger.error(error_msg)
                     for i, txt in invalid_texts:
                         logger.error(f"  Invalid caption at position {i}, original input: {repr(batch['text'][i])}")
-                    continue
+                    raise TextEncodingError(
+                        error_msg,
+                        context={
+                            'batch_index': idx,
+                            'invalid_texts': invalid_texts,
+                            'stage': ProcessingStage.TEXT_ENCODING.name,
+                            'traceback': traceback.format_exc()
+                        }
+                    )
                     
                 logger.info(f"Processing batch {idx} with {valid_count}/{len(batch_texts)} valid captions")
                 if invalid_texts:
