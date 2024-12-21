@@ -226,9 +226,10 @@ class AspectBucketDataset(Dataset):
             current_w, current_h = image.size
             target_w, target_h = target_size
             
-            if target_w > self.max_size or target_h > self.max_size:
+            max_h, max_w = self.max_size
+            if target_w > max_w or target_h > max_h:
                 logger.warning(f"Target size {target_size} exceeds max size {self.max_size}")
-                scale = self.max_size / max(target_w, target_h)
+                scale = min(max_w / target_w, max_h / target_h)
                 target_w = int(target_w * scale)
                 target_h = int(target_h * scale)
                 
