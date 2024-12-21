@@ -497,20 +497,56 @@ class PreprocessingPipeline:
                                     processed.unsqueeze(0) if processed.dim() == 3 else processed
                                 )
                                 
-                                # Cache results if enabled
-                                if self.cache_manager is not None and isinstance(item, dict) and 'file_path' in item:
-                                    self.cache_manager.save_preprocessed_data(
-                                        latent_data=vae_latents,
-                                        text_embeddings=text_embeddings,
-                                        metadata={'original_file': str(item['file_path'])},
-                                        file_path=item['file_path']
-                                    )
+                                # Cache results with validation if enabled
+                                if self.cache_manager is not None:
+                                    file_path = item.get('file_path') if isinstance(item, dict) else None
+                                    if file_path:
+                                        try:
+                                            # Validate tensors before caching
+                                            for tensor_dict in [vae_latents, text_embeddings]:
+                                                for name, tensor in tensor_dict.items():
+                                                    if not isinstance(tensor, torch.Tensor):
+                                                        raise ValueError(f"Invalid tensor type for {name}: {type(tensor)}")
+                                                    if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                                                        raise ValueError(f"Found NaN/Inf in {name} tensor")
+
+                                            self.cache_manager.save_preprocessed_data(
+                                                latent_data=vae_latents,
+                                                text_embeddings=text_embeddings,
+                                                metadata={
+                                                    'original_file': str(file_path),
+                                                    'timestamp': time.time(),
+                                                    'tensor_shapes': {
+                                                        'vae': {k: v.shape for k,v in vae_latents.items()},
+                                                        'text': {k: v.shape for k,v in text_embeddings.items()}
+                                                    }
+                                                },
+                                                file_path=file_path
+                                            )
+                                            logger.debug(f"Successfully cached latents for {file_path}")
+                                        except Exception as e:
+                                            logger.warning(f"Failed to cache latents for {file_path}: {str(e)}")
                                 
                                 # Combine results
+                                # Construct processed dict with full metadata
                                 processed_dict = {
                                     "tensor": processed,
                                     "latents": vae_latents["model_input"],
-                                    **text_embeddings
+                                    "prompt_embeds": text_embeddings["prompt_embeds"],
+                                    "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"],
+                                    "file_path": item.get('file_path') if isinstance(item, dict) else None,
+                                    "caption": item.get('caption') if isinstance(item, dict) else None,
+                                    "metadata": {
+                                        "processed_at": time.time(),
+                                        "device": str(processed.device),
+                                        "dtype": str(processed.dtype),
+                                        "shapes": {
+                                            "tensor": tuple(processed.shape),
+                                            "latents": tuple(vae_latents["model_input"].shape),
+                                            "prompt": tuple(text_embeddings["prompt_embeds"].shape),
+                                            "pooled": tuple(text_embeddings["pooled_prompt_embeds"].shape)
+                                        }
+                                    }
                                 }
                             except Exception as e:
                                 logger.warning(f"Latent processing failed: {str(e)}, falling back to basic tensor")

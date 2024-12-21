@@ -721,21 +721,48 @@ class LatentPreprocessor:
                     replace_tensors_(vae_latents[-1], latents)
                 vae_latents.append(latents)
                 
-                # Save complete file latents
+                # Save complete file latents with validation
                 if self.cache_manager is not None and "text_embeddings" in locals():
                     for i, latent in enumerate(latents["model_input"]):
                         file_path = dataset[batch_indices[i]].get("file_path")
                         if file_path and i < len(text_embeddings):
                             try:
+                                # Prepare data with proper shapes
+                                latent_data = {"model_input": latent.unsqueeze(0)}
+                                text_data = {
+                                    "prompt_embeds": text_embeddings["prompt_embeds"][i].unsqueeze(0),
+                                    "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"][i].unsqueeze(0)
+                                }
+                            
+                                # Validate tensors
+                                for tensor_dict in [latent_data, text_data]:
+                                    for name, tensor in tensor_dict.items():
+                                        if not isinstance(tensor, torch.Tensor):
+                                            raise ValueError(f"Invalid tensor type for {name}: {type(tensor)}")
+                                        if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                                            raise ValueError(f"Found NaN/Inf in {name} tensor")
+                                        
+                                # Save with detailed metadata
                                 self.cache_manager.save_preprocessed_data(
-                                    latent_data={"model_input": latent.unsqueeze(0)},
-                                    text_embeddings={
-                                        "prompt_embeds": text_embeddings["prompt_embeds"][i].unsqueeze(0),
-                                        "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"][i].unsqueeze(0)
+                                    latent_data=latent_data,
+                                    text_embeddings=text_data,
+                                    metadata={
+                                        "original_file": str(file_path),
+                                        "timestamp": time.time(),
+                                        "tensor_shapes": {
+                                            "latent": tuple(latent.shape),
+                                            "prompt": tuple(text_embeddings["prompt_embeds"][i].shape),
+                                            "pooled": tuple(text_embeddings["pooled_prompt_embeds"][i].shape)
+                                        },
+                                        "dtypes": {
+                                            "latent": str(latent.dtype),
+                                            "prompt": str(text_embeddings["prompt_embeds"][i].dtype),
+                                            "pooled": str(text_embeddings["pooled_prompt_embeds"][i].dtype)
+                                        }
                                     },
-                                    metadata={"original_file": str(file_path)},
                                     file_path=file_path
                                 )
+                                logger.debug(f"Successfully cached file {file_path}")
                             except Exception as e:
                                 logger.warning(f"Failed to cache file {file_path}: {str(e)}")
                 
