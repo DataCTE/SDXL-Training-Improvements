@@ -1,14 +1,18 @@
-"""High-performance cache management for large-scale dataset preprocessing."""
+"""High-performance cache management with optimized tensor and memory handling."""
 import multiprocessing as mp
 import traceback
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
-from src.core.logging.logging import setup_logging
-from ..utils.paths import convert_windows_path
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+import hashlib
+import json
+import torch
+import numpy as np
+from tqdm.auto import tqdm
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
 from src.core.memory.tensor import (
     tensors_record_stream,
     pin_tensor_,
@@ -17,42 +21,17 @@ from src.core.memory.tensor import (
     replace_tensors_,
     torch_gc
 )
-import hashlib
-import json
-import torch
-import numpy as np
-from PIL import Image
-from tqdm.auto import tqdm
+import logging
+from contextlib import nullcontext
 
-class CacheError(Exception):
-    """Base exception for cache-related errors."""
-    def __init__(self, message: str, context: dict = None):
-        super().__init__(message)
-        self.context = context or {}
+from src.core.logging.logging import setup_logging
+from ..utils.paths import convert_windows_path
 
-class CacheIOError(CacheError):
-    """Raised when cache I/O operations fail."""
-    pass
-
-class CacheValidationError(CacheError):
-    """Raised when cache validation fails."""
-    pass
-
-class CacheProcessingError(CacheError):
-    """Raised when processing cache items fails."""
-    pass
-
-class CacheStage(Enum):
-    """Enum for tracking cache processing stages."""
-    INITIALIZATION = auto()
-    IMAGE_PROCESSING = auto()
-    TENSOR_VALIDATION = auto()
-    CHUNK_SAVING = auto()
-    INDEX_UPDATE = auto()
+logger = logging.getLogger(__name__)
 
 @dataclass
 class CacheStats:
-    """Statistics for cache operations."""
+    """Enhanced statistics for cache operations."""
     total_items: int = 0
     processed_items: int = 0
     failed_items: int = 0
@@ -61,11 +40,12 @@ class CacheStats:
     cache_misses: int = 0
     corrupted_items: int = 0
     validation_errors: int = 0
-
-logger = setup_logging(__name__, level="INFO")
+    memory_errors: int = 0
+    io_errors: int = 0
+    gpu_oom_events: int = 0
 
 class CacheManager:
-    """Manages high-throughput caching of image-caption pairs."""
+    """Manages high-throughput caching with optimized memory handling."""
     
     def __init__(
         self,
@@ -73,9 +53,11 @@ class CacheManager:
         num_proc: Optional[int] = None,
         chunk_size: int = 1000,
         compression: Optional[str] = "zstd",
-        verify_hashes: bool = True
+        verify_hashes: bool = True,
+        max_memory_usage: float = 0.8,
+        enable_memory_tracking: bool = True
     ):
-        """Initialize cache manager.
+        """Initialize cache manager with enhanced memory management.
         
         Args:
             cache_dir: Directory for cached files
@@ -83,7 +65,10 @@ class CacheManager:
             chunk_size: Number of items per cache chunk
             compression: Compression algorithm (None, 'zstd', 'gzip')
             verify_hashes: Whether to verify content hashes
+            max_memory_usage: Maximum fraction of GPU memory to use
+            enable_memory_tracking: Whether to track memory usage
         """
+        # Setup base configuration
         self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
@@ -91,125 +76,64 @@ class CacheManager:
         self.chunk_size = chunk_size
         self.compression = compression
         self.verify_hashes = verify_hashes
+        self.max_memory_usage = max_memory_usage
+        self.enable_memory_tracking = enable_memory_tracking
         
-        # Setup cache index
-        self.index_path = Path(convert_windows_path(self.cache_dir / "cache_index.json", make_absolute=True))
+        # Initialize statistics
+        self.stats = CacheStats()
+        
+        # Setup cache paths
+        self.latents_dir = self.cache_dir / "latents"
+        self.text_dir = self.cache_dir / "text"
+        self.latents_dir.mkdir(exist_ok=True)
+        self.text_dir.mkdir(exist_ok=True)
+        
+        # Load cache index
+        self.index_path = self.cache_dir / "cache_index.json"
         self.cache_index = self._load_cache_index()
         
-        # Setup process pools
-        self.image_pool = ProcessPoolExecutor(max_workers=self.num_proc)
-        self.io_pool = ThreadPoolExecutor(max_workers=self.num_proc * 2)
+        # Setup worker pools with proper resource limits
+        self.image_pool = ProcessPoolExecutor(
+            max_workers=self.num_proc,
+            mp_context=mp.get_context('spawn')
+        )
+        self.io_pool = ThreadPoolExecutor(
+            max_workers=self.num_proc * 2,
+            thread_name_prefix="cache_io"
+        )
         
-    def _load_cache_index(self) -> Dict:
-        """Load or create cache index."""
-        if self.index_path.exists():
-            with open(self.index_path, 'r') as f:
-                return json.load(f)
-        return {"files": {}, "chunks": {}}
-        
-    def _save_cache_index(self):
-        """Save cache index to disk."""
-        with open(self.index_path, 'w') as f:
-            json.dump(self.cache_index, f)
-            
-    def _compute_hash(self, file_path: Path) -> str:
-        """Compute file hash for verification."""
-        hasher = hashlib.sha256()
-        converted_path = convert_windows_path(file_path, make_absolute=True)
-        with open(converted_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(65536), b''):
-                hasher.update(chunk)
-        return hasher.hexdigest()
-        
-    def _process_image(self, image_path: Path) -> Optional[torch.Tensor]:
-        """Process single image with optimized memory handling and CUDA streams.
-        
-        Args:
-            image_path: Path to image file
-            
-        Returns:
-            Processed tensor or None if processing failed
-            
-        Raises:
-            CacheProcessingError: If image processing fails
-        """
-        try:
-            # Create streams for pipelined operations
-            compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-            transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-            
-            # Use NVIDIA DALI for faster image loading if available
+        # Initialize memory tracking if enabled
+        if enable_memory_tracking and torch.cuda.is_available():
+            self._init_memory_tracking()
+
+    def _init_memory_tracking(self):
+        """Initialize memory tracking utilities."""
+        self.memory_stats = {
+            'peak_allocated': 0,
+            'total_allocated': 0,
+            'num_allocations': 0,
+            'oom_events': 0
+        }
+
+    def _track_memory(self, context: str):
+        """Track memory usage with proper cleanup."""
+        if self.enable_memory_tracking and torch.cuda.is_available():
             try:
-                import nvidia.dali as dali
-                import nvidia.dali.fn as fn
-                use_dali = True
-            except ImportError:
-                use_dali = False
+                allocated = torch.cuda.memory_allocated()
+                self.memory_stats['peak_allocated'] = max(
+                    self.memory_stats['peak_allocated'],
+                    allocated
+                )
+                self.memory_stats['total_allocated'] += allocated
+                self.memory_stats['num_allocations'] += 1
                 
-            if use_dali:
-                pipe = dali.Pipeline(batch_size=1, num_threads=1, device_id=0)
-                with pipe:
-                    images = fn.readers.file(name="Reader", files=[str(image_path)])
-                    decoded = fn.decoders.image(images, device="mixed")
-                    normalized = fn.crop_mirror_normalize(
-                        decoded,
-                        dtype=dali.types.FLOAT,
-                        mean=[0.5 * 255] * 3,
-                        std=[0.5 * 255] * 3,
-                        output_layout="CHW"
-                    )
-                    pipe.set_outputs(normalized)
-                pipe.build()
-                
-                # Use compute stream for DALI processing
-                if compute_stream is not None:
-                    with torch.cuda.stream(compute_stream):
-                        tensor = pipe.run()[0].as_tensor()
-                else:
-                    tensor = pipe.run()[0].as_tensor()
-            else:
-                # Fallback to PIL with optimizations
-                image = Image.open(image_path).convert('RGB')
-                tensor = torch.from_numpy(np.array(image)).float() / 255.0
-                tensor = tensor.permute(2, 0, 1)  # CHW format
-                
-            # Optimize memory format and transfer
-            if transfer_stream is not None:
-                with torch.cuda.stream(transfer_stream):
-                    tensor = tensor.contiguous(memory_format=torch.channels_last)
-                    if torch.cuda.is_available():
-                        tensor = tensor.pin_memory()
-                        tensors_record_stream(transfer_stream, tensor)
-            else:
-                tensor = tensor.contiguous(memory_format=torch.channels_last)
-                if torch.cuda.is_available():
-                    tensor = tensor.pin_memory()
+                # Log if approaching limit
+                if allocated > self.max_memory_usage * torch.cuda.get_device_properties(0).total_memory:
+                    logger.warning(f"High memory usage in {context}: {allocated / 1e9:.2f}GB")
                     
-            # Synchronize streams if used
-            if compute_stream is not None:
-                compute_stream.synchronize()
-            if transfer_stream is not None:
-                transfer_stream.synchronize()
-                
-            return tensor
-        except Exception as e:
-            error_context = {
-                'image_path': str(image_path),
-                'error_type': type(e).__name__,
-                'error_msg': str(e),
-                'traceback': traceback.format_exc(),
-                'stage': CacheStage.IMAGE_PROCESSING.name
-            }
-            logger.error(
-                f"Error processing image:\n"
-                f"Image path: {error_context['image_path']}\n"
-                f"Error type: {error_context['error_type']}\n"
-                f"Error message: {error_context['error_msg']}\n"
-                f"Processing stage: {error_context['stage']}\n"
-                f"Traceback:\n{error_context['traceback']}"
-            )
-            raise CacheProcessingError("Failed to process image", context=error_context)
-            
+            except Exception as e:
+                logger.error(f"Memory tracking error in {context}: {str(e)}")
+
     def save_preprocessed_data(
         self,
         latent_data: Dict[str, torch.Tensor],
@@ -217,11 +141,11 @@ class CacheManager:
         metadata: Dict,
         file_path: Union[str, Path]
     ) -> bool:
-        """Save latent data to disk.
+        """Save preprocessed data with optimized memory handling.
         
         Args:
             latent_data: Dictionary containing latent tensors
-            text_embeddings: Dictionary containing text embeddings
+            text_embeddings: Dictionary containing text embeddings 
             metadata: Associated metadata
             file_path: Path to original file
             
@@ -229,382 +153,263 @@ class CacheManager:
             bool indicating success
         """
         try:
-            # Create cache path based on file path
-            # Create cache path based on file path
+            # Track memory before processing
+            if self.enable_memory_tracking:
+                self._track_memory("save_start")
+                
+            # Create cache paths
             file_hash = hashlib.sha256(str(file_path).encode()).hexdigest()[:12]
-            cache_path = self.cache_dir / f"{file_hash}_latent.pt"
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            latent_path = self.latents_dir / f"{file_hash}_latent.pt"
+            text_path = self.text_dir / f"{file_hash}_text.pt"
             
-            # Check device compatibility and optimize memory
+            # Check and optimize device placement
             current_device = next(
                 (t.device for t in latent_data.values() if isinstance(t, torch.Tensor)),
                 torch.device('cpu')
             )
-
-            # Save complete latent data for the file
-            save_data = {
-                "latent": latent_data,
-                "text_embeddings": text_embeddings,
-                "metadata": {
-                    **metadata,
-                    "original_path": str(file_path),
-                    "timestamp": time.time()
-                }
-            }
-
-            # Reuse existing tensors if devices match
-            if self.cache_index["files"].get(str(file_path)):
+            
+            # Memory optimization: Stream-based processing
+            with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
+                # Pin memory for faster I/O
+                for tensor_dict in [latent_data, text_embeddings]:
+                    for tensor in tensor_dict.values():
+                        if isinstance(tensor, torch.Tensor):
+                            pin_tensor_(tensor)
+                            
                 try:
-                    existing_data = torch.load(cache_path)
-                    if device_equals(
-                        next(t.device for t in existing_data["latent"].values() if isinstance(t, torch.Tensor)), 
-                        current_device
-                    ):
-                        replace_tensors_(existing_data["latent"], save_data["latent"])
-                        replace_tensors_(existing_data["text_embeddings"], save_data["text_embeddings"])
-                except Exception as e:
-                    logger.debug(f"Could not reuse tensors: {e}")
-                    torch_gc()  # Clean up any partial loads
-            
-            # Pin tensors before saving for faster I/O
-            for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
-                for tensor in tensor_dict.values():
-                    if isinstance(tensor, torch.Tensor):
-                        pin_tensor_(tensor)
-
-            # Prepare save data
-            save_data = {
-                "latent": latent_data,
-                "text_embeddings": text_embeddings,
-                "metadata": metadata
-            }
-            
-            try:
-                # Save with proper cleanup
-                torch.save(
-                    save_data,
-                    cache_path,
-                    _use_new_zipfile_serialization=True
-                )
-                torch_gc()  # Clean up after save
+                    # Save latents and text embeddings separately for better memory management
+                    torch.save(
+                        {
+                            "latent": latent_data,
+                            "metadata": {
+                                **metadata,
+                                "latent_timestamp": time.time()
+                            }
+                        },
+                        latent_path,
+                        _use_new_zipfile_serialization=True
+                    )
+                    
+                    torch.save(
+                        {
+                            "embeddings": text_embeddings,
+                            "metadata": {
+                                **metadata,
+                                "text_timestamp": time.time()
+                            }
+                        },
+                        text_path,
+                        _use_new_zipfile_serialization=True
+                    )
+                    
+                    # Update index
+                    self.cache_index["files"][str(file_path)] = {
+                        "latent_path": str(latent_path),
+                        "text_path": str(text_path),
+                        "hash": file_hash,
+                        "timestamp": time.time()
+                    }
+                    
+                    # Save index periodically
+                    if len(self.cache_index["files"]) % 100 == 0:
+                        self._save_cache_index()
+                        
+                finally:
+                    # Cleanup: Unpin tensors and free memory
+                    for tensor_dict in [latent_data, text_embeddings]:
+                        for tensor in tensor_dict.values():
+                            if isinstance(tensor, torch.Tensor):
+                                unpin_tensor_(tensor)
+                                
+                    torch_gc()
+                    
+                # Track final memory state
+                if self.enable_memory_tracking:
+                    self._track_memory("save_complete")
+                    
+                return True
                 
-                # Explicitly clean up save_data tensors
-                for tensor_dict in [latent_data, text_embeddings]:
-                    for tensor in tensor_dict.values():
-                        if isinstance(tensor, torch.Tensor):
-                            del tensor
-                del save_data
-                torch_gc()
-            finally:
-                # Unpin tensors after saving
-                for tensor_dict in [latent_data, text_embeddings]:
-                    for tensor in tensor_dict.values():
-                        if isinstance(tensor, torch.Tensor):
-                            unpin_tensor_(tensor)
+        except Exception as e:
+            logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
+            if self.enable_memory_tracking:
+                self._track_memory("save_error")
+            return False
+
+    def _process_image_batch(
+        self,
+        image_paths: List[Path],
+        caption_ext: str
+    ) -> Tuple[List[torch.Tensor], Dict]:
+        """Process batch of images with optimized memory handling.
+        
+        Args:
+            image_paths: List of paths to process
+            caption_ext: Caption file extension
             
-            # Update index with file mapping
-            self.cache_index["files"][str(file_path)] = {
-                "cache_path": str(cache_path),
-                "hash": file_hash,
-                "timestamp": time.time()
-            }
+        Returns:
+            Tuple of (tensors, metadata)
+        """
+        tensors = []
+        metadata = {}
+        
+        # Use thread pool for parallel I/O
+        with ThreadPoolExecutor(max_workers=self.num_proc) as pool:
+            futures = []
+            
+            # Submit processing jobs
+            for path in image_paths:
+                if str(path) in self.cache_index["files"]:
+                    self.stats.skipped_items += 1
+                    continue
+                    
+                futures.append(pool.submit(self._process_single_image, path, caption_ext))
+                
+            # Collect results with proper error handling
+            for future in futures:
+                try:
+                    result = future.result()
+                    if result is not None:
+                        tensor, meta = result
+                        # Validate tensor
+                        if self._validate_tensor(tensor):
+                            tensors.append(tensor)
+                            metadata.update(meta)
+                            self.stats.processed_items += 1
+                        else:
+                            self.stats.validation_errors += 1
+                except Exception as e:
+                    self.stats.failed_items += 1
+                    logger.error(f"Batch processing error: {str(e)}")
+                    
+        return tensors, metadata
+
+    def _validate_tensor(self, tensor: torch.Tensor) -> bool:
+        """Validate tensor properties with memory tracking."""
+        try:
+            if self.enable_memory_tracking:
+                self._track_memory("validate_start")
+                
+            if not isinstance(tensor, torch.Tensor):
+                return False
+                
+            if tensor.dim() != 4:  # [B, C, H, W]
+                return False
+                
+            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                return False
+                
+            # Check tensor device placement
+            if tensor.device.type == 'cuda':
+                # Ensure tensor is in contiguous memory
+                if not tensor.is_contiguous():
+                    tensor = tensor.contiguous()
+                    
+            return True
+            
+        finally:
+            if self.enable_memory_tracking:
+                self._track_memory("validate_complete")
+
+    def get_cached_item(
+        self,
+        file_path: Union[str, Path],
+        device: Optional[torch.device] = None
+    ) -> Optional[Dict[str, torch.Tensor]]:
+        """Retrieve cached item with optimized memory handling.
+        
+        Args:
+            file_path: Path to original file
+            device: Target device for tensors
+            
+        Returns:
+            Dict containing cached tensors and metadata
+        """
+        try:
+            if self.enable_memory_tracking:
+                self._track_memory("cache_fetch_start")
+                
+            file_info = self.cache_index["files"].get(str(file_path))
+            if not file_info:
+                self.stats.cache_misses += 1
+                return None
+                
+            latent_path = Path(file_info["latent_path"])
+            text_path = Path(file_info["text_path"])
+            
+            if not latent_path.exists() or not text_path.exists():
+                self.stats.corrupted_items += 1
+                return None
+                
+            # Load data with memory optimization
+            try:
+                with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
+                    # Load latents
+                    latent_data = torch.load(latent_path, map_location='cpu')
+                    text_data = torch.load(text_path, map_location='cpu')
+                    
+                    # Move to target device if specified
+                    if device is not None:
+                        for tensor_dict in [latent_data["latent"], text_data["embeddings"]]:
+                            for k, v in tensor_dict.items():
+                                if isinstance(v, torch.Tensor):
+                                    tensor_dict[k] = v.to(device, non_blocking=True)
+                                    
+                    self.stats.cache_hits += 1
+                    
+                    return {
+                        "latent": latent_data["latent"],
+                        "text_embeddings": text_data["embeddings"],
+                        "metadata": {
+                            **latent_data["metadata"],
+                            **text_data["metadata"]
+                        }
+                    }
+            finally:
+                if self.enable_memory_tracking:
+                    self._track_memory("cache_fetch_complete")
+                    
+        except Exception as e:
+            logger.error(f"Error retrieving cached item: {str(e)}")
+            self.stats.failed_items += 1
+            return None
+
+    def clear_cache(self, remove_files: bool = True):
+        """Clear cache with proper cleanup."""
+        try:
+            if remove_files:
+                # Remove cache directories
+                import shutil
+                shutil.rmtree(self.latents_dir)
+                shutil.rmtree(self.text_dir)
+                
+                # Recreate directories
+                self.latents_dir.mkdir(parents=True)
+                self.text_dir.mkdir(parents=True)
+                
+            # Reset index
+            self.cache_index = {"files": {}, "chunks": {}}
             self._save_cache_index()
             
-            return True
+            # Clear memory
+            torch_gc()
+            
+            # Reset statistics
+            self.stats = CacheStats()
+            if self.enable_memory_tracking:
+                self._init_memory_tracking()
+                
         except Exception as e:
-            logger.error(f"Error saving latent for {file_path}: {str(e)}")
-            return False
-            
-    def process_dataset(
-        self,
-        data_dir: Union[str, Path],
-        image_exts: List[str] = [".jpg", ".jpeg", ".png"],
-        caption_ext: str = ".txt", 
-        num_workers: Optional[int] = None
-    ) -> CacheStats:
-        """Process dataset with performance metrics logging.
-        
-        Args:
-            data_dir: Directory containing image-caption pairs
-            image_exts: List of valid image extensions
-            caption_ext: Caption file extension
-            num_workers: Number of worker processes
-            
-        Returns:
-            Dict with processing statistics
-        """
-        logger.info(f"Starting dataset processing with {num_workers or self.num_proc} workers")
-        from ..utils.paths import convert_windows_path, is_wsl
-        data_dir = convert_windows_path(data_dir, make_absolute=True)
-        if is_wsl():
-            logger.info(f"Running in WSL, using converted path: {data_dir}")
-        """Process entire dataset with parallel processing.
-        
-        Args:
-            data_dir: Directory containing image-caption pairs
-            image_exts: List of valid image extensions
-            caption_ext: Caption file extension
-            
-        Returns:
-            Processing statistics
-        """
-        data_dir = Path(data_dir)
-        stats = CacheStats()
-        
-        # Get all image files with WSL path handling
-        image_files = []
-        for ext in image_exts:
-            found_files = list(data_dir.glob(f"*{ext}"))
-            # Convert any Windows paths and handle list inputs
-            for f in found_files:
-                if isinstance(f, (list, tuple)):
-                    # Take first path if given a list
-                    if f:
-                        path = f[0] if isinstance(f[0], (str, Path)) else str(f[0])
-                        image_files.append(Path(str(convert_windows_path(path, make_absolute=True))))
-                else:
-                    image_files.append(Path(str(convert_windows_path(f, make_absolute=True))))
-            
-        logger.info(f"Found {len(image_files)} images to process")
-        
-        # Use provided num_workers or default
-        workers = num_workers if num_workers is not None else self.num_proc
-        
-        # Process in chunks
-        for chunk_start in tqdm(range(0, len(image_files), self.chunk_size), 
-                               desc="Processing chunks",
-                               disable=workers > 1):
-            chunk = image_files[chunk_start:chunk_start + self.chunk_size]
-            chunk_id = chunk_start // self.chunk_size
-            
-            # Process images in parallel
-            futures = []
-            for img_path in chunk:
-                if str(img_path) in self.cache_index["files"]:
-                    stats.skipped_items += 1
-                    logger.debug(f"Skipping already cached image: {img_path}")
-                    continue
-                
-                caption_path = img_path.with_suffix(caption_ext)
-                if not caption_path.exists():
-                    error_context = {
-                        'image_path': str(img_path),
-                        'caption_path': str(caption_path),
-                        'stage': CacheStage.INITIALIZATION.name
-                    }
-                    logger.error(
-                        f"Missing caption file:\n"
-                        f"Image path: {error_context['image_path']}\n"
-                        f"Caption path: {error_context['caption_path']}\n"
-                        f"Stage: {error_context['stage']}"
-                    )
-                    stats.failed_items += 1
-                    continue
-                
-                try:
-                    futures.append(
-                        self.image_pool.submit(
-                            self._process_image, 
-                            img_path
-                        ) if workers > 1 else self._process_image(img_path)
-                    )
-                except Exception as e:
-                    error_context = {
-                        'image_path': str(img_path),
-                        'error_type': type(e).__name__,
-                        'error_msg': str(e),
-                        'traceback': traceback.format_exc(),
-                        'stage': CacheStage.INITIALIZATION.name
-                    }
-                    logger.error(
-                        f"Error submitting processing job:\n"
-                        f"Image path: {error_context['image_path']}\n"
-                        f"Error type: {error_context['error_type']}\n"
-                        f"Error message: {error_context['error_msg']}\n"
-                        f"Stage: {error_context['stage']}\n"
-                        f"Traceback:\n{error_context['traceback']}"
-                    )
-                    stats.failed_items += 1
-                
-            # Collect results
-            tensors = []
-            metadata = {}
-            
-            for i, future in enumerate(futures):
-                try:
-                    tensor = future.result()
-                    try:
-                        img_path = chunk[i]
-                        if isinstance(img_path, (list, tuple)):
-                            # Handle list of paths by taking first valid one
-                            valid_path = None
-                            for p in img_path:
-                                try:
-                                    test_path = Path(str(p))
-                                    if test_path.exists():
-                                        valid_path = test_path
-                                        break
-                                except Exception:
-                                    continue
-                            if valid_path is None:
-                                raise ValueError(f"No valid path found in list: {img_path}")
-                            img_path = valid_path
-                        else:
-                            img_path = Path(str(img_path))
-                
-                        caption_path = img_path.with_suffix(caption_ext)
-                
-                        # Read caption with error handling
-                        with open(caption_path, 'r', encoding='utf-8') as f:
-                            caption = f.read().strip()
-                    except Exception as e:
-                        error_context = {
-                            'image_path': str(img_path),
-                            'caption_path': str(caption_path),
-                            'error_type': type(e).__name__,
-                            'error_msg': str(e),
-                            'traceback': traceback.format_exc(),
-                            'stage': CacheStage.INITIALIZATION.name
-                        }
-                        logger.error(
-                            f"Error reading caption file:\n"
-                            f"Image path: {error_context['image_path']}\n"
-                            f"Caption path: {error_context['caption_path']}\n"
-                            f"Error type: {error_context['error_type']}\n"
-                            f"Error message: {error_context['error_msg']}\n"
-                            f"Stage: {error_context['stage']}\n"
-                            f"Traceback:\n{error_context['traceback']}"
-                        )
-                        stats.failed_items += 1
-                        continue
-                        
-                    # Validate tensor
-                    try:
-                        if not isinstance(tensor, torch.Tensor):
-                            raise CacheValidationError(
-                                f"Invalid tensor type: {type(tensor)}",
-                                {'image_path': str(img_path)}
-                            )
-                        if tensor.dim() != 4:  # [C, H, W] or [B, C, H, W]
-                            raise CacheValidationError(
-                                f"Invalid tensor dimensions: {tensor.dim()}",
-                                {'image_path': str(img_path)}
-                            )
-                        if torch.isnan(tensor).any() or torch.isinf(tensor).any():
-                            raise CacheValidationError(
-                                "Tensor contains NaN or Inf values",
-                                {'image_path': str(img_path)}
-                            )
-                    except CacheValidationError as e:
-                        logger.error(
-                            f"Tensor validation failed:\n"
-                            f"Image path: {e.context.get('image_path')}\n"
-                            f"Error: {str(e)}"
-                        )
-                        stats.validation_errors += 1
-                        continue
-                        
-                    # Store tensor and metadata
-                    tensors.append(tensor)
-                    metadata[str(img_path)] = {
-                        "caption": caption,
-                        "hash": self._compute_hash(img_path) if self.verify_hashes else None
-                    }
-                    stats.processed_items += 1
-                    logger.debug(f"Successfully processed: {img_path}")
-                except Exception as e:
-                    error_context = {
-                        'image_path': str(chunk[i]),
-                        'error_type': type(e).__name__,
-                        'error_msg': str(e),
-                        'traceback': traceback.format_exc(),
-                        'stage': CacheStage.IMAGE_PROCESSING.name
-                    }
-                    logger.error(
-                        f"Error processing chunk item:\n"
-                        f"Image path: {error_context['image_path']}\n"
-                        f"Error type: {error_context['error_type']}\n"
-                        f"Error message: {error_context['error_msg']}\n"
-                        f"Stage: {error_context['stage']}\n"
-                        f"Traceback:\n{error_context['traceback']}"
-                    )
-                    stats.failed_items += 1
-                    
-            # Save chunk if not empty
-            if tensors:
-                if self._save_chunk(chunk_id, tensors, metadata):
-                    # Update main index
-                    for img_path, meta in metadata.items():
-                        self.cache_index["files"][img_path] = {
-                            "chunk_id": chunk_id,
-                            "metadata": meta
-                        }
-                        
-            # Save index periodically
-            if chunk_id % 10 == 0:
-                self._save_cache_index()
-                
-        # Final index save
-        self._save_cache_index()
-        
-        return stats
-        
-    def get_cached_latent(
-        self,
-        index: int
-    ) -> Optional[Dict[str, torch.Tensor]]:
-        """Retrieve cached item by image path."""
-        """Get cached latent by index."""
-        if str(index) not in self.cache_index["files"]:
-            return None
-            
-        file_info = self.cache_index["files"][str(index)]
-        latent_path = Path(file_info["path"])
-        
-        if not latent_path.exists():
-            return None
-            
+            logger.error(f"Error clearing cache: {str(e)}")
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with proper cleanup."""
         try:
-            cached_data = torch.load(latent_path, map_location='cpu')
-            if cached_data is None or "latent" not in cached_data:
-                logger.warning(f"Invalid cache data for index {index}")
-                return None
-            return cached_data["latent"]
-        except Exception as e:
-            logger.error(f"Error loading cached latent {index}: {str(e)}")
-            return None
-        
-    def verify_cache(self) -> Dict[str, int]:
-        """Verify cache integrity."""
-        stats = {"valid": 0, "corrupted": 0, "missing": 0}
-        
-        for file_path, file_info in tqdm(self.cache_index["files"].items()):
-            if not self.verify_hashes:
-                continue
-                
-            try:
-                current_hash = self._compute_hash(file_path)
-                stored_hash = file_info["metadata"]["hash"]
-                
-                if current_hash == stored_hash:
-                    stats["valid"] += 1
-                else:
-                    stats["corrupted"] += 1
-            except FileNotFoundError:
-                stats["missing"] += 1
-                
-        return stats
-        
-    def clear_cache(self):
-        """Clear all cached files."""
-        # Remove chunk files
-        for chunk_id, chunk_info in self.cache_index["chunks"].items():
-            try:
-                Path(chunk_info["path"]).unlink()
-            except FileNotFoundError:
-                logger.warning(f"Cache chunk {chunk_id} already missing")
-                
-        # Clear index and clean memory
-        self.cache_index = {"files": {}, "chunks": {}}
-        self._save_cache_index()
-        torch_gc()  # Ensure memory is freed after clearing cache
+            self._save_cache_index()
+        finally:
+            self.image_pool.shutdown()
+            self.io_pool.shutdown()
+            torch_gc()

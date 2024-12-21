@@ -1,21 +1,20 @@
-"""Dataset implementation for SDXL training."""
+"""High-performance dataset implementation for SDXL training with optimized memory handling."""
 import os
 import threading
 import traceback
-from src.core.logging.logging import setup_logging
+from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+from contextlib import contextmanager
 
-# Third-party imports
 import torch
 from PIL import Image
-from .utils.paths import convert_windows_path
-from PIL.Image import BILINEAR, FLIP_LEFT_RIGHT
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import crop
 
-# Local imports
+from src.core.logging.logging import setup_logging
 from src.core.memory.tensor import (
     create_stream_context,
     tensors_record_stream,
@@ -25,13 +24,44 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     device_equals
 )
-from src.models.sdxl import StableDiffusionXLPipeline
+from .utils.paths import convert_windows_path
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
 logger = setup_logging(__name__)
 
+class DatasetError(Exception):
+    """Base exception for dataset-related errors."""
+    def __init__(self, message: str, context: dict = None):
+        super().__init__(message)
+        self.context = context or {}
+
+class ImageLoadError(DatasetError):
+    """Raised when image loading fails."""
+    pass
+
+class BucketingError(DatasetError):
+    """Raised when bucketing operations fail."""
+    pass
+
+class ProcessingError(DatasetError):
+    """Raised when tensor processing fails."""
+    pass
+
+@dataclass
+class DatasetStats:
+    """Track dataset statistics."""
+    total_images: int = 0
+    processed_images: int = 0
+    failed_images: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    memory_allocated: int = 0
+    peak_memory: int = 0
+
 class AspectBucketDataset(Dataset):
+    """Enhanced SDXL dataset with optimized memory handling and bucketing."""
+    
     def __init__(
         self,
         config: Config,
@@ -39,481 +69,314 @@ class AspectBucketDataset(Dataset):
         captions: List[str],
         latent_preprocessor: Optional[LatentPreprocessor] = None,
         tag_weighter: Optional[TagWeighter] = None,
-        is_train: bool = True
+        is_train: bool = True,
+        enable_memory_tracking: bool = True
     ):
-        """Initialize SDXL dataset with memory optimizations and aspect ratio preservation.
+        """Initialize dataset with enhanced memory management."""
+        super().__init__()
         
-        Args:
-            config: Configuration object
-            image_paths: List of paths to images
-            captions: List of captions/prompts
-            latent_preprocessor: Optional latent preprocessor for caching
-            tag_weighter: Optional tag weighter for loss weighting
-            is_train: Whether this is training data
-        """
+        # Initialize statistics tracking
+        self.stats = DatasetStats()
+        self.enable_memory_tracking = enable_memory_tracking
+        
         # Setup CUDA optimizations
         if torch.cuda.is_available():
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
-            torch.backends.cudnn.benchmark = True
+            self._setup_cuda_optimizations()
             
-        # Convert and validate paths with detailed error tracking
-        converted_paths = []
-        for path in image_paths:
-            try:
-                converted = convert_windows_path(path, make_absolute=True)
-                if not os.path.exists(str(converted)):
-                    logger.warning(
-                        "Path does not exist after conversion",
-                        extra={
-                            'original_path': str(path),
-                            'converted_path': str(converted),
-                            'function': '__init__',
-                            'line_number': traceback.extract_stack()[-1].lineno,
-                            'file_path': __file__
-                        }
-                    )
-                    continue
-                converted_paths.append(str(converted))
-            except Exception as e:
-                logger.error(
-                    "Error converting path",
-                    extra={
-                        'path': str(path),
-                        'error_type': type(e).__name__,
-                        'error_msg': str(e),
-                        'function': '__init__',
-                        'line_number': traceback.extract_stack()[-1].lineno,
-                        'file_path': __file__,
-                        'traceback': traceback.format_exc()
-                    }
-                )
-                
-        if not converted_paths:
-            raise RuntimeError("No valid image paths found after conversion")
-            
-        image_paths = converted_paths
+        # Process and validate paths with error tracking
+        self.image_paths = self._validate_paths(image_paths)
+        self.stats.total_images = len(self.image_paths)
+        
+        # Store configuration
         self.config = config
-        self.image_paths = image_paths
         self.captions = captions
         self.latent_preprocessor = latent_preprocessor
-        self.tag_weighter = tag_weighter
+        self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
         self.is_train = is_train
         
-        # Image settings from config with validation
-        self.target_size = tuple(map(int, config.global_config.image.target_size))
-        self.max_size = tuple(map(int, config.global_config.image.max_size))
-        self.min_size = tuple(map(int, config.global_config.image.min_size))
-        self.bucket_step = int(config.global_config.image.bucket_step)
-        self.max_aspect_ratio = float(config.global_config.image.max_aspect_ratio)
+        # Setup image processing parameters
+        self._setup_image_config()
         
-        # Validate size configurations with detailed error tracking
-        try:
-            # Check types with detailed context
-            for size_name, size_tuple in [
-                ("max_size", self.max_size),
-                ("min_size", self.min_size),
-                ("target_size", self.target_size)
-            ]:
-                if not isinstance(size_tuple, tuple):
-                    raise ValueError(
-                        f"{size_name} must be a tuple, got {type(size_tuple)}\n"
-                        f"Value: {repr(size_tuple)}"
-                    )
-                if len(size_tuple) != 2:
-                    raise ValueError(
-                        f"{size_name} must contain exactly 2 values, got {len(size_tuple)}\n"
-                        f"Value: {repr(size_tuple)}"
-                    )
-                for i, dim in enumerate(size_tuple):
-                    if not isinstance(dim, int):
-                        raise ValueError(
-                            f"{size_name}[{i}] must be an integer, got {type(dim)}\n"
-                            f"Value: {repr(dim)}"
-                        )
-                
-            # Log actual values for debugging
-            logger.debug(
-                "Image size configuration:\n"
-                f"max_size: {repr(self.max_size)} ({type(self.max_size)})\n"
-                f"min_size: {repr(self.min_size)} ({type(self.min_size)})\n"
-                f"target_size: {repr(self.target_size)} ({type(self.target_size)})"
-            )
-                
-        except Exception as e:
-            logger.error(
-                f"Image size validation failed:\n"
-                f"Error: {str(e)}\n"
-                f"max_size: {repr(self.max_size)} ({type(self.max_size)})\n"
-                f"min_size: {repr(self.min_size)} ({type(self.min_size)})\n"
-                f"target_size: {repr(self.target_size)} ({type(self.target_size)})\n"
-                f"Traceback:\n{traceback.format_exc()}"
-            )
-            raise
-        
-        # Create buckets based on aspect ratios
+        # Create and validate buckets
         self.buckets = self._create_buckets()
         self.bucket_indices = self._assign_buckets()
         
-        # Set up transforms
-        self.train_transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])
-        ])
+        # Setup transforms with memory optimization
+        self.train_transforms = self._create_transforms()
         
-        # Initialize tag weighter if enabled but not provided
-        if self.tag_weighter is None and config.tag_weighting.enable_tag_weighting:
-            self.tag_weighter = create_tag_weighter(config, captions)
-            
+        # Initialize memory tracking if enabled
+        if enable_memory_tracking and torch.cuda.is_available():
+            self._init_memory_tracking()
 
-    def _create_buckets(self) -> List[Tuple[int, int]]:
-        """Get supported SDXL dimensions as buckets."""
-        return self.config.global_config.image.supported_dims
+    def _setup_cuda_optimizations(self):
+        """Setup CUDA-specific optimizations."""
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+        torch.backends.cudnn.benchmark = True
 
-    def _assign_buckets(self) -> List[int]:
-        """Assign each image to closest supported SDXL dimension based on aspect ratio and area."""
-        bucket_indices = []
+    def _validate_paths(self, paths: List[str]) -> List[str]:
+        """Validate and convert image paths with error tracking."""
+        validated_paths = []
         
-        for img_path in self.image_paths:
+        for path in paths:
             try:
-                img = Image.open(img_path)
-                w, h = img.size
-                aspect_ratio = w / h
-                img_area = w * h
-                
-                # Find closest supported dimension
-                min_diff = float('inf')
-                best_bucket_idx = 0
-                
-                for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
-                    # Skip buckets exceeding max aspect ratio
-                    bucket_ratio = bucket_w / bucket_h
-                    if bucket_ratio > self.max_aspect_ratio:
-                        continue
-                        
-                    # Compare aspect ratios and total area difference
-                    ratio_diff = abs(aspect_ratio - bucket_ratio)
-                    bucket_area = bucket_w * bucket_h
-                    area_diff = abs(img_area - bucket_area)
-                    
-                    # Weighted combination favoring aspect ratio match
-                    total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
-                    
-                    if total_diff < min_diff:
-                        min_diff = total_diff
-                        best_bucket_idx = idx
-                
-                bucket_indices.append(best_bucket_idx)
-                
+                converted = convert_windows_path(path, make_absolute=True)
+                if os.path.exists(str(converted)):
+                    validated_paths.append(str(converted))
+                else:
+                    self.stats.failed_images += 1
+                    logger.warning(f"Path does not exist: {converted}")
             except Exception as e:
-                logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
-                # Use default bucket (first one) on error
-                bucket_indices.append(0)
+                self.stats.failed_images += 1
+                logger.error(f"Path validation failed: {str(e)}")
                 
-        return bucket_indices
+        if not validated_paths:
+            raise DatasetError("No valid image paths found")
+            
+        return validated_paths
 
-    def _process_image(self, image: Image.Image, target_size: Tuple[int, int]) -> torch.Tensor:
-        """Process image with resizing and augmentations using optimized memory handling."""
+    @contextmanager
+    def _track_memory(self, context: str):
+        """Track memory usage with context manager."""
+        if not (self.enable_memory_tracking and torch.cuda.is_available()):
+            yield
+            return
+            
         try:
-            # Validate input
-            if not isinstance(image, Image.Image):
-                raise ValueError(f"Expected PIL.Image, got {type(image)}")
-            if not isinstance(target_size, tuple) or len(target_size) != 2:
-                raise ValueError(f"Invalid target size: {target_size}")
-                
-            # Resize with bounds checking
-            current_w, current_h = image.size
-            target_w, target_h = target_size
+            start_mem = torch.cuda.memory_allocated()
+            yield
+            end_mem = torch.cuda.memory_allocated()
             
-            max_h, max_w = self.max_size
-            if target_w > max_w or target_h > max_h:
-                logger.warning(f"Target size {target_size} exceeds max size {self.max_size}")
-                scale = min(max_w / target_w, max_h / target_h)
-                target_w = int(target_w * scale)
-                target_h = int(target_h * scale)
-                
-            image = image.resize((target_w, target_h), BILINEAR)
+            self.stats.memory_allocated = end_mem
+            self.stats.peak_memory = max(self.stats.peak_memory, end_mem)
             
-            # Random flip in training
-            if self.is_train and self.config.training.random_flip and torch.rand(1).item() < 0.5:
-                image = image.transpose(FLIP_LEFT_RIGHT)
+            if end_mem - start_mem > 1e8:  # 100MB
+                logger.warning(f"High memory allocation in {context}: {(end_mem - start_mem) / 1e6:.1f}MB")
+        except Exception as e:
+            logger.error(f"Memory tracking failed in {context}: {str(e)}")
+            raise
+
+    def _process_image(
+        self,
+        image: Image.Image,
+        target_size: Tuple[int, int],
+        device: Optional[torch.device] = None
+    ) -> torch.Tensor:
+        """Process single image with optimized memory handling."""
+        with self._track_memory("image_processing"):
+            try:
+                # Input validation
+                if not isinstance(image, Image.Image):
+                    raise ProcessingError(f"Expected PIL.Image, got {type(image)}")
+                    
+                # Create processing streams
+                transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
                 
-            # Convert to tensor and normalize efficiently
-            with create_stream_context(torch.cuda.current_stream()):
-                tensor = self.train_transforms(image)
+                # Resize image with bounds checking
+                image = self._resize_image(image, target_size)
                 
-                # Add batch dimension before memory optimization
-                tensor = tensor.unsqueeze(0)  # Add batch dimension [1, C, H, W]
-                
-                # Optimize memory layout
-                if torch.cuda.is_available():
-                    tensor = tensor.contiguous(memory_format=torch.channels_last)
-                    pin_tensor_(tensor)
-                    if self.is_train:
-                        tensors_record_stream(torch.cuda.current_stream(), tensor)
-                
-                # Remove batch dimension before returning
-                tensor = tensor.squeeze(0)  # Back to [C, H, W]
+                # Apply transforms with CUDA stream optimization
+                with create_stream_context(compute_stream):
+                    # Convert to tensor and add batch dimension
+                    tensor = self.train_transforms(image).unsqueeze(0)
+                    
+                    # Optimize memory format for device
+                    if device and device.type == 'cuda':
+                        tensor = tensor.to(
+                            memory_format=torch.channels_last,
+                            device=device,
+                            non_blocking=True
+                        )
                         
+                        # Pin memory and record stream
+                        pin_tensor_(tensor)
+                        tensors_record_stream(compute_stream, tensor)
+                        
+                # Remove batch dimension
+                tensor = tensor.squeeze(0)
+                
+                self.stats.processed_images += 1
                 return tensor
                 
-        except Exception as e:
-            logger.error(
-                f"Error processing image: {str(e)}\n"
-                f"Traceback:\n{traceback.format_exc()}\n"
-                f"Image shape: {getattr(image, 'size', 'Unknown')}\n"
-                f"Target size: {target_size}"
-            )
-            # Return zero tensor of correct shape as fallback
-            return torch.zeros((3, target_size[1], target_size[0]), 
-                             dtype=torch.float32)
-
-    def __len__(self) -> int:
-        return len(self.image_paths)
-
-    def __getitem__(self, idx: Union[int, slice]) -> Dict[str, Union[torch.Tensor, str, Tuple[int, int], float]]:
-        """Get dataset item with bucketing and caching.
-        
-        Returns dict with:
-            - pixel_values: Processed image tensor
-            - text: Caption/prompt
-            - original_size: Original image dimensions
-            - crop_top_left: Crop coordinates
-            - target_size: Target size after bucketing
-            - loss_weight: Optional tag-based loss weight
-        """
-        try:
-            # Validate index with detailed error tracking and context
-            if not isinstance(idx, (int, slice)):
+            except Exception as e:
                 error_context = {
-                    'expected_type': 'int or slice',
-                    'actual_type': type(idx).__name__,
-                    'value': repr(idx),
-                    'function': '__getitem__',
-                    'line_number': traceback.extract_stack()[-1].lineno,
-                    'file_path': __file__,
-                    'traceback': traceback.format_exc(),
-                    'dataset_size': len(self.image_paths),
-                    'valid_range': f'[0, {len(self.image_paths)})',
-                    'process': os.getpid(),
-                    'thread': threading.get_ident()
+                    'target_size': target_size,
+                    'device': str(device),
+                    'error': str(e)
                 }
-                logger.error(
-                    f"Invalid index type:\n"
-                    f"Expected: {error_context['expected_type']}\n"
-                    f"Got: {error_context['actual_type']}\n"
-                    f"Value: {error_context['value']}\n"
-                    f"Dataset size: {error_context['dataset_size']}\n"
-                    f"Valid range: {error_context['valid_range']}",
-                    extra=error_context
-                )
-                raise TypeError(
-                    f"Dataset indices must be integers or slices, not {type(idx)}. "
-                    f"Valid range is [0, {len(self.image_paths)})"
-                )
-                
-            if isinstance(idx, int):
-                if idx < 0 or idx >= len(self.image_paths):
-                    error_msg = f"Index {idx} out of range [0, {len(self.image_paths)})"
-                    logger.error(
-                        f"Index out of range:\n"
-                        f"Index: {idx}\n"
-                        f"Valid range: [0, {len(self.image_paths)})\n"
-                        f"Dataset size: {len(self.image_paths)}"
-                    )
-                    raise IndexError(error_msg)
-            
-            # Load and process image with WSL path handling
-            img_path = self.image_paths[idx]
-            if isinstance(img_path, (list, tuple)):
-                img_path = img_path[0] if img_path else None
-            image_path = convert_windows_path(img_path, make_absolute=True) if img_path else None
-        except Exception as e:
-            logger.error(
-                "Error processing image path",
-                extra={
-                    'index': idx,
-                    'error_type': type(e).__name__,
-                    'error_msg': str(e),
-                    'image_path': str(img_path),
-                    'traceback': traceback.format_exc()
-                }
-            )
-            raise
+                raise ProcessingError("Image processing failed", error_context) from e
 
-        try:
-            image = Image.open(image_path).convert('RGB')
-            original_size = image.size
-            
-            # Get bucket dimensions
-            bucket_idx = self.bucket_indices[idx]
-            target_h, target_w = self.buckets[bucket_idx]
-        except Exception as e:
-            logger.error(
-                "Error loading or processing image",
-                extra={
-                    'image_path': str(image_path),
-                    'error_type': type(e).__name__,
-                    'error_msg': str(e),
-                    'function': '__getitem__',
-                    'line_number': traceback.extract_stack()[-1].lineno,
-                    'file_path': __file__,
-                    'traceback': traceback.format_exc()
-                }
-            )
-            raise
-            
-        # Calculate crop coordinates
-        if self.config.training.center_crop:
-            crop_top = max(0, (image.height - target_h) // 2)
-            crop_left = max(0, (image.width - target_w) // 2)
-        else:
-            crop_top = torch.randint(0, max(1, image.height - target_h), (1,)).item()
-            crop_left = torch.randint(0, max(1, image.width - target_w), (1,)).item()
-            
-        # Crop and process image
-        image = crop(image, crop_top, crop_left, target_h, target_w)
-        pixel_values = self._process_image(image, (target_w, target_h))
-        
-        # Get caption and compute loss weight if tag weighter is enabled
-        caption = self.captions[idx]
-        loss_weight = (
-            self.tag_weighter.get_caption_weight(caption)
-            if self.tag_weighter is not None
-            else 1.0
-        )
-        
-        return {
-            "pixel_values": pixel_values,
-            "text": caption,
-            "original_size": original_size,
-            "crop_top_left": (crop_top, crop_left),
-            "target_size": (target_h, target_w),
-            "loss_weight": loss_weight
-        }
-
-    def collate_fn(self, examples: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Custom collate function with optimized memory handling and CUDA streams.
-        
-        Uses:
-        - Multiple CUDA streams for pipelined transfers
-        - Pinned memory for faster host-device transfers
-        - Channels-last memory format for better throughput
-        - Bucketing for efficient batch construction
-        """
-        # Create streams for pipelined operations
-        transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-        compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-        
-        # Initialize variables
-        pixel_values = None
-        pinned_buffer = None
-        
-        # Pre-allocate pinned memory buffer if using CUDA
-        if torch.cuda.is_available():
-            buffer_shape = (len(examples),) + examples[0]["pixel_values"].shape
-            pinned_buffer = torch.empty(buffer_shape, pin_memory=True)
-            
-        # Stack tensors with optimized memory handling
-        with create_stream_context(transfer_stream):
-            # Skip if no pinned buffer
-            if pinned_buffer is not None:
-                # Copy to pinned buffer
-                for i, example in enumerate(examples):
-                    pinned_buffer[i].copy_(example["pixel_values"], non_blocking=True)
-            
-            # Move to GPU with channels-last optimization if using CUDA
-            if pinned_buffer is not None:
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                # Verify device before transfer
-                if not device_equals(pinned_buffer.device, device):
-                    tensors_to_device_(pinned_buffer, device, non_blocking=True)
-                pixel_values = pinned_buffer.to(memory_format=torch.channels_last)
+    def _create_collate_buffers(self, batch_size: int, example_shape: torch.Size) -> Dict[str, torch.Tensor]:
+        """Create reusable buffers for collate function."""
+        with self._track_memory("create_buffers"):
+            try:
+                buffers = {}
                 
                 if torch.cuda.is_available():
-                    tensors_record_stream(transfer_stream, pixel_values)
-                    # Clean up pinned memory
-                    unpin_tensor_(pinned_buffer)
-            else:
-                # Fallback for CPU-only
-                pixel_values = torch.stack([example["pixel_values"] for example in examples])
-                
-            loss_weights = torch.tensor([example["loss_weight"] for example in examples], dtype=torch.float32)
-        
-        # If using latent preprocessor, get cached embeddings
-        if self.latent_preprocessor is not None:
-            # Use compute stream for preprocessing
-            with create_stream_context(compute_stream):
-                if compute_stream is not None:
-                    compute_stream.wait_stream(transfer_stream)
+                    # Create pinned buffers for efficient transfers
+                    buffers['pixel_values'] = torch.empty(
+                        (batch_size,) + example_shape,
+                        pin_memory=True
+                    )
                     
-                # Clean up GPU memory before preprocessing
+                    # Create device buffers for final storage
+                    device = torch.device('cuda')
+                    buffers['device_storage'] = torch.empty(
+                        (batch_size,) + example_shape,
+                        device=device,
+                        memory_format=torch.channels_last
+                    )
+                    
+                return buffers
+                
+            except Exception as e:
+                raise ProcessingError("Failed to create collate buffers", {
+                    'batch_size': batch_size,
+                    'shape': example_shape,
+                    'error': str(e)
+                })
+
+    def collate_fn(self, examples: List[Dict]) -> Dict[str, torch.Tensor]:
+        """Optimized collate function with efficient memory handling."""
+        with self._track_memory("collate"):
+            try:
+                # Create or reuse buffers
+                if not hasattr(self, '_collate_buffers'):
+                    self._collate_buffers = self._create_collate_buffers(
+                        len(examples),
+                        examples[0]["pixel_values"].shape
+                    )
+                
+                # Get streams for pipelined operations
+                transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                
+                with create_stream_context(transfer_stream):
+                    # Copy to pinned buffer
+                    if 'pixel_values' in self._collate_buffers:
+                        for i, example in enumerate(examples):
+                            self._collate_buffers['pixel_values'][i].copy_(
+                                example["pixel_values"],
+                                non_blocking=True
+                            )
+                            
+                    # Transfer to device with compute stream
+                    if compute_stream and 'device_storage' in self._collate_buffers:
+                        with torch.cuda.stream(compute_stream):
+                            compute_stream.wait_stream(transfer_stream)
+                            
+                            # Move to device and optimize format
+                            pixel_values = self._collate_buffers['device_storage']
+                            pixel_values.copy_(
+                                self._collate_buffers['pixel_values'],
+                                non_blocking=True
+                            )
+                            
+                            # Record stream and clean up
+                            tensors_record_stream(compute_stream, pixel_values)
+                            for buffer in self._collate_buffers.values():
+                                if buffer.is_pinned():
+                                    unpin_tensor_(buffer)
+                    else:
+                        # CPU fallback
+                        pixel_values = torch.stack([
+                            example["pixel_values"] for example in examples
+                        ])
+                
+                # Process with latent preprocessor if available
+                if self.latent_preprocessor is not None:
+                    return self._process_with_latents(
+                        examples,
+                        pixel_values,
+                        compute_stream
+                    )
+                    
+                # Return raw inputs
+                return {
+                    "pixel_values": pixel_values,
+                    "text": [example["text"] for example in examples],
+                    "original_sizes": [example["original_size"] for example in examples],
+                    "crop_top_lefts": [example["crop_top_left"] for example in examples],
+                    "target_sizes": [example["target_size"] for example in examples],
+                    "loss_weights": torch.tensor([
+                        example["loss_weight"] for example in examples
+                    ], dtype=torch.float32)
+                }
+                
+            except Exception as e:
+                raise ProcessingError("Collate failed", {
+                    'batch_size': len(examples),
+                    'error': str(e)
+                })
+            finally:
+                # Clean up
+                torch_gc()
+
+    def _process_with_latents(
+        self,
+        examples: List[Dict],
+        pixel_values: torch.Tensor,
+        compute_stream: Optional[torch.cuda.Stream]
+    ) -> Dict[str, torch.Tensor]:
+        """Process batch with latent preprocessor."""
+        with self._track_memory("latent_processing"):
+            try:
+                with create_stream_context(compute_stream):
+                    # Process text embeddings
+                    text_embeddings = self.latent_preprocessor.encode_prompt(
+                        [example["text"] for example in examples],
+                        proportion_empty_prompts=self.config.data.proportion_empty_prompts,
+                        is_train=self.is_train
+                    )
+                    
+                    # Process VAE embeddings
+                    vae_embeddings = self.latent_preprocessor.encode_images(
+                        pixel_values
+                    )
+                    
+                    return {
+                        "pixel_values": pixel_values,
+                        "prompt_embeds": text_embeddings["prompt_embeds"],
+                        "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"],
+                        "model_input": vae_embeddings["model_input"],
+                        "original_sizes": [example["original_size"] for example in examples],
+                        "crop_top_lefts": [example["crop_top_left"] for example in examples],
+                        "target_sizes": [example["target_size"] for example in examples],
+                        "loss_weights": torch.tensor([
+                            example["loss_weight"] for example in examples
+                        ], dtype=torch.float32)
+                    }
+                    
+            except Exception as e:
+                raise ProcessingError("Latent processing failed", {
+                    'batch_size': len(examples),
+                    'error': str(e)
+                })
+            finally:
+                torch_gc()
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with cleanup."""
+        try:
+            # Clean up CUDA resources
+            if torch.cuda.is_available():
+                for stream in self.streams.values():
+                    stream.synchronize()
                 torch_gc()
                 
-                text_embeddings = self.latent_preprocessor.encode_prompt(
-                    [example["text"] for example in examples],
-                    proportion_empty_prompts=self.config.data.proportion_empty_prompts,
-                    is_train=self.is_train
+            # Log final statistics
+            if self.enable_memory_tracking:
+                logger.info(
+                    f"Dataset statistics:\n"
+                    f"- Processed images: {self.stats.processed_images}/{self.stats.total_images}\n"
+                    f"- Failed images: {self.stats.failed_images}\n"
+                    f"- Peak memory: {self.stats.peak_memory / 1e9:.2f}GB"
                 )
-                vae_embeddings = self.latent_preprocessor.encode_images(pixel_values)
-            
-            return {
-                "pixel_values": pixel_values,
-                "prompt_embeds": text_embeddings["prompt_embeds"],
-                "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"],
-                "model_input": vae_embeddings["model_input"],
-                "original_sizes": [example["original_size"] for example in examples],
-                "crop_top_lefts": [example["crop_top_left"] for example in examples],
-                "target_sizes": [example["target_size"] for example in examples],
-                "loss_weights": loss_weights
-            }
-        
-        # Without preprocessor, return raw inputs
-        return {
-            "pixel_values": pixel_values,
-            "text": [example["text"] for example in examples],
-            "original_sizes": [example["original_size"] for example in examples],
-            "crop_top_lefts": [example["crop_top_left"] for example in examples],
-            "target_sizes": [example["target_size"] for example in examples],
-            "loss_weights": loss_weights
-        }
-
-
-def create_dataset(
-    config: Config,
-    image_paths: List[str],
-    captions: List[str],
-    latent_preprocessor: Optional[LatentPreprocessor] = None,
-    tag_weighter: Optional[TagWeighter] = None,
-    is_train: bool = True
-) -> AspectBucketDataset:
-    """Create SDXL dataset with validation.
-    
-    Args:
-        config: Configuration object
-        image_paths: List of paths to images
-        captions: List of captions/prompts
-        latent_preprocessor: Optional latent preprocessor
-        tag_weighter: Optional tag weighter
-        is_train: Whether this is training data
-        
-    Returns:
-        Configured dataset
-    """
-    # Validate inputs
-    assert len(image_paths) == len(captions), "Number of images and captions must match"
-    assert all(Path(p).exists() for p in image_paths), "All image paths must exist"
-    
-    # Create dataset
-    dataset = AspectBucketDataset(
-        config=config,
-        image_paths=image_paths,
-        captions=captions,
-        latent_preprocessor=latent_preprocessor,
-        tag_weighter=tag_weighter,
-        is_train=is_train
-    )
-    
-    logger.info(f"Created dataset with {len(dataset)} examples and {len(dataset.buckets)} buckets")
-    return dataset
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
