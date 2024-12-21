@@ -1,13 +1,11 @@
 """Memory optimization utilities for training."""
 import logging
 import torch
-from src.core.logging.logging import setup_logging
 from typing import Dict, Optional, Any, TYPE_CHECKING
 from pathlib import Path
 from ..types import DataType, ModelWeightDtypes
 
-logger = setup_logging(__name__, level="INFO")
-from src.data.utils.paths import convert_windows_path, is_wsl
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ...data.config import Config

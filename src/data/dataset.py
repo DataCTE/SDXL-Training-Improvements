@@ -24,9 +24,14 @@ from src.core.memory.tensor import (
     device_equals
 )
 from src.models.sdxl import StableDiffusionXLPipeline
-from src.core.memory.optimizations import (
-    setup_memory_optimizations,
-    verify_memory_optimizations
+from src.core.memory.tensor import (
+    create_stream_context,
+    tensors_record_stream,
+    pin_tensor_,
+    unpin_tensor_,
+    torch_gc,
+    tensors_to_device_,
+    device_equals
 )
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
@@ -53,17 +58,14 @@ class AspectBucketDataset(Dataset):
             tag_weighter: Optional tag weighter
             is_train: Whether this is training data
         """
-        # Setup memory optimizations and validate paths
+        # Setup CUDA optimizations and validate paths
         try:
             if torch.cuda.is_available():
-                success = setup_memory_optimizations(
-                    model=None,
-                    config=config,
-                    device=torch.device("cuda"),
-                    batch_size=config.training.batch_size
-                )
-                if not success:
-                    logger.warning("Memory optimizations setup failed, continuing with defaults")
+                # Enable memory optimizations
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+                torch.backends.cudnn.benchmark = True
                     
             # Convert and validate paths with detailed error tracking
             converted_paths = []
