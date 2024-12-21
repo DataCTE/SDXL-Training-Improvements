@@ -18,6 +18,18 @@ dynamic = [
     "scripts"
 ]
 
+[tool.setuptools.dynamic]
+version = {attr = "src.__version__"}
+description = {file = ["README.md"]}
+readme = {file = ["README.md"]}
+requires-python = {file = ["requirements-python.txt"]}
+license = {file = ["LICENSE"]}
+authors = {file = ["AUTHORS"]}
+keywords = {file = ["keywords.txt"]}
+classifiers = {file = ["classifiers.txt"]}
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {file = ["requirements-dev.txt", "requirements-docs.txt"]}
+
 [tool.black]
 line-length = 100
 target-version = ["py38", "py39", "py310", "py311"]
