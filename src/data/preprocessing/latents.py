@@ -645,7 +645,11 @@ class LatentPreprocessor:
                 logger.error(f"Error processing text batch {idx}: {str(e)}")
                 continue
 
-        # Combine text embedding batches with validation
+        # Process text embeddings in chunks to manage memory
+        chunk_size = 1000  # Process 1000 embeddings at a time
+        combined_prompt_embeds = []
+        combined_pooled_embeds = []
+
         if not text_embeddings:
             error_msg = "No valid text embeddings were generated."
             logger.error(error_msg)
@@ -730,20 +734,36 @@ class LatentPreprocessor:
                 
             logger.info(f"Validated {len(valid_embeds)}/{len(text_embeddings)} embedding batches")
                 
-            # Efficiently combine embeddings with tensor replacement
+            # Process embeddings in chunks
+            for i in range(0, len(valid_embeds), chunk_size):
+                chunk = valid_embeds[i:i + chunk_size]
+                
+                # Concatenate chunk embeddings
+                chunk_prompt_embeds = torch.cat([e["prompt_embeds"].cpu() for e in chunk])
+                chunk_pooled_embeds = torch.cat([e["pooled_prompt_embeds"].cpu() for e in chunk])
+                
+                combined_prompt_embeds.append(chunk_prompt_embeds)
+                combined_pooled_embeds.append(chunk_pooled_embeds)
+                
+                # Clean up chunk tensors
+                del chunk_prompt_embeds
+                del chunk_pooled_embeds
+                torch_gc()
+                
+                logger.info(f"Processed embedding chunk {i//chunk_size + 1}/{(len(valid_embeds) + chunk_size - 1)//chunk_size}")
+
+            # Combine all chunks
             text_embeddings = {
-                "prompt_embeds": torch.cat([e["prompt_embeds"] for e in valid_embeds]),
-                "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in valid_embeds])
+                "prompt_embeds": torch.cat(combined_prompt_embeds),
+                "pooled_prompt_embeds": torch.cat(combined_pooled_embeds)
             }
             
-            # Replace tensors in place when possible
-            for embed in valid_embeds:
-                if device_equals(embed["prompt_embeds"].device, text_embeddings["prompt_embeds"].device):
-                    replace_tensors_(embed["prompt_embeds"], text_embeddings["prompt_embeds"])
-                if device_equals(embed["pooled_prompt_embeds"].device, text_embeddings["pooled_prompt_embeds"].device):
-                    replace_tensors_(embed["pooled_prompt_embeds"], text_embeddings["pooled_prompt_embeds"])
+            # Clean up intermediate tensors
+            del combined_prompt_embeds
+            del combined_pooled_embeds
+            torch_gc()
             
-            logger.info(f"Successfully generated embeddings for {len(valid_embeds)} batches")
+            logger.info(f"Successfully combined embeddings for {len(valid_embeds)} batches")
             
         except Exception as e:
             raise RuntimeError(f"Failed to concatenate text embeddings: {str(e)}")
