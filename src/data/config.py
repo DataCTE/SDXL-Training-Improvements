@@ -167,8 +167,8 @@ class Config:
         # Validate image sizes with detailed error tracking
         try:
             # Extract and validate size tuples
-            max_size = tuple(self.global_config.image.max_size) if isinstance(self.global_config.image.max_size, (list, tuple)) else self.global_config.image.max_size
-            min_size = tuple(self.global_config.image.min_size) if isinstance(self.global_config.image.min_size, (list, tuple)) else self.global_config.image.min_size
+            max_size = tuple(int(x) for x in self.global_config.image.max_size) if isinstance(self.global_config.image.max_size, (list, tuple)) else self.global_config.image.max_size
+            min_size = tuple(int(x) for x in self.global_config.image.min_size) if isinstance(self.global_config.image.min_size, (list, tuple)) else self.global_config.image.min_size
             
             # Convert to tuple and store back
             self.global_config.image.max_size = max_size
