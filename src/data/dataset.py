@@ -27,8 +27,8 @@ from src.core.memory.tensor import (
 )
 from .utils.paths import convert_windows_path
 from .config import Config
-from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
-from .cache_manager import CacheManager
+from src.data.preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
+from src.data.preprocessing import CacheManager
 
 logger = setup_logging(__name__)
 
