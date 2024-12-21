@@ -1,6 +1,7 @@
 """High-performance cache management for large-scale dataset preprocessing."""
 import multiprocessing as mp
 import traceback
+import time
 from dataclasses import dataclass
 from enum import Enum, auto
 from src.core.logging.logging import setup_logging
@@ -248,7 +249,7 @@ class CacheManager:
             
             return True
         except Exception as e:
-            logger.error(f"Error saving batch {batch_id}: {str(e)}")
+            logger.error(f"Error saving chunk {chunk_id}: {str(e)}")
             return False
             
     def process_dataset(

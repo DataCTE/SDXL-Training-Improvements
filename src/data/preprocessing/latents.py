@@ -1,5 +1,6 @@
 """Latent preprocessing utilities for SDXL training."""
 import traceback
+import time
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -681,16 +682,25 @@ class LatentPreprocessor:
                 vae_latents.append(latents)
                 
                 # Save batch using cache manager
-                if self.cache_manager is not None:
-                    batch_data = {
-                        "vae_latents": latents,
-                        "text_embeddings": embeddings,
-                        "metadata": {
-                            "batch_size": len(batch),
-                            "timestamp": time.time()
+                # Save individual latents for each item in batch
+                for i, (latent, embedding) in enumerate(zip(latents["model_input"], embeddings)):
+                    item_idx = batch_indices[i]
+                    if self.cache_manager is not None:
+                        # Save individual latent and embedding
+                        item_data = {
+                            "vae_latent": latent.unsqueeze(0),  # Add batch dim back
+                            "text_embedding": {
+                                "prompt_embeds": embedding["prompt_embeds"].unsqueeze(0),
+                                "pooled_prompt_embeds": embedding["pooled_prompt_embeds"].unsqueeze(0)
+                            },
+                            "metadata": {
+                                "index": item_idx,
+                                "timestamp": time.time()
+                            }
                         }
-                    }
-                    self.cache_manager._save_chunk(idx, [batch_data], {}, self.cache_dir)
+                        # Save to individual cache files
+                        latent_path = self.cache_dir / f"latent_{item_idx}.pt"
+                        torch.save(item_data, latent_path, _use_new_zipfile_serialization=True)
                 
                 # Clean up intermediate tensors
                 del batch_pixels, latents, embeddings
