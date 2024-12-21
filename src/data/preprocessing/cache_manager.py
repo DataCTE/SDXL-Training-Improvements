@@ -92,6 +92,25 @@ class CacheManager:
         self.index_path = self.cache_dir / "cache_index.json"
         self.cache_index = self._load_cache_index()
         
+    def _load_cache_index(self) -> Dict:
+        """Load cache index from disk or create new one."""
+        try:
+            if self.index_path.exists():
+                with open(self.index_path, 'r') as f:
+                    return json.load(f)
+            return {"files": {}, "chunks": {}}
+        except Exception as e:
+            logger.error(f"Failed to load cache index: {str(e)}")
+            return {"files": {}, "chunks": {}}
+            
+    def _save_cache_index(self) -> None:
+        """Save cache index to disk."""
+        try:
+            with open(self.index_path, 'w') as f:
+                json.dump(self.cache_index, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save cache index: {str(e)}")
+            
         # Setup worker pools with proper resource limits
         self.image_pool = ProcessPoolExecutor(
             max_workers=self.num_proc,

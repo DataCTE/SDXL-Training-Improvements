@@ -51,6 +51,7 @@ class LatentPreprocessor:
         self.max_retries = max_retries
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
+        self.device = device
         
     def _setup_cache(self, config: Config, use_cache: bool = True) -> None:
         """Setup caching configuration."""
