@@ -252,8 +252,9 @@ class LatentPreprocessor:
                 'error_msg': str(e),
                 'traceback': traceback.format_exc()
             }
+            error_context['logging_level'] = logging.ERROR
             logger.error(
-                f"Failed to process prompts:\n"
+                f"Failed to process prompts - failing fast:\n"
                 f"Processing stats:\n"
                 f"- Total samples: {error_context['total_samples']}\n"
                 f"- Successful: {error_context['successful_samples']}\n"
@@ -261,7 +262,9 @@ class LatentPreprocessor:
                 f"- Empty: {error_context['empty_captions']}\n"
                 f"Error type: {error_context['error_type']}\n"
                 f"Error message: {error_context['error_msg']}\n"
-                f"Traceback:\n{error_context['traceback']}"
+                f"Traceback:\n{error_context['traceback']}\n"
+                f"Logging level: {logging.getLevelName(error_context['logging_level'])}",
+                extra=error_context
             )
             raise TextEncodingError(
                 f"Failed to process prompts: {error_context['error_msg']}\n"
@@ -485,23 +488,25 @@ class LatentPreprocessor:
                         else:
                             logger.warning(f"Skipping invalid dataset item at index {i}")
                     except Exception as e:
+                        error_context = {
+                            'index': i,
+                            'error_type': type(e).__name__,
+                            'error_msg': str(e),
+                            'function': '_process_item',
+                            'line_number': traceback.extract_stack()[-1].lineno,
+                            'file_path': __file__,
+                            'traceback': traceback.format_exc(),
+                            'input_data': repr(dataset[i]) if i < len(dataset) else None,
+                            'stack_info': traceback.extract_stack().format(),
+                            'process': os.getpid(),
+                            'thread': threading.get_ident(),
+                            'logging_level': logging.ERROR
+                        }
                         logger.error(
-                            "Error accessing dataset item",
-                            extra={
-                                'index': i,
-                                'error_type': type(e).__name__,
-                                'error_msg': str(e),
-                                'function': '_process_item',
-                                'line_number': traceback.extract_stack()[-1].lineno,
-                                'file_path': __file__,
-                                'traceback': traceback.format_exc(),
-                                'input_data': repr(dataset[i]) if i < len(dataset) else None,
-                                'stack_info': traceback.extract_stack().format(),
-                                'process': os.getpid(),
-                                'thread': threading.get_ident()
-                            }
+                            "Error accessing dataset item - failing fast",
+                            extra=error_context
                         )
-                        continue
+                        raise RuntimeError(f"Dataset access failed at index {i}") from e
                 
                 if not batch:
                     error_msg = f"No valid items found in batch {idx}"

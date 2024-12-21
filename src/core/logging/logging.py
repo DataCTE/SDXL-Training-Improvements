@@ -47,6 +47,15 @@ class ColoredFormatter(logging.Formatter):
         # Add timestamp and context
         timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')
         
+        # Track error levels that cause failures
+        if record.levelno >= logging.ERROR:
+            action_history[f'error_{time.time()}'] = {
+                'level': record.levelno,
+                'level_name': record.levelname,
+                'message': record.msg,
+                'timestamp': timestamp
+            }
+        
         # Build detailed context string
         context_parts = []
         for field in self.CONTEXT_FIELDS:
