@@ -438,7 +438,9 @@ class LatentPreprocessor:
         text_embeddings = []
         for idx in tqdm(range(0, len(dataset), batch_size)):
             try:
-                batch = dataset[idx:idx + batch_size]
+                # Handle slice indexing properly
+                batch_indices = list(range(idx, min(idx + batch_size, len(dataset))))
+                batch = [dataset[i] for i in batch_indices]
                 batch_texts = []
                 valid_count = 0
                 
