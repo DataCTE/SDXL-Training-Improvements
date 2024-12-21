@@ -731,10 +731,16 @@ class LatentPreprocessor:
                         item = dataset[i]
                         if not isinstance(item, dict):
                             logger.error(
-                                f"Invalid dataset item type at index {i}:\n"
-                                f"Expected: dict\n"
-                                f"Got: {type(item)}\n"
-                                f"Value: {repr(item)}"
+                                "Invalid dataset item type",
+                                extra={
+                                    'index': i,
+                                    'expected_type': 'dict',
+                                    'actual_type': type(item).__name__,
+                                    'value': repr(item),
+                                    'function': '_process_item',
+                                    'line_number': traceback.extract_stack()[-1].lineno,
+                                    'file_path': __file__
+                                }
                             )
                             continue
                             
@@ -742,30 +748,54 @@ class LatentPreprocessor:
                         missing_keys = required_keys - set(item.keys())
                         if missing_keys:
                             logger.error(
-                                f"Missing required keys in dataset item {i}:\n"
-                                f"Missing: {missing_keys}\n"
-                                f"Available keys: {set(item.keys())}\n"
-                                f"Item: {repr(item)}"
+                                "Missing required dataset item keys",
+                                extra={
+                                    'index': i,
+                                    'missing_keys': list(missing_keys),
+                                    'available_keys': list(item.keys()),
+                                    'item': repr(item),
+                                    'function': '_process_item',
+                                    'line_number': traceback.extract_stack()[-1].lineno,
+                                    'file_path': __file__,
+                                    'traceback': traceback.format_exc()
+                                }
                             )
                             continue
                             
                         # Validate pixel values
                         if not isinstance(item["pixel_values"], torch.Tensor):
                             logger.error(
-                                f"Invalid pixel_values type at index {i}:\n"
-                                f"Expected: torch.Tensor\n"
-                                f"Got: {type(item['pixel_values'])}\n"
-                                f"Value: {repr(item['pixel_values'])}"
+                                "Invalid pixel_values type",
+                                extra={
+                                    'index': i,
+                                    'expected_type': 'torch.Tensor',
+                                    'actual_type': type(item['pixel_values']).__name__,
+                                    'value': repr(item['pixel_values']),
+                                    'shape': getattr(item['pixel_values'], 'shape', None),
+                                    'dtype': getattr(item['pixel_values'], 'dtype', None),
+                                    'device': getattr(item['pixel_values'], 'device', None),
+                                    'function': '_process_item',
+                                    'line_number': traceback.extract_stack()[-1].lineno,
+                                    'file_path': __file__,
+                                    'traceback': traceback.format_exc()
+                                }
                             )
                             continue
                             
                         # Validate text
                         if not isinstance(item["text"], (str, list, tuple)):
                             logger.error(
-                                f"Invalid text type at index {i}:\n"
-                                f"Expected: str, list, or tuple\n"
-                                f"Got: {type(item['text'])}\n"
-                                f"Value: {repr(item['text'])}"
+                                "Invalid text type",
+                                extra={
+                                    'index': i,
+                                    'expected_type': 'str, list, or tuple',
+                                    'actual_type': type(item['text']).__name__,
+                                    'value': repr(item['text']),
+                                    'function': '_process_item',
+                                    'line_number': traceback.extract_stack()[-1].lineno,
+                                    'file_path': __file__,
+                                    'traceback': traceback.format_exc()
+                                }
                             )
                             continue
                             
@@ -773,17 +803,21 @@ class LatentPreprocessor:
                         logger.debug(f"Successfully validated dataset item {i}")
                         
                     except Exception as e:
-                        error_context = {
-                            'index': i,
-                            'error_type': type(e).__name__,
-                            'error_msg': str(e),
-                            'traceback': traceback.format_exc()
-                        }
                         logger.error(
-                            f"Error accessing dataset item {i}:\n"
-                            f"Error type: {error_context['error_type']}\n"
-                            f"Error message: {error_context['error_msg']}\n"
-                            f"Traceback:\n{error_context['traceback']}"
+                            "Error accessing dataset item",
+                            extra={
+                                'index': i,
+                                'error_type': type(e).__name__,
+                                'error_msg': str(e),
+                                'function': '_process_item',
+                                'line_number': traceback.extract_stack()[-1].lineno,
+                                'file_path': __file__,
+                                'traceback': traceback.format_exc(),
+                                'input_data': repr(dataset[i]) if i < len(dataset) else None,
+                                'stack_info': traceback.extract_stack().format(),
+                                'process': os.getpid(),
+                                'thread': threading.get_ident()
+                            }
                         )
                         continue
                 # Check memory before VAE encoding
