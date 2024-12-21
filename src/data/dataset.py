@@ -86,11 +86,49 @@ class AspectBucketDataset(Dataset):
         self.bucket_step = int(config.global_config.image.bucket_step)
         self.max_aspect_ratio = float(config.global_config.image.max_aspect_ratio)
         
-        # Validate size configurations
-        if not all(isinstance(x, int) for x in self.max_size + self.min_size + self.target_size):
-            raise ValueError("All image dimensions must be integers")
-        if len(self.max_size) != 2 or len(self.min_size) != 2 or len(self.target_size) != 2:
-            raise ValueError("Image size tuples must contain exactly 2 values")
+        # Validate size configurations with detailed error tracking
+        try:
+            # Check types with detailed context
+            for size_name, size_tuple in [
+                ("max_size", self.max_size),
+                ("min_size", self.min_size),
+                ("target_size", self.target_size)
+            ]:
+                if not isinstance(size_tuple, tuple):
+                    raise ValueError(
+                        f"{size_name} must be a tuple, got {type(size_tuple)}\n"
+                        f"Value: {repr(size_tuple)}"
+                    )
+                if len(size_tuple) != 2:
+                    raise ValueError(
+                        f"{size_name} must contain exactly 2 values, got {len(size_tuple)}\n"
+                        f"Value: {repr(size_tuple)}"
+                    )
+                for i, dim in enumerate(size_tuple):
+                    if not isinstance(dim, int):
+                        raise ValueError(
+                            f"{size_name}[{i}] must be an integer, got {type(dim)}\n"
+                            f"Value: {repr(dim)}"
+                        )
+                
+            # Log actual values for debugging
+            logger.debug(
+                "Image size configuration:\n"
+                f"max_size: {repr(self.max_size)} ({type(self.max_size)})\n"
+                f"min_size: {repr(self.min_size)} ({type(self.min_size)})\n"
+                f"target_size: {repr(self.target_size)} ({type(self.target_size)})"
+            )
+                
+        except Exception as e:
+            logger.error(
+                f"Image size validation failed:\n"
+                f"Error: {str(e)}\n"
+                f"max_size: {repr(self.max_size)} ({type(self.max_size)})\n"
+                f"min_size: {repr(self.min_size)} ({type(self.min_size)})\n"
+                f"target_size: {repr(self.target_size)} ({type(self.target_size)})\n"
+                f"Traceback:\n{traceback.format_exc()}"
+            )
+            raise
         
         # Create buckets based on aspect ratios
         self.buckets = self._create_buckets()

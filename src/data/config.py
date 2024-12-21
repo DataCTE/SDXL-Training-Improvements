@@ -160,15 +160,69 @@ class Config:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         
-        # Validate image sizes
-        max_h, max_w = self.global_config.image.max_size
-        min_h, min_w = self.global_config.image.min_size
-        if not isinstance(max_h, int) or not isinstance(max_w, int):
-            raise ValueError(f"max_size values must be integers, got {type(max_h)} and {type(max_w)}")
-        if not isinstance(min_h, int) or not isinstance(min_w, int):
-            raise ValueError(f"min_size values must be integers, got {type(min_h)} and {type(min_w)}")
-        if max_h < min_h or max_w < min_w:
-            raise ValueError(f"max_size ({max_h}, {max_w}) must be greater than min_size ({min_h}, {min_w})")
+        # Validate image sizes with detailed error tracking
+        try:
+            # Extract and validate size tuples
+            max_size = self.global_config.image.max_size
+            min_size = self.global_config.image.min_size
+            
+            # Validate tuple types first
+            if not isinstance(max_size, tuple):
+                raise ValueError(f"max_size must be a tuple, got {type(max_size)}\nValue: {repr(max_size)}")
+            if not isinstance(min_size, tuple):
+                raise ValueError(f"min_size must be a tuple, got {type(min_size)}\nValue: {repr(min_size)}")
+                
+            # Validate tuple lengths
+            if len(max_size) != 2:
+                raise ValueError(f"max_size must contain exactly 2 values, got {len(max_size)}\nValue: {repr(max_size)}")
+            if len(min_size) != 2:
+                raise ValueError(f"min_size must contain exactly 2 values, got {len(min_size)}\nValue: {repr(min_size)}")
+                
+            # Now safely unpack
+            max_h, max_w = max_size
+            min_h, min_w = min_size
+            
+            # Validate individual values
+            for name, value in [
+                ("max_h", max_h), ("max_w", max_w),
+                ("min_h", min_h), ("min_w", min_w)
+            ]:
+                if not isinstance(value, int):
+                    raise ValueError(
+                        f"{name} must be an integer, got {type(value)}\n"
+                        f"Value: {repr(value)}"
+                    )
+                    
+            # Compare dimensions with detailed error
+            if max_h < min_h or max_w < min_w:
+                raise ValueError(
+                    f"max_size dimensions must be greater than min_size dimensions\n"
+                    f"max_size: {repr(max_size)}\n"
+                    f"min_size: {repr(min_size)}\n"
+                    f"Comparison: max_h ({max_h}) < min_h ({min_h}) or max_w ({max_w}) < min_w ({min_w})"
+                )
+                
+            # Log actual values for debugging
+            logger.debug(
+                "Image size validation:\n"
+                f"max_size: {repr(max_size)} ({type(max_size)})\n"
+                f"min_size: {repr(min_size)} ({type(min_size)})\n"
+                f"Individual values:\n"
+                f"- max_h: {repr(max_h)} ({type(max_h)})\n"
+                f"- max_w: {repr(max_w)} ({type(max_w)})\n"
+                f"- min_h: {repr(min_h)} ({type(min_h)})\n"
+                f"- min_w: {repr(min_w)} ({type(min_w)})"
+            )
+            
+        except Exception as e:
+            logger.error(
+                f"Image size validation failed:\n"
+                f"Error: {str(e)}\n"
+                f"max_size: {repr(max_size)} ({type(max_size)})\n"
+                f"min_size: {repr(min_size)} ({type(min_size)})\n"
+                f"Traceback:\n{traceback.format_exc()}"
+            )
+            raise
             
         # Validate learning rate
         if self.training.learning_rate <= 0:
