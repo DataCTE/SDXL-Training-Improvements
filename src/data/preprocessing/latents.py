@@ -644,8 +644,11 @@ class LatentPreprocessor:
         vae_latents = []
         for idx in tqdm(range(0, len(dataset), batch_size)):
             try:
-                batch = dataset[idx:idx + batch_size]
-                latents = self.encode_images(batch["pixel_values"], batch_size=batch_size)
+                # Handle slice indexing properly
+                batch_indices = list(range(idx, min(idx + batch_size, len(dataset))))
+                batch = [dataset[i] for i in batch_indices]
+                batch_pixels = torch.stack([b["pixel_values"] for b in batch])
+                latents = self.encode_images(batch_pixels, batch_size=batch_size)
                 vae_latents.append(latents)
             except Exception as e:
                 logger.error(f"Error processing VAE batch {idx}: {str(e)}")
