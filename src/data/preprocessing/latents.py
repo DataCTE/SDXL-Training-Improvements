@@ -361,15 +361,18 @@ class LatentPreprocessor:
                 if torch.cuda.is_available():
                     compute_stream = torch.cuda.Stream()
                     transfer_stream = torch.cuda.Stream()
-                    
+                        
                     try:
                         with torch.cuda.stream(compute_stream):
                             batch_latents = self.vae.encode(batch).latent_dist.sample()
                             batch_latents = batch_latents * self.vae.config.scaling_factor
-                            
+                            pin_tensor_(batch_latents)
+                                
                         with torch.cuda.stream(transfer_stream):
                             transfer_stream.wait_stream(compute_stream)
+                            tensors_record_stream(transfer_stream, batch_latents)
                             latents.append(batch_latents.cpu())
+                            unpin_tensor_(batch_latents)
                             
                     finally:
                         # Ensure streams are properly synchronized and destroyed
@@ -688,7 +691,11 @@ class LatentPreprocessor:
                         torch_gc()
                         logger.warning("High GPU memory usage before VAE encoding")
                         
+                # Stack and optimize pixel tensors
                 batch_pixels = torch.stack([b.get("pixel_values") for b in batch if b.get("pixel_values") is not None])
+                pin_tensor_(batch_pixels)
+                if torch.cuda.is_available():
+                    tensors_record_stream(torch.cuda.current_stream(), batch_pixels)
                 
                 # Process VAE in smaller chunks if needed
                 chunk_size = batch_size
@@ -714,6 +721,10 @@ class LatentPreprocessor:
                             )
                 
                 # Clean up intermediate tensors
+                try:
+                    unpin_tensor_(batch_pixels)
+                except:
+                    pass
                 del batch_pixels, latents, embeddings
                 torch_gc()
                 
