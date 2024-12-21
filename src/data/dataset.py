@@ -64,11 +64,31 @@ class AspectBucketDataset(Dataset):
             try:
                 converted = convert_windows_path(path, make_absolute=True)
                 if not os.path.exists(str(converted)):
-                    logger.warning(f"Path does not exist after conversion: {path} -> {converted}")
+                    logger.warning(
+                        "Path does not exist after conversion",
+                        extra={
+                            'original_path': str(path),
+                            'converted_path': str(converted),
+                            'function': '__init__',
+                            'line_number': traceback.extract_stack()[-1].lineno,
+                            'file_path': __file__
+                        }
+                    )
                     continue
                 converted_paths.append(str(converted))
             except Exception as e:
-                logger.error(f"Error converting path {path}: {str(e)}")
+                logger.error(
+                    "Error converting path",
+                    extra={
+                        'path': str(path),
+                        'error_type': type(e).__name__,
+                        'error_msg': str(e),
+                        'function': '__init__',
+                        'line_number': traceback.extract_stack()[-1].lineno,
+                        'file_path': __file__,
+                        'traceback': traceback.format_exc()
+                    }
+                )
                 
         if not converted_paths:
             raise RuntimeError("No valid image paths found after conversion")

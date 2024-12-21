@@ -188,7 +188,16 @@ class LatentPreprocessor:
                             valid_count += 1
                             stats.successful_samples += 1
                         else:
-                            logger.warning(f"Empty caption at index {idx}")
+                            logger.warning(
+                                "Empty caption detected",
+                                extra={
+                                    'index': idx,
+                                    'caption': repr(caption),
+                                    'function': '__getitem__',
+                                    'line_number': traceback.extract_stack()[-1].lineno,
+                                    'file_path': __file__
+                                }
+                            )
                             invalid_texts.append((idx, caption))
                             stats.empty_captions += 1
                             captions.append("")
@@ -476,7 +485,22 @@ class LatentPreprocessor:
                         else:
                             logger.warning(f"Skipping invalid dataset item at index {i}")
                     except Exception as e:
-                        logger.error(f"Error accessing dataset item {i}: {str(e)}")
+                        logger.error(
+                            "Error accessing dataset item",
+                            extra={
+                                'index': i,
+                                'error_type': type(e).__name__,
+                                'error_msg': str(e),
+                                'function': '_process_item',
+                                'line_number': traceback.extract_stack()[-1].lineno,
+                                'file_path': __file__,
+                                'traceback': traceback.format_exc(),
+                                'input_data': repr(dataset[i]) if i < len(dataset) else None,
+                                'stack_info': traceback.extract_stack().format(),
+                                'process': os.getpid(),
+                                'thread': threading.get_ident()
+                            }
+                        )
                         continue
                 
                 if not batch:
@@ -908,7 +932,21 @@ class LatentPreprocessor:
                 torch_gc()
                 
             except Exception as e:
-                logger.error(f"Error processing batch {idx}: {str(e)}")
+                logger.error(
+                    "Error processing batch",
+                    extra={
+                        'batch_index': idx,
+                        'error_type': type(e).__name__,
+                        'error_msg': str(e),
+                        'function': '_process_batch',
+                        'line_number': traceback.extract_stack()[-1].lineno,
+                        'file_path': __file__,
+                        'traceback': traceback.format_exc(),
+                        'batch_size': len(batch) if isinstance(batch, (list, tuple)) else 'N/A',
+                        'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
+                        'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                    }
+                )
                 continue
 
         # Load all processed batches from cache
