@@ -215,13 +215,12 @@ class CacheManager:
         metadata: Dict,
         index: int
     ) -> bool:
-        """Save chunk of processed tensors to disk.
+        """Save latent data to disk.
         
         Args:
-            chunk_id: Chunk identifier
-            tensors: List of tensors to save
+            latent_data: Dictionary containing latent tensors
             metadata: Associated metadata
-            cache_dir: Cache directory path
+            index: Index identifier for the latent
             
         Returns:
             bool indicating success
@@ -252,7 +251,7 @@ class CacheManager:
             
             return True
         except Exception as e:
-            logger.error(f"Error saving chunk {chunk_id}: {str(e)}")
+            logger.error(f"Error saving latent {index}: {str(e)}")
             return False
             
     def process_dataset(
