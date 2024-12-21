@@ -7,7 +7,7 @@ from pathlib import Path
 from ..types import DataType, ModelWeightDtypes
 
 logger = setup_logging(__name__, level="INFO")
-from src.utils.paths import convert_windows_path, is_wsl
+from src.data.utils.paths import convert_windows_path, is_wsl
 
 if TYPE_CHECKING:
     from ...data.config import Config
