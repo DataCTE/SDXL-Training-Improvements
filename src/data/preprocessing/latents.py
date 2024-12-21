@@ -174,6 +174,8 @@ class LatentPreprocessor:
             captions = []
             stats = ProcessingStats()
             stats.total_samples = len(prompt_batch)
+            valid_count = 0
+            invalid_texts = []
             
             def process_caption(caption_data):
                 idx, caption = caption_data
