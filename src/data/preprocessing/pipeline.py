@@ -1,5 +1,6 @@
 """High-performance preprocessing pipeline for SDXL training."""
 import logging
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from .exceptions import (
