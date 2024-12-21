@@ -25,7 +25,7 @@ from src.core.memory.tensor import (
 )
 from src.models.sdxl import StableDiffusionXLPipeline
 from .config import Config
-from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter, CacheManager
+from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
 logger = setup_logging(__name__)
 
@@ -96,26 +96,6 @@ class AspectBucketDataset(Dataset):
             transforms.Normalize([0.5], [0.5])
         ])
         
-        # Setup cache manager with proper error handling
-        self.cache_manager = None
-        if config.global_config.cache.use_cache:
-            try:
-                from .preprocessing.cache_manager import CacheManager
-                cache_dir = convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True)
-                compression = getattr(config.global_config.cache, 'compression', 'zstd')
-                
-                self.cache_manager = CacheManager(
-                    cache_dir=cache_dir,
-                    compression=compression,
-                    num_proc=config.global_config.cache.num_workers if hasattr(config.global_config.cache, 'num_workers') else None,
-                    chunk_size=config.global_config.cache.chunk_size if hasattr(config.global_config.cache, 'chunk_size') else 1000,
-                    verify_hashes=config.global_config.cache.verify_hashes if hasattr(config.global_config.cache, 'verify_hashes') else True
-                )
-                logger.info(f"Cache manager initialized with directory: {cache_dir}")
-            except Exception as e:
-                logger.error(f"Failed to initialize cache manager: {str(e)}")
-                logger.warning("Continuing without caching enabled")
-            
         # Initialize tag weighter if enabled but not provided
         if self.tag_weighter is None and config.tag_weighting.enable_tag_weighting:
             self.tag_weighter = create_tag_weighter(config, captions)
@@ -229,46 +209,6 @@ class AspectBucketDataset(Dataset):
         if not isinstance(idx, (int, slice)):
             raise TypeError(f"Dataset indices must be integers or slices, not {type(idx)}")
             
-        # Try loading from cache with proper error handling and memory optimization
-        if self.cache_manager is not None:
-            try:
-                # Convert path to string if it's a list/tuple
-                img_path = self.image_paths[idx]
-                if isinstance(img_path, (list, tuple)):
-                    img_path = img_path[0] if img_path else None
-                    
-                cached_item = self.cache_manager.get_cached_item(img_path)
-                if cached_item is not None:
-                    tensor, caption = cached_item
-                    
-                    # Validate cached tensor
-                    if not isinstance(tensor, torch.Tensor):
-                        raise ValueError(f"Invalid cached tensor type: {type(tensor)}")
-                    if tensor.dim() != 4:
-                        raise ValueError(f"Invalid cached tensor dimensions: {tensor.dim()}")
-                        
-                    # Optimize memory layout
-                    if torch.cuda.is_available():
-                        tensor = tensor.to(memory_format=torch.channels_last)
-                        pin_tensor_(tensor)
-                        
-                    loss_weight = (
-                        self.tag_weighter.get_caption_weight(caption)
-                        if self.tag_weighter is not None else 1.0
-                    )
-                    
-                    return {
-                        "pixel_values": tensor,
-                        "text": caption,
-                        "original_size": tensor.shape[-2:],
-                        "crop_top_left": (0, 0),  # Cached items are already processed
-                        "target_size": tensor.shape[-2:],
-                        "loss_weight": loss_weight
-                    }
-            except Exception as e:
-                logger.warning(f"Error loading cached item {idx}: {str(e)}")
-                # Continue to load from disk
-        
         # Load and process image with WSL path handling
         img_path = self.image_paths[idx]
         if isinstance(img_path, (list, tuple)):
