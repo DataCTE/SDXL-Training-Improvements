@@ -696,7 +696,7 @@ class LatentPreprocessor:
                 if torch.cuda.is_available():
                     total_memory = torch.cuda.get_device_properties(0).total_memory
                     allocated = torch.cuda.memory_allocated()
-                    if allocated > max_memory_usage * total_memory:
+                    if allocated > int(max_memory_usage * total_memory):
                         torch_gc()
                         logger.warning("High GPU memory usage before VAE encoding")
                         
@@ -706,12 +706,12 @@ class LatentPreprocessor:
                 if torch.cuda.is_available():
                     tensors_record_stream(torch.cuda.current_stream(), batch_pixels)
                 
-                # Process VAE in smaller chunks if needed
+                # Process VAE in smaller chunks if needed  
                 chunk_size = batch_size
                 if torch.cuda.is_available():
                     total_memory = torch.cuda.get_device_properties(0).total_memory
                     allocated = torch.cuda.memory_allocated()
-                    if allocated > 0.7 * total_memory:
+                    if allocated > int(0.7 * total_memory):
                         chunk_size = max(1, batch_size // 2)
                 
                 # Check if device matches before encoding
