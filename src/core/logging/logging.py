@@ -21,9 +21,17 @@ class ColoredFormatter(logging.Formatter):
         'DEBUG': Fore.CYAN,
         'INFO': Fore.GREEN,
         'WARNING': Fore.YELLOW,
-        'ERROR': Fore.RED,
-        'CRITICAL': Fore.RED + Style.BRIGHT
+        'ERROR': Fore.RED + Style.BRIGHT,
+        'CRITICAL': Fore.RED + Style.BRIGHT + Style.DIM
     }
+
+    # Extended context fields for detailed logging
+    CONTEXT_FIELDS = [
+        'function', 'line_number', 'file_path',
+        'input_data', 'expected_type', 'actual_type',
+        'shape', 'device', 'dtype', 'error_type',
+        'stack_info', 'process', 'thread'
+    ]
     
     KEYWORDS = {
         'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
@@ -34,9 +42,36 @@ class ColoredFormatter(logging.Formatter):
     }
     
     def format(self, record):
+        """Enhanced formatter with detailed context and error tracking."""
         # Add timestamp and context
-        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S')
-        record.msg = f"[{timestamp}] {record.msg}"
+        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')
+        
+        # Build detailed context string
+        context_parts = []
+        for field in self.CONTEXT_FIELDS:
+            if hasattr(record, field):
+                value = getattr(record, field)
+                if value is not None:
+                    if isinstance(value, (dict, list, tuple)):
+                        value_str = f"\n    {repr(value)}"
+                    else:
+                        value_str = str(value)
+                    context_parts.append(f"{field}: {value_str}")
+
+        # Add full traceback for errors
+        if record.exc_info:
+            if context_parts:
+                context_parts.append("Traceback:")
+            context_parts.append(''.join(traceback.format_exception(*record.exc_info)))
+            
+        # Add stack info for warnings and above
+        if record.levelno >= logging.WARNING and record.stack_info:
+            if context_parts:
+                context_parts.append("Stack trace:")
+            context_parts.append(record.stack_info)
+
+        context_str = "\n  ".join(context_parts)
+        record.msg = f"[{timestamp}] {record.msg}\n  {context_str}" if context_str else f"[{timestamp}] {record.msg}"
         
         # Add color to level name
         if record.levelname in self.COLORS:
@@ -70,7 +105,9 @@ def setup_logging(
     log_dir: str = "outputs/wslref/logs",
     level: int = logging.INFO,
     filename: Optional[str] = None,
-    module_name: Optional[str] = None
+    module_name: Optional[str] = None,
+    capture_warnings: bool = True,
+    propagate: bool = True
 ) -> logging.Logger:
     """Setup logging configuration with detailed action tracking and colored output.
     
@@ -103,22 +140,34 @@ def setup_logging(
         logger.removeHandler(handler)
     
     try:
-        # Create console handler with colored output
+        # Create console handler with detailed colored output
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(ColoredFormatter(
-            '%(levelname)s | %(name)s | %(message)s'
+            '%(levelname)s | %(name)s | %(processName)s:%(threadName)s | %(message)s'
         ))
+        console_handler.setLevel(level)
         logger.addHandler(console_handler)
+
+        # Enable warning capture and configure propagation
+        logging.captureWarnings(capture_warnings)
+        logger.propagate = propagate
         
-        # Add file handler if filename provided
+        # Add detailed file handler if filename provided
         if filename:
             file_path = log_path / filename
             file_handler = logging.FileHandler(file_path, mode='a', encoding='utf-8')
             file_handler.setFormatter(logging.Formatter(
-                '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
+                '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
+                '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
+                '%(funcName)s |\n%(message)s\n',
+                datefmt='%Y-%m-%d %H:%M:%S'
             ))
+            file_handler.setLevel(logging.DEBUG)  # Always capture full detail in file
             logger.addHandler(file_handler)
-            logger.info(f"Logging to file: {file_path}")
+            logger.info(f"Logging to file: {file_path}", extra={
+                'file_path': str(file_path),
+                'log_level': logging.getLevelName(level)
+            })
     except Exception as e:
         print(f"{Fore.RED}Failed to setup logging handlers: {str(e)}{Style.RESET_ALL}")
         raise
