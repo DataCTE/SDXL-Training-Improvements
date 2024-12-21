@@ -39,6 +39,7 @@ class LatentPreprocessor:
         max_memory_usage: float = 0.8
     ):
         super().__init__()
+        self._setup_cache(config, use_cache)
         self.config = config
         self.tokenizer_one = tokenizer_one
         self.tokenizer_two = tokenizer_two
@@ -51,9 +52,27 @@ class LatentPreprocessor:
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
         
-        # Initialize cache if enabled
-        if self.use_cache:
-            self._setup_cache()
+    def _setup_cache(self, config: Config, use_cache: bool = True) -> None:
+        """Setup caching configuration."""
+        self.use_cache = use_cache
+        if not self.use_cache:
+            return
+            
+        try:
+            cache_dir = Path(config.global_config.cache.cache_dir)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            self.cache_manager = CacheManager(
+                cache_dir=cache_dir,
+                num_proc=config.global_config.cache.num_proc,
+                chunk_size=config.global_config.cache.chunk_size,
+                compression=getattr(config.global_config.cache, 'compression', 'zstd'),
+                verify_hashes=config.global_config.cache.verify_hashes,
+                max_memory_usage=self.max_memory_usage
+            )
+        except Exception as e:
+            logger.error(f"Failed to setup cache: {str(e)}")
+            self.use_cache = False
 
     def encode_prompt(
         self,
