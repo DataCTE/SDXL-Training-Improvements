@@ -595,6 +595,22 @@ class LatentPreprocessor:
                     logger.error(f"Error validating embedding: {str(err)}")
                     
             if not valid_embeds:
+                # Log detailed error statistics
+                stats.total_samples = len(dataset)
+                stats.successful_samples = len(text_embeddings) if text_embeddings else 0
+                stats.failed_samples = stats.total_samples - stats.successful_samples
+                stats.empty_captions = sum(1 for c in dataset['text'] if not str(c).strip())
+
+                error_details = (
+                    "No valid embeddings found after validation.\n"
+                    f"Processing Statistics:\n"
+                    f"- Total samples: {stats.total_samples}\n"
+                    f"- Successful: {stats.successful_samples}\n" 
+                    f"- Failed: {stats.failed_samples}\n"
+                    f"- Empty captions: {stats.empty_captions}\n"
+                    f"Check previous log messages for detailed error traces."
+                )
+
                 if text_embeddings:
                     # Log details about failed embeddings
                     logger.error("All embeddings failed validation:")
@@ -605,7 +621,9 @@ class LatentPreprocessor:
                                 logger.error(f"  {k}: type={type(v)}, shape={getattr(v, 'shape', 'N/A')}")
                         else:
                             logger.error(f"  Unexpected type: {type(e)}")
-                raise RuntimeError("No valid embeddings found after thorough validation. Check logs for details.")
+
+                logger.error(error_details)
+                raise RuntimeError(error_details)
                 
             logger.info(f"Validated {len(valid_embeds)}/{len(text_embeddings)} embedding batches")
                 
