@@ -214,10 +214,19 @@ class AspectBucketDataset(Dataset):
             - target_size: Target size after bucketing
             - loss_weight: Optional tag-based loss weight
         """
+        # Validate index
+        if not isinstance(idx, (int, slice)):
+            raise TypeError(f"Dataset indices must be integers or slices, not {type(idx)}")
+            
         # Try loading from cache with proper error handling and memory optimization
         if self.cache_manager is not None:
             try:
-                cached_item = self.cache_manager.get_cached_item(self.image_paths[idx])
+                # Convert path to string if it's a list/tuple
+                img_path = self.image_paths[idx]
+                if isinstance(img_path, (list, tuple)):
+                    img_path = img_path[0] if img_path else None
+                    
+                cached_item = self.cache_manager.get_cached_item(img_path)
                 if cached_item is not None:
                     tensor, caption = cached_item
                     
@@ -249,8 +258,11 @@ class AspectBucketDataset(Dataset):
                 logger.warning(f"Error loading cached item {idx}: {str(e)}")
                 # Continue to load from disk
         
-        # Load and process image with WSL path handling if not cached
-        image_path = convert_windows_path(self.image_paths[idx], make_absolute=True)
+        # Load and process image with WSL path handling
+        img_path = self.image_paths[idx]
+        if isinstance(img_path, (list, tuple)):
+            img_path = img_path[0] if img_path else None
+        image_path = convert_windows_path(img_path, make_absolute=True) if img_path else None
         image = Image.open(image_path).convert('RGB')
         original_size = image.size
         
