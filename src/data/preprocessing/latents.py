@@ -1,4 +1,5 @@
 """Latent preprocessing utilities for SDXL training."""
+import logging
 import traceback
 import time
 from pathlib import Path
