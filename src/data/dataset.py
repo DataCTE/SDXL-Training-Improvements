@@ -473,24 +473,6 @@ class AspectBucketDataset(Dataset):
             raise ImageLoadError(f"Failed to load image {path}: {str(e)}")
 
     def collate_fn(self, examples: List[Dict]) -> Dict[str, torch.Tensor]:
-        
-    def create_dataset(
-        config: Config,
-        image_paths: List[str],
-        captions: List[str],
-        latent_preprocessor: Optional[LatentPreprocessor] = None,
-        enable_memory_tracking: bool = True,
-        max_memory_usage: float = 0.8
-    ) -> AspectBucketDataset:
-        """Create dataset instance with configuration."""
-        return AspectBucketDataset(
-            config=config,
-            image_paths=image_paths,
-            captions=captions,
-            latent_preprocessor=latent_preprocessor,
-            enable_memory_tracking=enable_memory_tracking,
-            max_memory_usage=max_memory_usage
-        )
         """Collate batch with optimized memory handling."""
         with self._track_memory("collate"):
             try:
@@ -627,3 +609,21 @@ class AspectBucketDataset(Dataset):
                 
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
+
+def create_dataset(
+    config: Config,
+    image_paths: List[str],
+    captions: List[str],
+    latent_preprocessor: Optional[LatentPreprocessor] = None,
+    enable_memory_tracking: bool = True,
+    max_memory_usage: float = 0.8
+) -> AspectBucketDataset:
+    """Create dataset instance with configuration."""
+    return AspectBucketDataset(
+        config=config,
+        image_paths=image_paths,
+        captions=captions,
+        latent_preprocessor=latent_preprocessor,
+        enable_memory_tracking=enable_memory_tracking,
+        max_memory_usage=max_memory_usage
+    )
