@@ -122,7 +122,7 @@ class CacheManager:
         )
         
         # Initialize memory tracking if enabled
-        if enable_memory_tracking and torch.cuda.is_available():
+        if self.enable_memory_tracking and torch.cuda.is_available():
             self._init_memory_tracking()
 
     def _init_memory_tracking(self):
