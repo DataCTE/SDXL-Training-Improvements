@@ -4,27 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sdxl-trainer"
+version = "0.1.0"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "DataCTE Team"}
+]
+keywords = ["machine learning", "deep learning", "diffusion", "stable diffusion"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
 dynamic = [
-    "version",
     "readme",
-    "requires-python", 
-    "license",
-    "authors",
-    "keywords",
-    "classifiers",
     "dependencies",
-    "optional-dependencies",
-    "scripts"
+    "optional-dependencies"
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "src.__version__"}
 readme = {file = ["README.md"]}
-requires-python = {file = ["requirements-python.txt"]}
-license = {file = ["LICENSE"]}
-authors = {file = ["AUTHORS"]}
-keywords = {file = ["keywords.txt"]}
-classifiers = {file = ["classifiers.txt"]}
 dependencies = {file = ["requirements.txt"]}
 [tool.setuptools.dynamic.optional-dependencies.dev]
 file = ["requirements-dev.txt"]
