@@ -53,6 +53,11 @@ def encode_clip(
         if pooled_text_encoder_output is not None:
             pooled_output = pooled_text_encoder_output
         else:
-            pooled_output = outputs.pooler_output
+            # Get pooled output from last hidden state if no direct pooler
+            if hasattr(outputs, 'pooler_output'):
+                pooled_output = outputs.pooler_output
+            else:
+                # Use mean pooling on last hidden state as fallback
+                pooled_output = outputs.last_hidden_state.mean(dim=1)
             
     return text_encoder_output, pooled_output
