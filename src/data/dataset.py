@@ -325,7 +325,21 @@ class AspectBucketDataset(Dataset):
             # Get bucket dimensions
             bucket_idx = self.bucket_indices[idx]
             target_h, target_w = self.buckets[bucket_idx]
-        
+        except Exception as e:
+            logger.error(
+                "Error loading or processing image",
+                extra={
+                    'image_path': str(image_path),
+                    'error_type': type(e).__name__,
+                    'error_msg': str(e),
+                    'function': '__getitem__',
+                    'line_number': traceback.extract_stack()[-1].lineno,
+                    'file_path': __file__,
+                    'traceback': traceback.format_exc()
+                }
+            )
+            raise
+            
         # Calculate crop coordinates
         if self.config.training.center_crop:
             crop_top = max(0, (image.height - target_h) // 2)
