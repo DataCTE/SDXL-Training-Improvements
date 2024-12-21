@@ -54,7 +54,7 @@ def load_models(config: Config) -> Dict[str, torch.nn.Module]:
 
     
     # Load pipeline with optimized device placement
-    torch_dtype = torch.floatbf16 
+    torch_dtype = torch.bfloat16
     device_map="balanced" if torch.cuda.is_available() else None
 
     pipeline = StableDiffusionXLPipeline.from_pretrained(
