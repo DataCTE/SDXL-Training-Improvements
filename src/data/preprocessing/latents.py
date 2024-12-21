@@ -428,6 +428,7 @@ class LatentPreprocessor:
             try:
                 batch = dataset[idx:idx + batch_size]
                 batch_texts = []
+                valid_count = 0
                 
                 # Safely extract and validate text from batch
                 for text_item in batch["text"]:
@@ -484,7 +485,12 @@ class LatentPreprocessor:
                 if invalid_texts:
                     logger.warning(f"Found {len(invalid_texts)} invalid captions in batch {idx}:")
                     for i, txt in invalid_texts:
-                        logger.warning(f"  Position {i}, original input: {repr(text_item)}")
+                        logger.warning(f"  Position {i}, original input: {repr(batch['text'][i])}")
+                        
+                # Skip batch if no valid captions
+                if valid_count == 0:
+                    logger.error(f"Skipping batch {idx}: no valid captions")
+                    continue
                     
                 try:
                     embeddings = self.encode_prompt(
@@ -555,7 +561,17 @@ class LatentPreprocessor:
                     logger.error(f"Error validating embedding: {str(err)}")
                     
             if not valid_embeds:
-                raise RuntimeError("No valid embeddings found after thorough validation")
+                if text_embeddings:
+                    # Log details about failed embeddings
+                    logger.error("All embeddings failed validation:")
+                    for i, e in enumerate(text_embeddings):
+                        logger.error(f"Embedding {i}:")
+                        if isinstance(e, dict):
+                            for k, v in e.items():
+                                logger.error(f"  {k}: type={type(v)}, shape={getattr(v, 'shape', 'N/A')}")
+                        else:
+                            logger.error(f"  Unexpected type: {type(e)}")
+                raise RuntimeError("No valid embeddings found after thorough validation. Check logs for details.")
                 
             logger.info(f"Validated {len(valid_embeds)}/{len(text_embeddings)} embedding batches")
                 

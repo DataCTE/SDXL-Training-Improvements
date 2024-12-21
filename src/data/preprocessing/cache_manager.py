@@ -479,7 +479,22 @@ class CacheManager:
         image_path: Union[str, Path]
     ) -> Optional[Tuple[torch.Tensor, str]]:
         """Retrieve cached item by image path."""
-        image_path = str(Path(image_path))
+        # Handle list inputs by taking first valid path
+        if isinstance(image_path, (list, tuple)):
+            valid_path = None
+            for p in image_path:
+                try:
+                    test_path = Path(str(p))
+                    if test_path.exists():
+                        valid_path = test_path
+                        break
+                except Exception:
+                    continue
+            if valid_path is None:
+                return None
+            image_path = str(valid_path)
+        else:
+            image_path = str(Path(image_path))
         
         if image_path not in self.cache_index["files"]:
             return None
