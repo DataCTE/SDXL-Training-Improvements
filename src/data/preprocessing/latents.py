@@ -39,7 +39,6 @@ class LatentPreprocessor:
         max_memory_usage: float = 0.8
     ):
         super().__init__()
-        self._setup_cache(config, use_cache)
         self.config = config
         self.tokenizer_one = tokenizer_one
         self.tokenizer_two = tokenizer_two
@@ -52,6 +51,9 @@ class LatentPreprocessor:
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
         self.device = device
+        
+        # Setup cache after initializing attributes
+        self._setup_cache(config, use_cache)
         
     def _setup_cache(self, config: Config, use_cache: bool = True) -> None:
         """Setup caching configuration."""
