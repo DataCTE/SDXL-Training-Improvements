@@ -324,7 +324,7 @@ class AspectBucketDataset(Dataset):
             
             # Get bucket dimensions
             bucket_idx = self.bucket_indices[idx]
-        target_h, target_w = self.buckets[bucket_idx]
+            target_h, target_w = self.buckets[bucket_idx]
         
         # Calculate crop coordinates
         if self.config.training.center_crop:
