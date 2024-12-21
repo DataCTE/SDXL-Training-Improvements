@@ -55,8 +55,14 @@ from tqdm.auto import tqdm
 
 from src.data.config import Config
 from src.models.encoders.clip import encode_clip
-from src.core.memory.tensor import torch_gc
-
+from src.core.memory.tensor import (
+    tensors_record_stream,
+    pin_tensor_,
+    unpin_tensor_,
+    device_equals,
+    replace_tensors_,
+    torch_gc
+)
 logger = setup_logging(__name__, level="INFO")
 
 class LatentPreprocessor:

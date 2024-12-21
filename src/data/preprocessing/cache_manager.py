@@ -14,7 +14,8 @@ from src.core.memory.tensor import (
     pin_tensor_,
     unpin_tensor_,
     device_equals,
-    replace_tensors_
+    replace_tensors_,
+    torch_gc
 )
 import hashlib
 import json
