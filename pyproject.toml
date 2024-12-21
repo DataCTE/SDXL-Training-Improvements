@@ -6,9 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "sdxl-trainer"
 dynamic = [
     "version",
-    "description",
     "readme",
-    "requires-python",
+    "requires-python", 
     "license",
     "authors",
     "keywords",
@@ -20,7 +19,6 @@ dynamic = [
 
 [tool.setuptools.dynamic]
 version = {attr = "src.__version__"}
-description = {file = ["README.md"]}
 readme = {file = ["README.md"]}
 requires-python = {file = ["requirements-python.txt"]}
 license = {file = ["LICENSE"]}
