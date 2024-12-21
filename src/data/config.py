@@ -167,14 +167,18 @@ class Config:
         # Validate image sizes with detailed error tracking
         try:
             # Extract and validate size tuples
-            max_size = self.global_config.image.max_size
-            min_size = self.global_config.image.min_size
+            max_size = tuple(self.global_config.image.max_size) if isinstance(self.global_config.image.max_size, (list, tuple)) else self.global_config.image.max_size
+            min_size = tuple(self.global_config.image.min_size) if isinstance(self.global_config.image.min_size, (list, tuple)) else self.global_config.image.min_size
             
-            # Validate tuple types first
+            # Convert to tuple and store back
+            self.global_config.image.max_size = max_size
+            self.global_config.image.min_size = min_size
+            
+            # Validate tuple types
             if not isinstance(max_size, tuple):
-                raise ValueError(f"max_size must be a tuple, got {type(max_size)}\nValue: {repr(max_size)}")
+                raise ValueError(f"max_size must be a tuple or list, got {type(max_size)}\nValue: {repr(max_size)}")
             if not isinstance(min_size, tuple):
-                raise ValueError(f"min_size must be a tuple, got {type(min_size)}\nValue: {repr(min_size)}")
+                raise ValueError(f"min_size must be a tuple or list, got {type(min_size)}\nValue: {repr(min_size)}")
                 
             # Validate tuple lengths
             if len(max_size) != 2:
