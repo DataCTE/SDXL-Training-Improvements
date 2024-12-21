@@ -666,10 +666,18 @@ class LatentPreprocessor:
                 
             logger.info(f"Validated {len(valid_embeds)}/{len(text_embeddings)} embedding batches")
                 
+            # Efficiently combine embeddings with tensor replacement
             text_embeddings = {
                 "prompt_embeds": torch.cat([e["prompt_embeds"] for e in valid_embeds]),
                 "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in valid_embeds])
             }
+            
+            # Replace tensors in place when possible
+            for embed in valid_embeds:
+                if device_equals(embed["prompt_embeds"].device, text_embeddings["prompt_embeds"].device):
+                    replace_tensors_(embed["prompt_embeds"], text_embeddings["prompt_embeds"])
+                if device_equals(embed["pooled_prompt_embeds"].device, text_embeddings["pooled_prompt_embeds"].device):
+                    replace_tensors_(embed["pooled_prompt_embeds"], text_embeddings["pooled_prompt_embeds"])
             
             logger.info(f"Successfully generated embeddings for {len(valid_embeds)} batches")
             
@@ -701,8 +709,16 @@ class LatentPreprocessor:
                 chunk_size = batch_size
                 if torch.cuda.is_available() and allocated > 0.7 * total_memory:
                     chunk_size = max(1, batch_size // 2)
+                
+                # Check if device matches before encoding
+                if not device_equals(batch_pixels.device, self.device):
+                    batch_pixels = batch_pixels.to(self.device)
                     
                 latents = self.encode_images(batch_pixels, batch_size=chunk_size)
+                
+                # Use replace_tensors_ for efficient memory reuse
+                if len(vae_latents) > 0:
+                    replace_tensors_(vae_latents[-1], latents)
                 vae_latents.append(latents)
                 
                 # Save complete file latents
