@@ -279,7 +279,21 @@ class AspectBucketDataset(Dataset):
             if isinstance(img_path, (list, tuple)):
                 img_path = img_path[0] if img_path else None
             image_path = convert_windows_path(img_path, make_absolute=True) if img_path else None
-        image = Image.open(image_path).convert('RGB')
+        except Exception as e:
+            logger.error(
+                "Error processing image path",
+                extra={
+                    'index': idx,
+                    'error_type': type(e).__name__,
+                    'error_msg': str(e),
+                    'image_path': str(img_path),
+                    'traceback': traceback.format_exc()
+                }
+            )
+            raise
+
+        try:
+            image = Image.open(image_path).convert('RGB')
         original_size = image.size
         
         # Get bucket dimensions
