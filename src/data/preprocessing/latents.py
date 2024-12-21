@@ -692,19 +692,20 @@ class LatentPreprocessor:
                 latents = self.encode_images(batch_pixels, batch_size=chunk_size)
                 vae_latents.append(latents)
                 
-                # Use cache manager to save preprocessed data
-                for i, (latent, embedding) in enumerate(zip(latents["model_input"], embeddings)):
-                    item_idx = batch_indices[i]
-                    if self.cache_manager is not None:
-                        self.cache_manager.save_preprocessed_data(
-                            latent_data={"model_input": latent.unsqueeze(0)},
-                            text_embeddings={
-                                "prompt_embeds": embedding["prompt_embeds"].unsqueeze(0),
-                                "pooled_prompt_embeds": embedding["pooled_prompt_embeds"].unsqueeze(0)
-                            },
-                            metadata={"index": item_idx},
-                            index=item_idx
-                        )
+                # Save complete file latents
+                if self.cache_manager is not None:
+                    for i, (latent, embedding) in enumerate(zip(latents["model_input"], embeddings)):
+                        file_path = dataset[batch_indices[i]].get("file_path")
+                        if file_path:
+                            self.cache_manager.save_preprocessed_data(
+                                latent_data={"model_input": latent.unsqueeze(0)},
+                                text_embeddings={
+                                    "prompt_embeds": embedding["prompt_embeds"].unsqueeze(0),
+                                    "pooled_prompt_embeds": embedding["pooled_prompt_embeds"].unsqueeze(0)
+                                },
+                                metadata={"original_file": str(file_path)},
+                                file_path=file_path
+                            )
                 
                 # Clean up intermediate tensors
                 del batch_pixels, latents, embeddings

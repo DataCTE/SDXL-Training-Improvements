@@ -214,7 +214,7 @@ class CacheManager:
         latent_data: Dict[str, torch.Tensor],
         text_embeddings: Dict[str, torch.Tensor],
         metadata: Dict,
-        index: int
+        file_path: Union[str, Path]
     ) -> bool:
         """Save latent data to disk.
         
@@ -232,19 +232,35 @@ class CacheManager:
             latent_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Save latent data with compression
-            # Save combined data
+            # Create cache path based on file path
+            file_hash = hashlib.sha256(str(file_path).encode()).hexdigest()[:12]
+            cache_path = self.cache_dir / f"{file_hash}_latent.pt"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save complete latent data for the file
             save_data = {
                 "latent": latent_data,
                 "text_embeddings": text_embeddings,
-                "metadata": metadata,
-                "timestamp": time.time()
+                "metadata": {
+                    **metadata,
+                    "original_path": str(file_path),
+                    "timestamp": time.time()
+                }
             }
             
             torch.save(
                 save_data,
-                latent_path,
+                cache_path,
                 _use_new_zipfile_serialization=True
             )
+            
+            # Update index with file mapping
+            self.cache_index["files"][str(file_path)] = {
+                "cache_path": str(cache_path),
+                "hash": file_hash,
+                "timestamp": time.time()
+            }
+            self._save_cache_index()
             
             # Update index
             self.cache_index["files"][str(index)] = {
