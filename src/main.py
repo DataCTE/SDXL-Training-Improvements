@@ -58,7 +58,7 @@ def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
         torch_dtype=torch.float32,
-        device_map="auto"
+        device_map="balanced"
     )
     
     # Transfer pipeline components to our model
