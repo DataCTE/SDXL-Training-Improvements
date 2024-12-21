@@ -26,10 +26,11 @@ authors = {file = ["AUTHORS"]}
 keywords = {file = ["keywords.txt"]}
 classifiers = {file = ["classifiers.txt"]}
 dependencies = {file = ["requirements.txt"]}
-optional-dependencies = {
-    dev = {file = ["requirements-dev.txt"]},
-    docs = {file = ["requirements-docs.txt"]}
-}
+[tool.setuptools.dynamic.optional-dependencies.dev]
+file = ["requirements-dev.txt"]
+
+[tool.setuptools.dynamic.optional-dependencies.docs] 
+file = ["requirements-docs.txt"]
 
 [tool.black]
 line-length = 100
