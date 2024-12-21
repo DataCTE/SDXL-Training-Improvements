@@ -294,10 +294,10 @@ class AspectBucketDataset(Dataset):
 
         try:
             image = Image.open(image_path).convert('RGB')
-        original_size = image.size
-        
-        # Get bucket dimensions
-        bucket_idx = self.bucket_indices[idx]
+            original_size = image.size
+            
+            # Get bucket dimensions
+            bucket_idx = self.bucket_indices[idx]
         target_h, target_w = self.buckets[bucket_idx]
         
         # Calculate crop coordinates
