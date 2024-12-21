@@ -71,6 +71,7 @@ class LatentPreprocessor:
         device: Union[str, torch.device] = "cuda",
         use_cache: bool = True
     ):
+        """Initialize the latent preprocessor for SDXL training."""
         """Initialize the latent preprocessor for SDXL training.
         
         Args:
@@ -97,6 +98,16 @@ class LatentPreprocessor:
             from src.data.utils.paths import convert_windows_path
             self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Initialize cache manager
+            from .cache_manager import CacheManager
+            self.cache_manager = CacheManager(
+                cache_dir=self.cache_dir,
+                num_proc=config.global_config.cache.num_proc,
+                chunk_size=config.global_config.cache.chunk_size,
+                compression=config.global_config.cache.compression,
+                verify_hashes=config.global_config.cache.verify_hashes
+            )
             
             # Create subdirectories for individual files
             self.text_cache_dir = Path(convert_windows_path(self.cache_dir / "text", make_absolute=True))
@@ -780,3 +791,5 @@ class LatentPreprocessor:
         if self.image_cache_dir.exists():
             shutil.rmtree(self.image_cache_dir)
             self.image_cache_dir.mkdir(parents=True)
+        if self.cache_manager is not None:
+            self.cache_manager.clear_cache()
