@@ -58,11 +58,13 @@ def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     # Initialize device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Load pipeline with device placement
+    # Load pipeline with optimized device placement
+    device_map = "balanced" if torch.cuda.is_available() else None
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
         torch_dtype=torch.float32,
-        device_map="balanced" if torch.cuda.is_available() else None
+        device_map=device_map,
+        low_cpu_mem_usage=True
     )
     
     # Transfer pipeline components to our model

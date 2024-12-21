@@ -142,11 +142,11 @@ class StableDiffusionXLModel(BaseModel):
 
     def vae_to(self, device: torch.device) -> None:
         """Move VAE to device with optimized CUDA transfer."""
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available")
-            
-        # Ensure CUDA device is properly initialized
-        torch.cuda.set_device(device)
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA is not available")
+            # Ensure CUDA device is properly initialized
+            torch.cuda.set_device(device)
         
         if not tensors_match_device(self.vae.state_dict(), device):
             with create_stream_context(torch.cuda.current_stream()):
@@ -156,11 +156,11 @@ class StableDiffusionXLModel(BaseModel):
 
     def text_encoder_to(self, device: torch.device) -> None:
         """Move both text encoders to device with explicit CUDA support."""
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available")
-            
-        # Initialize CUDA device
-        torch.cuda.set_device(device)
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA is not available")
+            # Initialize CUDA device
+            torch.cuda.set_device(device)
         
         with create_stream_context(torch.cuda.current_stream()):
             # Move encoders with CUDA optimization
@@ -197,11 +197,11 @@ class StableDiffusionXLModel(BaseModel):
 
     def unet_to(self, device: torch.device) -> None:
         """Move UNet to device with explicit CUDA/GPU support."""
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available")
-            
-        # Initialize CUDA device
-        torch.cuda.set_device(device)
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA is not available")
+            # Initialize CUDA device
+            torch.cuda.set_device(device)
         
         with create_stream_context(torch.cuda.current_stream()):
             # Move UNet with CUDA optimization
