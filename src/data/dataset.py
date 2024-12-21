@@ -239,7 +239,7 @@ class AspectBucketDataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_paths)
 
-    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, str, Tuple[int, int], float]]:
+    def __getitem__(self, idx: Union[int, slice]) -> Dict[str, Union[torch.Tensor, str, Tuple[int, int], float]]:
         """Get dataset item with bucketing and caching.
         
         Returns dict with:
@@ -250,9 +250,28 @@ class AspectBucketDataset(Dataset):
             - target_size: Target size after bucketing
             - loss_weight: Optional tag-based loss weight
         """
-        # Validate index
-        if not isinstance(idx, (int, slice)):
-            raise TypeError(f"Dataset indices must be integers or slices, not {type(idx)}")
+        # Validate index with detailed error tracking
+        try:
+            if not isinstance(idx, (int, slice)):
+                error_msg = f"Dataset indices must be integers or slices, not {type(idx)}"
+                logger.error(
+                    f"Invalid index type:\n"
+                    f"Expected: int or slice\n"
+                    f"Got: {type(idx)}\n"
+                    f"Value: {repr(idx)}"
+                )
+                raise TypeError(error_msg)
+                
+            if isinstance(idx, int):
+                if idx < 0 or idx >= len(self.image_paths):
+                    error_msg = f"Index {idx} out of range [0, {len(self.image_paths)})"
+                    logger.error(
+                        f"Index out of range:\n"
+                        f"Index: {idx}\n"
+                        f"Valid range: [0, {len(self.image_paths)})\n"
+                        f"Dataset size: {len(self.image_paths)}"
+                    )
+                    raise IndexError(error_msg)
             
         # Load and process image with WSL path handling
         img_path = self.image_paths[idx]

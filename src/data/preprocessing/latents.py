@@ -724,7 +724,68 @@ class LatentPreprocessor:
             try:
                 # Handle slice indexing properly
                 batch_indices = list(range(idx, min(idx + batch_size, len(dataset))))
-                batch = [dataset[i] for i in batch_indices]
+                # Handle dataset indexing with detailed validation
+                batch = []
+                for i in batch_indices:
+                    try:
+                        item = dataset[i]
+                        if not isinstance(item, dict):
+                            logger.error(
+                                f"Invalid dataset item type at index {i}:\n"
+                                f"Expected: dict\n"
+                                f"Got: {type(item)}\n"
+                                f"Value: {repr(item)}"
+                            )
+                            continue
+                            
+                        required_keys = {"pixel_values", "text"}
+                        missing_keys = required_keys - set(item.keys())
+                        if missing_keys:
+                            logger.error(
+                                f"Missing required keys in dataset item {i}:\n"
+                                f"Missing: {missing_keys}\n"
+                                f"Available keys: {set(item.keys())}\n"
+                                f"Item: {repr(item)}"
+                            )
+                            continue
+                            
+                        # Validate pixel values
+                        if not isinstance(item["pixel_values"], torch.Tensor):
+                            logger.error(
+                                f"Invalid pixel_values type at index {i}:\n"
+                                f"Expected: torch.Tensor\n"
+                                f"Got: {type(item['pixel_values'])}\n"
+                                f"Value: {repr(item['pixel_values'])}"
+                            )
+                            continue
+                            
+                        # Validate text
+                        if not isinstance(item["text"], (str, list, tuple)):
+                            logger.error(
+                                f"Invalid text type at index {i}:\n"
+                                f"Expected: str, list, or tuple\n"
+                                f"Got: {type(item['text'])}\n"
+                                f"Value: {repr(item['text'])}"
+                            )
+                            continue
+                            
+                        batch.append(item)
+                        logger.debug(f"Successfully validated dataset item {i}")
+                        
+                    except Exception as e:
+                        error_context = {
+                            'index': i,
+                            'error_type': type(e).__name__,
+                            'error_msg': str(e),
+                            'traceback': traceback.format_exc()
+                        }
+                        logger.error(
+                            f"Error accessing dataset item {i}:\n"
+                            f"Error type: {error_context['error_type']}\n"
+                            f"Error message: {error_context['error_msg']}\n"
+                            f"Traceback:\n{error_context['traceback']}"
+                        )
+                        continue
                 # Check memory before VAE encoding
                 if torch.cuda.is_available():
                     total_memory = torch.cuda.get_device_properties(0).total_memory
