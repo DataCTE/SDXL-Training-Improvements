@@ -272,6 +272,13 @@ class CacheManager:
                     if isinstance(tensor, torch.Tensor):
                         pin_tensor_(tensor)
 
+            # Prepare save data
+            save_data = {
+                "latent": latent_data,
+                "text_embeddings": text_embeddings,
+                "metadata": metadata
+            }
+            
             try:
                 # Save with proper cleanup
                 torch.save(
@@ -282,7 +289,7 @@ class CacheManager:
                 torch_gc()  # Clean up after save
                 
                 # Explicitly clean up save_data tensors
-                for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
+                for tensor_dict in [latent_data, text_embeddings]:
                     for tensor in tensor_dict.values():
                         if isinstance(tensor, torch.Tensor):
                             del tensor
@@ -290,7 +297,7 @@ class CacheManager:
                 torch_gc()
             finally:
                 # Unpin tensors after saving
-                for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
+                for tensor_dict in [latent_data, text_embeddings]:
                     for tensor in tensor_dict.values():
                         if isinstance(tensor, torch.Tensor):
                             unpin_tensor_(tensor)
