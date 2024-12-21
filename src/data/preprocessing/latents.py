@@ -764,7 +764,8 @@ class LatentPreprocessor:
                                     'value': repr(item),
                                     'function': '_process_item',
                                     'line_number': traceback.extract_stack()[-1].lineno,
-                                    'file_path': __file__
+                                    'file_path': __file__,
+                                    'traceback': traceback.format_exc()
                                 }
                             )
                             continue
