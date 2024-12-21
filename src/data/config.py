@@ -123,6 +123,7 @@ class TrainingConfig:
     random_flip: bool = True
     center_crop: bool = True
     method: str = "ddpm"  # ddpm or flow_matching
+    prediction_type: str = "v_prediction"  # v_prediction, epsilon, or sample
     ddpm: DDPMConfig = field(default_factory=DDPMConfig)
     flow_matching: FlowMatchingConfig = field(default_factory=FlowMatchingConfig)
     
