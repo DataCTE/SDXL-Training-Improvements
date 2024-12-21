@@ -381,6 +381,8 @@ class LatentPreprocessor:
         compression: Optional[str] = "zstd",
         max_retries: int = 3
     ) -> Dataset:
+        # Initialize processing statistics
+        stats = ProcessingStats()
         """Preprocess and cache embeddings for a dataset.
         
         Args:
@@ -545,10 +547,10 @@ class LatentPreprocessor:
             error_msg = "No valid text embeddings were generated."
             logger.error(error_msg)
             logger.error("Processing statistics:")
-            logger.error(f"Total samples: {stats.total_samples}")
-            logger.error(f"Successful samples: {stats.successful_samples}")
-            logger.error(f"Failed samples: {stats.failed_samples}")
-            logger.error(f"Empty captions: {stats.empty_captions}")
+            logger.error(f"Total samples: {len(dataset)}")
+            logger.error(f"Successful samples: {len(text_embeddings) if text_embeddings else 0}")
+            logger.error(f"Failed samples: {len(dataset) - (len(text_embeddings) if text_embeddings else 0)}")
+            logger.error(f"Empty captions: {sum(1 for c in dataset['text'] if not str(c).strip())}")
             logger.error("Check input captions and previous log messages for details.")
             raise RuntimeError(error_msg)
             
