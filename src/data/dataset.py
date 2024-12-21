@@ -39,46 +39,7 @@ class AspectBucketDataset(Dataset):
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True
     ):
-        """Initialize SDXL dataset with memory optimizations.
-        
-        Args:
-            config: Configuration object
-            image_paths: List of paths to images
-            captions: List of captions/prompts
-            latent_preprocessor: Optional latent preprocessor
-            tag_weighter: Optional tag weighter
-            is_train: Whether this is training data
-        """
-        # Setup CUDA optimizations and validate paths
-        try:
-            if torch.cuda.is_available():
-                # Enable memory optimizations
-                torch.backends.cuda.matmul.allow_tf32 = True
-                torch.backends.cudnn.allow_tf32 = True
-                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
-                torch.backends.cudnn.benchmark = True
-                    
-            # Convert and validate paths with detailed error tracking
-            converted_paths = []
-            for path in image_paths:
-                try:
-                    converted = convert_windows_path(path, make_absolute=True)
-                    if not os.path.exists(str(converted)):
-                        logger.warning(f"Path does not exist after conversion: {path} -> {converted}")
-                        continue
-                    converted_paths.append(str(converted))
-                except Exception as e:
-                    logger.error(f"Error converting path {path}: {str(e)}")
-                    
-            if not converted_paths:
-                raise RuntimeError("No valid image paths found after conversion")
-                
-            image_paths = converted_paths
-            
-        except Exception as e:
-            logger.error(f"Error during initialization: {str(e)}")
-            raise
-        """SDXL Dataset with bucketing and aspect ratio preservation.
+        """Initialize SDXL dataset with memory optimizations and aspect ratio preservation.
         
         Args:
             config: Configuration object
@@ -88,6 +49,29 @@ class AspectBucketDataset(Dataset):
             tag_weighter: Optional tag weighter for loss weighting
             is_train: Whether this is training data
         """
+        # Setup CUDA optimizations
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+            torch.backends.cudnn.benchmark = True
+            
+        # Convert and validate paths with detailed error tracking
+        converted_paths = []
+        for path in image_paths:
+            try:
+                converted = convert_windows_path(path, make_absolute=True)
+                if not os.path.exists(str(converted)):
+                    logger.warning(f"Path does not exist after conversion: {path} -> {converted}")
+                    continue
+                converted_paths.append(str(converted))
+            except Exception as e:
+                logger.error(f"Error converting path {path}: {str(e)}")
+                
+        if not converted_paths:
+            raise RuntimeError("No valid image paths found after conversion")
+            
+        image_paths = converted_paths
         self.config = config
         self.image_paths = image_paths
         self.captions = captions
@@ -142,54 +126,90 @@ class AspectBucketDataset(Dataset):
         return self.config.global_config.image.supported_dims
 
     def _assign_buckets(self) -> List[int]:
-        """Assign each image to closest supported SDXL dimension."""
+        """Assign each image to closest supported SDXL dimension based on aspect ratio and area."""
         bucket_indices = []
         
         for img_path in self.image_paths:
-            img = Image.open(img_path)
-            w, h = img.size
-            aspect_ratio = w / h
-            
-            # Find closest supported dimension
-            min_diff = float('inf')
-            best_bucket_idx = 0
-            
-            for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
-                # Compare aspect ratios and total area difference
-                bucket_ratio = bucket_w / bucket_h
-                ratio_diff = abs(aspect_ratio - bucket_ratio)
-                area_diff = abs((w * h) - (bucket_w * bucket_h))
+            try:
+                img = Image.open(img_path)
+                w, h = img.size
+                aspect_ratio = w / h
+                img_area = w * h
                 
-                # Weighted combination of ratio and area differences
-                total_diff = ratio_diff + area_diff / (1536 * 1536)  # Normalize area diff
+                # Find closest supported dimension
+                min_diff = float('inf')
+                best_bucket_idx = 0
                 
-                if total_diff < min_diff:
-                    min_diff = total_diff
-                    best_bucket_idx = idx
-            
-            bucket_indices.append(best_bucket_idx)
-            
+                for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
+                    # Skip buckets exceeding max aspect ratio
+                    bucket_ratio = bucket_w / bucket_h
+                    if bucket_ratio > self.max_aspect_ratio:
+                        continue
+                        
+                    # Compare aspect ratios and total area difference
+                    ratio_diff = abs(aspect_ratio - bucket_ratio)
+                    bucket_area = bucket_w * bucket_h
+                    area_diff = abs(img_area - bucket_area)
+                    
+                    # Weighted combination favoring aspect ratio match
+                    total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
+                    
+                    if total_diff < min_diff:
+                        min_diff = total_diff
+                        best_bucket_idx = idx
+                
+                bucket_indices.append(best_bucket_idx)
+                
+            except Exception as e:
+                logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
+                # Use default bucket (first one) on error
+                bucket_indices.append(0)
+                
         return bucket_indices
 
     def _process_image(self, image: Image.Image, target_size: Tuple[int, int]) -> torch.Tensor:
-        """Process image with resizing and augmentations."""
-        # Resize
-        image = image.resize(target_size, BILINEAR)
-        
-        # Random flip in training
-        if self.is_train and self.config.training.random_flip and torch.rand(1).item() < 0.5:
-            image = image.transpose(FLIP_LEFT_RIGHT)
+        """Process image with resizing and augmentations using optimized memory handling."""
+        try:
+            # Validate input
+            if not isinstance(image, Image.Image):
+                raise ValueError(f"Expected PIL.Image, got {type(image)}")
+            if not isinstance(target_size, tuple) or len(target_size) != 2:
+                raise ValueError(f"Invalid target size: {target_size}")
+                
+            # Resize with bounds checking
+            current_w, current_h = image.size
+            target_w, target_h = target_size
             
-        # Convert to tensor and normalize efficiently
-        with create_stream_context(torch.cuda.current_stream()):
-            tensor = self.train_transforms(image)
-            if torch.cuda.is_available():
-                pin_tensor_(tensor)
-                if self.is_train:
-                    tensors_record_stream(torch.cuda.current_stream(), tensor)
-            return tensor
-        
-        return image
+            if target_w > self.max_size or target_h > self.max_size:
+                logger.warning(f"Target size {target_size} exceeds max size {self.max_size}")
+                scale = self.max_size / max(target_w, target_h)
+                target_w = int(target_w * scale)
+                target_h = int(target_h * scale)
+                
+            image = image.resize((target_w, target_h), BILINEAR)
+            
+            # Random flip in training
+            if self.is_train and self.config.training.random_flip and torch.rand(1).item() < 0.5:
+                image = image.transpose(FLIP_LEFT_RIGHT)
+                
+            # Convert to tensor and normalize efficiently
+            with create_stream_context(torch.cuda.current_stream()):
+                tensor = self.train_transforms(image)
+                
+                # Optimize memory layout
+                if torch.cuda.is_available():
+                    tensor = tensor.contiguous(memory_format=torch.channels_last)
+                    pin_tensor_(tensor)
+                    if self.is_train:
+                        tensors_record_stream(torch.cuda.current_stream(), tensor)
+                        
+                return tensor
+                
+        except Exception as e:
+            logger.error(f"Error processing image: {str(e)}")
+            # Return zero tensor of correct shape as fallback
+            return torch.zeros((3, target_size[1], target_size[0]), 
+                             dtype=torch.float32)
 
     def __len__(self) -> int:
         return len(self.image_paths)
