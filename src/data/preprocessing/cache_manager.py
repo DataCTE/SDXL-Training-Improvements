@@ -4,7 +4,7 @@ import traceback
 from dataclasses import dataclass
 from enum import Enum, auto
 from src.core.logging.logging import setup_logging
-from src.utils.paths import convert_windows_path
+from ..utils.paths import convert_windows_path
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -259,7 +259,7 @@ class CacheManager:
             Dict with processing statistics
         """
         logger.info(f"Starting dataset processing with {num_workers or self.num_proc} workers")
-        from src.utils.paths import convert_windows_path, is_wsl
+        from ..utils.paths import convert_windows_path, is_wsl
         data_dir = convert_windows_path(data_dir, make_absolute=True)
         if is_wsl():
             logger.info(f"Running in WSL, using converted path: {data_dir}")

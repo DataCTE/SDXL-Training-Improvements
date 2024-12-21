@@ -149,7 +149,7 @@ class Config:
     
     def __post_init__(self):
         """Validate configuration after initialization."""
-        from src.utils.paths import convert_windows_path
+        from .utils.paths import convert_windows_path
         # Create output and cache directories with WSL path handling
         output_dir = convert_windows_path(self.global_config.output_dir, make_absolute=True)
         cache_dir = convert_windows_path(self.global_config.cache.cache_dir, make_absolute=True)
