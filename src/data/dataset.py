@@ -1,5 +1,6 @@
 """Dataset implementation for SDXL training."""
 import os
+import traceback
 from src.core.logging.logging import setup_logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union

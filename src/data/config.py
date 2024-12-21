@@ -1,8 +1,12 @@
 """Configuration management for SDXL training."""
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import yaml
+from src.core.logging.logging import setup_logging
+
+logger = setup_logging(__name__)
 
 @dataclass
 class GlobalConfig:
