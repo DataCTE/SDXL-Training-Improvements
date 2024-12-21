@@ -276,10 +276,16 @@ class AspectBucketDataset(Dataset):
             if not isinstance(idx, (int, slice)):
                 error_msg = f"Dataset indices must be integers or slices, not {type(idx)}"
                 logger.error(
-                    f"Invalid index type:\n"
-                    f"Expected: int or slice\n"
-                    f"Got: {type(idx)}\n"
-                    f"Value: {repr(idx)}"
+                    "Invalid index type",
+                    extra={
+                        'expected_type': 'int or slice',
+                        'actual_type': type(idx).__name__,
+                        'value': repr(idx),
+                        'function': '__getitem__',
+                        'line_number': traceback.extract_stack()[-1].lineno,
+                        'file_path': __file__,
+                        'traceback': traceback.format_exc()
+                    }
                 )
                 raise TypeError(error_msg)
                 
