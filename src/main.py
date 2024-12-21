@@ -233,14 +233,6 @@ def setup_training(
             max_memory_usage=0.8  # Set memory limit
         )
         
-        if config.global_config.cache.use_cache:
-            train_dataset = latent_preprocessor.preprocess_dataset(
-                train_dataset,
-                batch_size=config.training.batch_size,
-                cache=True,
-                compression=getattr(config.global_config.cache, 'compression', 'zstd')
-            )
-        
         # Create data loader
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
