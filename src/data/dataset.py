@@ -250,8 +250,8 @@ class AspectBucketDataset(Dataset):
             - target_size: Target size after bucketing
             - loss_weight: Optional tag-based loss weight
         """
-        # Validate index with detailed error tracking
         try:
+            # Validate index with detailed error tracking
             if not isinstance(idx, (int, slice)):
                 error_msg = f"Dataset indices must be integers or slices, not {type(idx)}"
                 logger.error(
@@ -273,8 +273,8 @@ class AspectBucketDataset(Dataset):
                     )
                     raise IndexError(error_msg)
             
-        # Load and process image with WSL path handling
-        img_path = self.image_paths[idx]
+            # Load and process image with WSL path handling
+            img_path = self.image_paths[idx]
         if isinstance(img_path, (list, tuple)):
             img_path = img_path[0] if img_path else None
         image_path = convert_windows_path(img_path, make_absolute=True) if img_path else None
