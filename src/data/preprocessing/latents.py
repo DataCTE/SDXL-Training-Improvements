@@ -550,7 +550,21 @@ class LatentPreprocessor:
             logger.error(f"Total samples: {len(dataset)}")
             logger.error(f"Successful samples: {len(text_embeddings) if text_embeddings else 0}")
             logger.error(f"Failed samples: {len(dataset) - (len(text_embeddings) if text_embeddings else 0)}")
-            logger.error(f"Empty captions: {sum(1 for c in dataset['text'] if not str(c).strip())}")
+            
+            # Safely count empty captions
+            empty_count = 0
+            for item in dataset:
+                try:
+                    caption = item['text']
+                    if isinstance(caption, (list, tuple)):
+                        caption = caption[0] if caption else ""
+                    if not str(caption).strip():
+                        empty_count += 1
+                except Exception as e:
+                    logger.warning(f"Error checking caption: {str(e)}")
+                    empty_count += 1
+                    
+            logger.error(f"Empty captions: {empty_count}")
             logger.error("Check input captions and previous log messages for details.")
             raise RuntimeError(error_msg)
             
