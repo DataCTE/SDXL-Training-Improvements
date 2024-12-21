@@ -19,6 +19,7 @@ accelerator = accelerate.Accelerator()
 default_device = accelerator.device
 torch_version = packaging.version.parse(torch.__version__)
 
+
 @dataclass
 class TensorStats:
     """Track tensor operation statistics."""
@@ -164,6 +165,223 @@ def tensors_to_device_(
             }
             raise DeviceError("Failed to transfer tensors to device", error_context) from e
 
+def state_dict_has_prefix(state_dict: Optional[Dict[str, Any]], prefix: str) -> bool:
+    """Check if state dict has keys with prefix.
+    
+    Args:
+        state_dict: Model state dictionary
+        prefix: Prefix to check for
+        
+    Returns:
+        bool indicating if prefix exists
+        
+    Raises:
+        TensorError: If state dict validation fails
+    """
+    with tensor_operation_context("state_dict_check"):
+        try:
+            if not state_dict:
+                return False
+                
+            # Validate inputs
+            if not isinstance(prefix, str):
+                raise ValueError(f"Prefix must be a string, got {type(prefix)}")
+                
+            # Check for prefix in keys
+            return any(k.startswith(prefix) for k in state_dict)
+            
+        except Exception as e:
+            error_context = {
+                'prefix': prefix,
+                'state_dict_type': type(state_dict),
+                'has_keys': bool(state_dict and state_dict.keys())
+            }
+            if not isinstance(e, ValueError):
+                raise TensorError("Failed to check state dict prefix", error_context) from e
+            raise
+
+
+def optimizer_to_device_(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    """Move optimizer state to device with optimized memory handling.
+    
+    Args:
+        optimizer: PyTorch optimizer
+        device: Target device
+        
+    Raises:
+        TensorError: If optimizer state transfer fails
+    """
+    with tensor_operation_context("optimizer_transfer"):
+        try:
+            state_dict = optimizer.state_dict()
+            if 'state' not in state_dict:
+                return
+                
+            # Use stream for transfer if CUDA
+            stream = torch.cuda.Stream() if device.type == 'cuda' else None
+            
+            try:
+                with create_stream_context(stream):
+                    tensors_to_device_(state_dict['state'], device, non_blocking=True)
+                    
+                    # Record stream for tensor states
+                    if stream:
+                        for state in state_dict['state'].values():
+                            if isinstance(state, dict):
+                                for value in state.values():
+                                    if isinstance(value, torch.Tensor):
+                                        tensors_record_stream(stream, value)
+            finally:
+                if stream:
+                    stream.synchronize()
+                    
+        except Exception as e:
+            error_context = {
+                'optimizer_type': type(optimizer).__name__,
+                'device': str(device),
+                'has_state': 'state' in getattr(optimizer, 'state_dict', lambda: {})()
+            }
+            raise TensorError("Failed to move optimizer to device", error_context) from e
+
+def replace_tensors_(
+    target_data: Union[torch.Tensor, List, Tuple, Dict],
+    source_data: Union[torch.Tensor, List, Tuple, Dict],
+    include_parameter_indices: Optional[List[int]] = None
+) -> None:
+    """Replace tensor data in-place with memory optimization.
+    
+    Args:
+        target_data: Target data structure
+        source_data: Source data structure 
+        include_parameter_indices: Optional indices to include
+        
+    Raises:
+        TensorError: If tensor replacement fails
+    """
+    with tensor_operation_context("replace_tensors"):
+        try:
+            if isinstance(target_data, torch.Tensor) and include_parameter_indices is None:
+                if not isinstance(source_data, torch.Tensor):
+                    raise TypeError(f"Source must be tensor, got {type(source_data)}")
+                target_data.data = source_data.data
+                
+            elif isinstance(target_data, (list, tuple)):
+                if not isinstance(source_data, (list, tuple)):
+                    raise TypeError(f"Source must be sequence, got {type(source_data)}")
+                for i, (target_elem, source_elem) in enumerate(zip(target_data, source_data)):
+                    if include_parameter_indices is None or i in include_parameter_indices:
+                        replace_tensors_(target_elem, source_elem)
+                        
+            elif isinstance(target_data, dict) and include_parameter_indices is None:
+                if not isinstance(source_data, dict):
+                    raise TypeError(f"Source must be dict, got {type(source_data)}")
+                for key, target_elem in target_data.items():
+                    if key in source_data:
+                        replace_tensors_(target_elem, source_data[key])
+                        
+        except Exception as e:
+            error_context = {
+                'target_type': type(target_data),
+                'source_type': type(source_data),
+                'indices': include_parameter_indices
+            }
+            raise TensorError("Failed to replace tensor data", error_context) from e
+
+def tensors_match_device(
+    data: Union[torch.Tensor, List, Tuple, Dict],
+    device: torch.device,
+    include_parameter_indices: Optional[List[int]] = None
+) -> bool:
+    """Check if tensors match target device with validation.
+    
+    Args:
+        data: Data structure to check
+        device: Target device
+        include_parameter_indices: Optional indices to include
+        
+    Returns:
+        bool indicating if tensors match device
+    """
+    with tensor_operation_context("device_check"):
+        try:
+            if isinstance(data, torch.Tensor) and include_parameter_indices is None:
+                return device_equals(data.device, device)
+            elif isinstance(data, (list, tuple)):
+                return all(
+                    tensors_match_device(elem, device)
+                    for i, elem in enumerate(data)
+                    if include_parameter_indices is None or i in include_parameter_indices
+                )
+            elif isinstance(data, dict) and include_parameter_indices is None:
+                return all(
+                    tensors_match_device(elem, device)
+                    for elem in data.values()
+                )
+            return True
+            
+        except Exception as e:
+            error_context = {
+                'data_type': type(data),
+                'device': str(device),
+                'indices': include_parameter_indices
+            }
+            raise TensorError("Failed to check tensor devices", error_context) from e
+
+def unpin_module(module: torch.nn.Module) -> torch.nn.Module:
+    """Unpin module tensors with cleanup.
+    
+    Args:
+        module: PyTorch module
+        
+    Returns:
+        Unpinned module
+        
+    Raises:
+        TensorError: If unpinning fails
+    """
+    with tensor_operation_context("unpin_module"):
+        try:
+            # Unpin parameters
+            for param in module.parameters():
+                if param.is_pinned():
+                    param.data = param.data.clone()
+                    unpin_tensor_(param)
+                    
+            # Unpin buffers
+            for buffer in module.buffers():
+                if buffer.is_pinned():
+                    buffer.data = buffer.data.clone()
+                    unpin_tensor_(buffer)
+                    
+            return module
+            
+        except Exception as e:
+            error_context = {
+                'module_type': type(module).__name__,
+                'num_parameters': sum(1 for _ in module.parameters()),
+                'num_buffers': sum(1 for _ in module.buffers())
+            }
+            raise TensorError("Failed to unpin module", error_context) from e
+
+def torch_sync() -> None:
+    """Synchronize all PyTorch devices.
+    
+    Raises:
+        TensorError: If synchronization fails
+    """
+    with tensor_operation_context("sync"):
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            if torch.backends.mps.is_available():
+                torch.mps.synchronize()
+        except Exception as e:
+            error_context = {
+                'cuda_available': torch.cuda.is_available(),
+                'mps_available': torch.backends.mps.is_available()
+            }
+            raise TensorError("Failed to synchronize devices", error_context) from e
+        
 def tensors_record_stream(
     stream: torch.cuda.Stream,
     data: Union[torch.Tensor, List, Tuple, Dict],
