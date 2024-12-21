@@ -24,15 +24,6 @@ from src.core.memory.tensor import (
     device_equals
 )
 from src.models.sdxl import StableDiffusionXLPipeline
-from src.core.memory.tensor import (
-    create_stream_context,
-    tensors_record_stream,
-    pin_tensor_,
-    unpin_tensor_,
-    torch_gc,
-    tensors_to_device_,
-    device_equals
-)
 from .config import Config
 from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
 
