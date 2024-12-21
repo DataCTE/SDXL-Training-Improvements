@@ -694,6 +694,7 @@ class LatentPreprocessor:
                 batch = [dataset[i] for i in batch_indices]
                 # Check memory before VAE encoding
                 if torch.cuda.is_available():
+                    total_memory = torch.cuda.get_device_properties(0).total_memory
                     allocated = torch.cuda.memory_allocated()
                     if allocated > max_memory_usage * total_memory:
                         torch_gc()
@@ -707,8 +708,11 @@ class LatentPreprocessor:
                 
                 # Process VAE in smaller chunks if needed
                 chunk_size = batch_size
-                if torch.cuda.is_available() and allocated > 0.7 * total_memory:
-                    chunk_size = max(1, batch_size // 2)
+                if torch.cuda.is_available():
+                    total_memory = torch.cuda.get_device_properties(0).total_memory
+                    allocated = torch.cuda.memory_allocated()
+                    if allocated > 0.7 * total_memory:
+                        chunk_size = max(1, batch_size // 2)
                 
                 # Check if device matches before encoding
                 if not device_equals(batch_pixels.device, self.device):
