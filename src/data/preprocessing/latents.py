@@ -376,10 +376,11 @@ class LatentPreprocessor:
     def preprocess_dataset(
         self,
         dataset: Dataset,
-        batch_size: int = 8,
+        batch_size: int = 4,  # Reduced default batch size
         cache: bool = True,
         compression: Optional[str] = "zstd",
-        max_retries: int = 3
+        max_retries: int = 3,
+        max_memory_usage: float = 0.8  # Max fraction of GPU memory to use
     ) -> Dataset:
         # Initialize processing statistics
         stats = ProcessingStats()
@@ -508,8 +509,19 @@ class LatentPreprocessor:
                     continue
                     
                 try:
+                    # Check available GPU memory
+                    if torch.cuda.is_available():
+                        total_memory = torch.cuda.get_device_properties(0).total_memory
+                        allocated = torch.cuda.memory_allocated()
+                        if allocated > max_memory_usage * total_memory:
+                            torch_gc()  # Force garbage collection
+                            logger.warning("High GPU memory usage, reducing batch size")
+                            current_batch = batch_texts[:len(batch_texts)//2]  # Process half batch
+                        else:
+                            current_batch = batch_texts
+
                     embeddings = self.encode_prompt(
-                        batch_texts,
+                        current_batch,
                         proportion_empty_prompts=self.config.data.proportion_empty_prompts
                     )
                     if embeddings is not None and all(t is not None for t in embeddings.values()):
@@ -648,9 +660,26 @@ class LatentPreprocessor:
                 # Handle slice indexing properly
                 batch_indices = list(range(idx, min(idx + batch_size, len(dataset))))
                 batch = [dataset[i] for i in batch_indices]
+                # Check memory before VAE encoding
+                if torch.cuda.is_available():
+                    allocated = torch.cuda.memory_allocated()
+                    if allocated > max_memory_usage * total_memory:
+                        torch_gc()
+                        logger.warning("High GPU memory usage before VAE encoding")
+                        
                 batch_pixels = torch.stack([b.get("pixel_values") for b in batch if b.get("pixel_values") is not None])
-                latents = self.encode_images(batch_pixels, batch_size=batch_size)
+                
+                # Process VAE in smaller chunks if needed
+                chunk_size = batch_size
+                if torch.cuda.is_available() and allocated > 0.7 * total_memory:
+                    chunk_size = max(1, batch_size // 2)
+                    
+                latents = self.encode_images(batch_pixels, batch_size=chunk_size)
                 vae_latents.append(latents)
+                
+                # Clean up intermediate tensors
+                del batch_pixels
+                torch_gc()
             except Exception as e:
                 logger.error(f"Error processing VAE batch {idx}: {str(e)}")
                 continue
