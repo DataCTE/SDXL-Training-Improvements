@@ -465,7 +465,22 @@ class LatentPreprocessor:
             try:
                 # Handle slice indexing properly
                 batch_indices = list(range(idx, min(idx + batch_size, len(dataset))))
-                batch = [dataset[i] for i in batch_indices]
+                # Handle dataset indexing with validation
+                batch = []
+                for i in batch_indices:
+                    try:
+                        item = dataset[i]
+                        if isinstance(item, dict) and "pixel_values" in item:
+                            batch.append(item)
+                        else:
+                            logger.warning(f"Skipping invalid dataset item at index {i}")
+                    except Exception as e:
+                        logger.error(f"Error accessing dataset item {i}: {str(e)}")
+                        continue
+                
+                if not batch:
+                    logger.warning(f"No valid items in batch {idx}, skipping")
+                    continue
                 batch_texts = []
                 valid_count = 0
                 
