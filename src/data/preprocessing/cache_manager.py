@@ -246,11 +246,24 @@ class CacheManager:
                 }
             }
             
-            torch.save(
-                save_data,
-                cache_path,
-                _use_new_zipfile_serialization=True
-            )
+            # Pin tensors before saving for faster I/O
+            for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
+                for tensor in tensor_dict.values():
+                    if isinstance(tensor, torch.Tensor):
+                        pin_tensor_(tensor)
+
+            try:
+                torch.save(
+                    save_data,
+                    cache_path,
+                    _use_new_zipfile_serialization=True
+                )
+            finally:
+                # Unpin tensors after saving
+                for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
+                    for tensor in tensor_dict.values():
+                        if isinstance(tensor, torch.Tensor):
+                            unpin_tensor_(tensor)
             
             # Update index with file mapping
             self.cache_index["files"][str(file_path)] = {
