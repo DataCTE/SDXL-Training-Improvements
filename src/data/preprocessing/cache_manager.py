@@ -209,9 +209,10 @@ class CacheManager:
             )
             raise CacheProcessingError("Failed to process image", context=error_context)
             
-    def _save_latent(
+    def save_preprocessed_data(
         self,
         latent_data: Dict[str, torch.Tensor],
+        text_embeddings: Dict[str, torch.Tensor],
         metadata: Dict,
         index: int
     ) -> bool:
@@ -231,12 +232,16 @@ class CacheManager:
             latent_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Save latent data with compression
+            # Save combined data
+            save_data = {
+                "latent": latent_data,
+                "text_embeddings": text_embeddings,
+                "metadata": metadata,
+                "timestamp": time.time()
+            }
+            
             torch.save(
-                {
-                    "latent": latent_data,
-                    "metadata": metadata,
-                    "timestamp": time.time()
-                },
+                save_data,
                 latent_path,
                 _use_new_zipfile_serialization=True
             )

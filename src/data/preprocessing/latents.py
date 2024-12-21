@@ -692,22 +692,19 @@ class LatentPreprocessor:
                 latents = self.encode_images(batch_pixels, batch_size=chunk_size)
                 vae_latents.append(latents)
                 
-                # Save individual latents using cache manager
+                # Use cache manager to save preprocessed data
                 for i, (latent, embedding) in enumerate(zip(latents["model_input"], embeddings)):
                     item_idx = batch_indices[i]
                     if self.cache_manager is not None:
-                        latent_data = {
-                            "vae_latent": latent.unsqueeze(0),
-                            "text_embedding": {
+                        self.cache_manager.save_preprocessed_data(
+                            latent_data={"model_input": latent.unsqueeze(0)},
+                            text_embeddings={
                                 "prompt_embeds": embedding["prompt_embeds"].unsqueeze(0),
                                 "pooled_prompt_embeds": embedding["pooled_prompt_embeds"].unsqueeze(0)
-                            }
-                        }
-                        metadata = {
-                            "index": item_idx,
-                            "timestamp": time.time()
-                        }
-                        self.cache_manager._save_latent(latent_data, metadata, item_idx)
+                            },
+                            metadata={"index": item_idx},
+                            index=item_idx
+                        )
                 
                 # Clean up intermediate tensors
                 del batch_pixels, latents, embeddings
