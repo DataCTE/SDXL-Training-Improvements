@@ -55,10 +55,14 @@ def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     sdxl_model = StableDiffusionXLModel(ModelType.BASE)
     
     # Load pipeline components into model with device placement
+    # Initialize device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Load pipeline with device placement
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
         torch_dtype=torch.float32,
-        device_map="cuda"
+        device_map={"": device} if device.type == "cuda" else None
     )
     
     # Transfer pipeline components to our model
