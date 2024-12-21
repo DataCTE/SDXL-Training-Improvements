@@ -445,7 +445,8 @@ class LatentPreprocessor:
                 valid_count = 0
                 
                 # Safely extract and validate text from batch
-                for text_item in batch["text"]:
+                for item in batch:
+                    text_item = item["text"]
                     try:
                         # Handle list/tuple inputs
                         if isinstance(text_item, (list, tuple)):
@@ -647,7 +648,7 @@ class LatentPreprocessor:
                 # Handle slice indexing properly
                 batch_indices = list(range(idx, min(idx + batch_size, len(dataset))))
                 batch = [dataset[i] for i in batch_indices]
-                batch_pixels = torch.stack([b["pixel_values"] for b in batch])
+                batch_pixels = torch.stack([b.get("pixel_values") for b in batch if b.get("pixel_values") is not None])
                 latents = self.encode_images(batch_pixels, batch_size=batch_size)
                 vae_latents.append(latents)
             except Exception as e:
