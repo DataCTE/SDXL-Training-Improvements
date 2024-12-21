@@ -208,34 +208,45 @@ class CacheManager:
             )
             raise CacheProcessingError("Failed to process image", context=error_context)
             
-    def _save_processed_batch(
+    def _save_chunk(
         self,
-        batch_id: int,
+        chunk_id: int,
         tensors: List[torch.Tensor],
-        metadata: Dict
+        metadata: Dict,
+        cache_dir: Path
     ) -> bool:
-        """Save processed batch using cache manager."""
-        if self.cache_manager is None:
-            return False
+        """Save chunk of processed tensors to disk.
+        
+        Args:
+            chunk_id: Chunk identifier
+            tensors: List of tensors to save
+            metadata: Associated metadata
+            cache_dir: Cache directory path
             
+        Returns:
+            bool indicating success
+        """
         try:
-            # Optimize tensors before saving
-            optimized_tensors = []
-            for tensor in tensors:
-                # Convert to channels last format
-                if tensor.dim() == 4:  # [B, C, H, W]
-                    tensor = tensor.contiguous(memory_format=torch.channels_last)
-                # Pin memory if using CUDA
-                if torch.cuda.is_available():
-                    pin_tensor_(tensor)
-                optimized_tensors.append(tensor)
-                
-            # Get cache path from config
-            cache_dir = Path(convert_windows_path(
-                self.config.global_config.cache.cache_dir,
-                make_absolute=True
-            ))
-            return self.cache_manager._save_chunk(batch_id, optimized_tensors, metadata, cache_dir)
+            # Create chunk directory
+            chunk_dir = cache_dir / f"chunk_{chunk_id}"
+            chunk_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save tensors with compression
+            chunk_path = chunk_dir / "data.pt"
+            torch.save(
+                {"tensors": tensors, "metadata": metadata},
+                chunk_path,
+                _use_new_zipfile_serialization=True
+            )
+            
+            # Update index
+            self.cache_index["chunks"][str(chunk_id)] = {
+                "path": str(chunk_path),
+                "size": chunk_path.stat().st_size,
+                "timestamp": time.time()
+            }
+            
+            return True
         except Exception as e:
             logger.error(f"Error saving batch {batch_id}: {str(e)}")
             return False

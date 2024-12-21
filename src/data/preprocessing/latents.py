@@ -680,17 +680,17 @@ class LatentPreprocessor:
                 latents = self.encode_images(batch_pixels, batch_size=chunk_size)
                 vae_latents.append(latents)
                 
-                # Save batch to disk
-                batch_dir = self.cache_dir / f"batch_{idx}"
-                batch_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Save VAE latents
-                vae_path = batch_dir / "vae_latents.pt"
-                torch.save(latents, vae_path, _use_new_zipfile_serialization=True)
-                
-                # Save text embeddings
-                text_path = batch_dir / "text_embeddings.pt"
-                torch.save(embeddings, text_path, _use_new_zipfile_serialization=True)
+                # Save batch using cache manager
+                if self.cache_manager is not None:
+                    batch_data = {
+                        "vae_latents": latents,
+                        "text_embeddings": embeddings,
+                        "metadata": {
+                            "batch_size": len(batch),
+                            "timestamp": time.time()
+                        }
+                    }
+                    self.cache_manager._save_chunk(idx, [batch_data], {}, self.cache_dir)
                 
                 # Clean up intermediate tensors
                 del batch_pixels, latents, embeddings
@@ -700,24 +700,22 @@ class LatentPreprocessor:
                 logger.error(f"Error processing batch {idx}: {str(e)}")
                 continue
 
-        # Load all processed batches
+        # Load all processed batches from cache
         all_vae_latents = []
         all_text_embeddings = []
         
-        for batch_idx in range(0, len(dataset), batch_size):
-            batch_dir = self.cache_dir / f"batch_{batch_idx}"
-            if batch_dir.exists():
+        if self.cache_manager is not None:
+            for chunk_id in sorted([int(k) for k in self.cache_manager.cache_index["chunks"].keys()]):
                 try:
-                    vae_path = batch_dir / "vae_latents.pt"
-                    text_path = batch_dir / "text_embeddings.pt"
-                    
-                    vae_latents = torch.load(vae_path)
-                    text_embeddings = torch.load(text_path)
-                    
-                    all_vae_latents.append(vae_latents["model_input"])
-                    all_text_embeddings.append(text_embeddings)
+                    chunk_path = Path(self.cache_manager.cache_index["chunks"][str(chunk_id)]["path"])
+                    if chunk_path.exists():
+                        chunk_data = torch.load(chunk_path)
+                        batch_data = chunk_data["tensors"][0]  # First item in tensors list
+                        
+                        all_vae_latents.append(batch_data["vae_latents"]["model_input"])
+                        all_text_embeddings.append(batch_data["text_embeddings"])
                 except Exception as e:
-                    logger.error(f"Error loading batch {batch_idx}: {str(e)}")
+                    logger.error(f"Error loading chunk {chunk_id}: {str(e)}")
                     continue
                     
         # Combine all batches
