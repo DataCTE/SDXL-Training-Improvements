@@ -149,6 +149,8 @@ class LatentPreprocessor:
             captions = []
             stats = ProcessingStats()
             stats.total_samples = len(prompt_batch)
+            valid_count = 0
+            invalid_texts = []
             
             for idx, caption in enumerate(prompt_batch):
                 try:
@@ -158,27 +160,35 @@ class LatentPreprocessor:
                         continue
                         
                     if isinstance(caption, str):
-                        if not caption.strip():
+                        text = caption.strip()
+                        if text:
+                            captions.append(text)
+                            valid_count += 1
+                            stats.successful_samples += 1
+                        else:
                             logger.warning(f"Empty caption at index {idx}")
+                            invalid_texts.append((idx, caption))
                             stats.empty_captions += 1
                             captions.append("")
-                        else:
-                            captions.append(caption)
-                            stats.successful_samples += 1
                     elif isinstance(caption, (list, tuple)):
-                        if is_train:
-                            selected_idx = torch.randint(0, len(caption), (1,)).item()
-                            selected_caption = caption[selected_idx]
+                        valid_caption = None
+                        # Try each caption in the list
+                        for cap in caption:
+                            if cap is not None:
+                                text = str(cap).strip()
+                                if text:
+                                    valid_caption = text
+                                    break
+                                    
+                        if valid_caption:
+                            captions.append(valid_caption)
+                            valid_count += 1
+                            stats.successful_samples += 1
                         else:
-                            selected_caption = caption[0]
-                            
-                        if not selected_caption.strip():
-                            logger.warning(f"Empty selected caption at index {idx}")
+                            logger.warning(f"No valid caption found in list at index {idx}")
+                            invalid_texts.append((idx, caption))
                             stats.empty_captions += 1
                             captions.append("")
-                        else:
-                            captions.append(selected_caption)
-                            stats.successful_samples += 1
                     else:
                         raise ValueError(f"Invalid caption type at index {idx}: {type(caption)}")
                         
@@ -532,7 +542,15 @@ class LatentPreprocessor:
 
         # Combine text embedding batches with validation
         if not text_embeddings:
-            raise RuntimeError("No valid text embeddings were generated. Check input captions and logs for details.")
+            error_msg = "No valid text embeddings were generated."
+            logger.error(error_msg)
+            logger.error("Processing statistics:")
+            logger.error(f"Total samples: {stats.total_samples}")
+            logger.error(f"Successful samples: {stats.successful_samples}")
+            logger.error(f"Failed samples: {stats.failed_samples}")
+            logger.error(f"Empty captions: {stats.empty_captions}")
+            logger.error("Check input captions and previous log messages for details.")
+            raise RuntimeError(error_msg)
             
         try:
             # Thorough embedding validation
