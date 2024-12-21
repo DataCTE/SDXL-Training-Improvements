@@ -44,6 +44,8 @@ class ProcessingStats:
 from src.core.logging.logging import setup_logging
 import torch
 from typing import Dict, List, Optional, Union
+import os
+from pathlib import Path
 
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers import AutoencoderKL
@@ -52,6 +54,7 @@ from tqdm.auto import tqdm
 
 from src.data.config import Config
 from src.models.encoders.clip import encode_clip
+from src.core.memory.tensor import torch_gc
 
 logger = setup_logging(__name__, level="INFO")
 
@@ -677,15 +680,53 @@ class LatentPreprocessor:
                 latents = self.encode_images(batch_pixels, batch_size=chunk_size)
                 vae_latents.append(latents)
                 
+                # Save batch to disk
+                batch_dir = self.cache_dir / f"batch_{idx}"
+                batch_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save VAE latents
+                vae_path = batch_dir / "vae_latents.pt"
+                torch.save(latents, vae_path, _use_new_zipfile_serialization=True)
+                
+                # Save text embeddings
+                text_path = batch_dir / "text_embeddings.pt"
+                torch.save(embeddings, text_path, _use_new_zipfile_serialization=True)
+                
                 # Clean up intermediate tensors
-                del batch_pixels
+                del batch_pixels, latents, embeddings
                 torch_gc()
+                
             except Exception as e:
-                logger.error(f"Error processing VAE batch {idx}: {str(e)}")
+                logger.error(f"Error processing batch {idx}: {str(e)}")
                 continue
 
+        # Load all processed batches
+        all_vae_latents = []
+        all_text_embeddings = []
+        
+        for batch_idx in range(0, len(dataset), batch_size):
+            batch_dir = self.cache_dir / f"batch_{batch_idx}"
+            if batch_dir.exists():
+                try:
+                    vae_path = batch_dir / "vae_latents.pt"
+                    text_path = batch_dir / "text_embeddings.pt"
+                    
+                    vae_latents = torch.load(vae_path)
+                    text_embeddings = torch.load(text_path)
+                    
+                    all_vae_latents.append(vae_latents["model_input"])
+                    all_text_embeddings.append(text_embeddings)
+                except Exception as e:
+                    logger.error(f"Error loading batch {batch_idx}: {str(e)}")
+                    continue
+                    
+        # Combine all batches
         vae_latents = {
-            "model_input": torch.cat([l["model_input"] for l in vae_latents])
+            "model_input": torch.cat(all_vae_latents)
+        }
+        text_embeddings = {
+            "prompt_embeds": torch.cat([e["prompt_embeds"] for e in all_text_embeddings]),
+            "pooled_prompt_embeds": torch.cat([e["pooled_prompt_embeds"] for e in all_text_embeddings])
         }
 
         # Cache individual results with compression
