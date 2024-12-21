@@ -145,14 +145,6 @@ class AspectBucketDataset(Dataset):
         if self.tag_weighter is None and config.tag_weighting.enable_tag_weighting:
             self.tag_weighter = create_tag_weighter(config, captions)
             
-        # Verify memory optimizations
-        if torch.cuda.is_available():
-            verify_memory_optimizations(
-                model=None,
-                config=config,
-                device=torch.device("cuda"),
-                logger=logger
-            )
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
         """Get supported SDXL dimensions as buckets."""
