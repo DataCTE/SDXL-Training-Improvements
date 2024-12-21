@@ -176,14 +176,8 @@ def pin_tensor_(x: torch.Tensor) -> None:
     if torch.cuda.is_available():
         if not x.is_pinned():
             try:
-                cudart = torch.cuda.cudart()
-                err = cudart.cudaHostRegister(
-                    x.data_ptr(),
-                    x.numel() * x.element_size(),
-                    cudart.cudaHostRegisterDefault
-                )
-                if err.value != 0:
-                    raise RuntimeError(f"CUDA Error while trying to pin memory. error: {err.value}, ptr: {x.data_ptr()}, size: {x.numel() * x.element_size()}")
+                # Use torch's built-in pin_memory instead of direct CUDA calls
+                x.pin_memory()
             except Exception as e:
                 logger.warning(f"Failed to pin tensor memory: {str(e)}")
 
