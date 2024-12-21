@@ -273,12 +273,21 @@ class CacheManager:
                         pin_tensor_(tensor)
 
             try:
+                # Save with proper cleanup
                 torch.save(
                     save_data,
                     cache_path,
                     _use_new_zipfile_serialization=True
                 )
                 torch_gc()  # Clean up after save
+                
+                # Explicitly clean up save_data tensors
+                for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
+                    for tensor in tensor_dict.values():
+                        if isinstance(tensor, torch.Tensor):
+                            del tensor
+                del save_data
+                torch_gc()
             finally:
                 # Unpin tensors after saving
                 for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
@@ -549,7 +558,10 @@ class CacheManager:
             return None
             
         try:
-            cached_data = torch.load(latent_path)
+            cached_data = torch.load(latent_path, map_location='cpu')
+            if cached_data is None or "latent" not in cached_data:
+                logger.warning(f"Invalid cache data for index {index}")
+                return None
             return cached_data["latent"]
         except Exception as e:
             logger.error(f"Error loading cached latent {index}: {str(e)}")

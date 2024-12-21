@@ -722,19 +722,22 @@ class LatentPreprocessor:
                 vae_latents.append(latents)
                 
                 # Save complete file latents
-                if self.cache_manager is not None:
-                    for i, (latent, embedding) in enumerate(zip(latents["model_input"], embeddings)):
+                if self.cache_manager is not None and "text_embeddings" in locals():
+                    for i, latent in enumerate(latents["model_input"]):
                         file_path = dataset[batch_indices[i]].get("file_path")
-                        if file_path:
-                            self.cache_manager.save_preprocessed_data(
-                                latent_data={"model_input": latent.unsqueeze(0)},
-                                text_embeddings={
-                                    "prompt_embeds": embedding["prompt_embeds"].unsqueeze(0),
-                                    "pooled_prompt_embeds": embedding["pooled_prompt_embeds"].unsqueeze(0)
-                                },
-                                metadata={"original_file": str(file_path)},
-                                file_path=file_path
-                            )
+                        if file_path and i < len(text_embeddings):
+                            try:
+                                self.cache_manager.save_preprocessed_data(
+                                    latent_data={"model_input": latent.unsqueeze(0)},
+                                    text_embeddings={
+                                        "prompt_embeds": text_embeddings["prompt_embeds"][i].unsqueeze(0),
+                                        "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"][i].unsqueeze(0)
+                                    },
+                                    metadata={"original_file": str(file_path)},
+                                    file_path=file_path
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to cache file {file_path}: {str(e)}")
                 
                 # Clean up intermediate tensors
                 try:
