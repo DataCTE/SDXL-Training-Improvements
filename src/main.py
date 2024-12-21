@@ -28,7 +28,7 @@ from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
 from src.models.base import ModelType
 from src.training.trainer import create_trainer
 from src.data.utils.paths import convert_path_list
-
+from src.data.dataset import create_dataset
 logger = logging.getLogger(__name__)
 
 class TrainingSetupError(Exception):
@@ -225,11 +225,12 @@ def setup_training(
         
         # Create and preprocess dataset
         train_dataset = create_dataset(
-            config,
-            image_paths,
-            captions,
+            config=config,
+            image_paths=image_paths,
+            captions=captions,
             latent_preprocessor=latent_preprocessor,
-            is_train=True
+            enable_memory_tracking=True,
+            max_memory_usage=0.8  # Set memory limit
         )
         
         if config.global_config.cache.use_cache:

@@ -6,9 +6,10 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
-from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection, AutoencoderKL
+from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
+from diffusers import AutoencoderKL
 from src.data.config import Config
-from src.data.preprocessing.cache_manager import CacheError, CacheManager
+from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import (
     tensors_to_device_,
     create_stream_context, 
