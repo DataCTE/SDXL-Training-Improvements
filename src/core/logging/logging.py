@@ -50,10 +50,13 @@ class ColoredFormatter(logging.Formatter):
         # Add timestamp and filtered context
         timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')
         
-        # Filter out excluded fields from record
+        # Create a copy of the record to avoid modifying the original
+        filtered_record = logging.makeLogRecord(record.__dict__)
+        
+        # Filter out excluded fields from the copy
         for field in self.exclude_fields:
-            if hasattr(record, field):
-                delattr(record, field)
+            if hasattr(filtered_record, field):
+                delattr(filtered_record, field)
         
         # Track error levels that cause failures
         if record.levelno >= logging.ERROR:
@@ -161,8 +164,7 @@ def setup_logging(
         # Create console handler with simplified colored output
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(ColoredFormatter(
-            '%(levelname)s | %(name)s | %(message)s',
-            exclude_fields=['process', 'thread']  # Exclude these from console output
+            '%(levelname)s | %(name)s | %(message)s'
         ))
         console_handler.setLevel(level)
         logger.addHandler(console_handler)
