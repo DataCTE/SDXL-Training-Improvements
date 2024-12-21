@@ -25,7 +25,7 @@ from src.core.memory.tensor import (
 )
 from src.models.sdxl import StableDiffusionXLPipeline
 from .config import Config
-from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
+from .preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter, CacheManager
 
 logger = setup_logging(__name__)
 
