@@ -163,8 +163,12 @@ class Config:
         # Validate image sizes
         max_h, max_w = self.global_config.image.max_size
         min_h, min_w = self.global_config.image.min_size
+        if not isinstance(max_h, int) or not isinstance(max_w, int):
+            raise ValueError(f"max_size values must be integers, got {type(max_h)} and {type(max_w)}")
+        if not isinstance(min_h, int) or not isinstance(min_w, int):
+            raise ValueError(f"min_size values must be integers, got {type(min_h)} and {type(min_w)}")
         if max_h < min_h or max_w < min_w:
-            raise ValueError("max_size must be greater than min_size")
+            raise ValueError(f"max_size ({max_h}, {max_w}) must be greater than min_size ({min_h}, {min_w})")
             
         # Validate learning rate
         if self.training.learning_rate <= 0:
