@@ -4,7 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sdxl-trainer"
-dynamic = ["version", "dependencies", "optional-dependencies"]
+dynamic = [
+    "version",
+    "description",
+    "readme",
+    "requires-python",
+    "license",
+    "authors",
+    "keywords",
+    "classifiers",
+    "dependencies",
+    "optional-dependencies",
+    "scripts"
+]
 
 [tool.black]
 line-length = 100
