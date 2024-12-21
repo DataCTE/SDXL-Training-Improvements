@@ -79,12 +79,18 @@ class AspectBucketDataset(Dataset):
         self.tag_weighter = tag_weighter
         self.is_train = is_train
         
-        # Image settings from config
-        self.target_size = config.global_config.image.target_size
-        self.max_size = config.global_config.image.max_size
-        self.min_size = config.global_config.image.min_size
-        self.bucket_step = config.global_config.image.bucket_step
-        self.max_aspect_ratio = config.global_config.image.max_aspect_ratio
+        # Image settings from config with validation
+        self.target_size = tuple(map(int, config.global_config.image.target_size))
+        self.max_size = tuple(map(int, config.global_config.image.max_size))
+        self.min_size = tuple(map(int, config.global_config.image.min_size))
+        self.bucket_step = int(config.global_config.image.bucket_step)
+        self.max_aspect_ratio = float(config.global_config.image.max_aspect_ratio)
+        
+        # Validate size configurations
+        if not all(isinstance(x, int) for x in self.max_size + self.min_size + self.target_size):
+            raise ValueError("All image dimensions must be integers")
+        if len(self.max_size) != 2 or len(self.min_size) != 2 or len(self.target_size) != 2:
+            raise ValueError("Image size tuples must contain exactly 2 values")
         
         # Create buckets based on aspect ratios
         self.buckets = self._create_buckets()
