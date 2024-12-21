@@ -243,12 +243,18 @@ class AspectBucketDataset(Dataset):
             with create_stream_context(torch.cuda.current_stream()):
                 tensor = self.train_transforms(image)
                 
+                # Add batch dimension before memory optimization
+                tensor = tensor.unsqueeze(0)  # Add batch dimension [1, C, H, W]
+                
                 # Optimize memory layout
                 if torch.cuda.is_available():
                     tensor = tensor.contiguous(memory_format=torch.channels_last)
                     pin_tensor_(tensor)
                     if self.is_train:
                         tensors_record_stream(torch.cuda.current_stream(), tensor)
+                
+                # Remove batch dimension before returning
+                tensor = tensor.squeeze(0)  # Back to [C, H, W]
                         
                 return tensor
                 
