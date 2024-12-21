@@ -170,8 +170,7 @@ class AspectBucketDataset(Dataset):
                 if not isinstance(image, Image.Image):
                     raise ProcessingError(f"Expected PIL.Image, got {type(image)}")
                     
-                # Create processing streams
-                transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                # Create processing stream
                 compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
                 
                 # Resize image with bounds checking
