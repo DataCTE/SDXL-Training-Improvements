@@ -202,7 +202,35 @@ class LatentPreprocessor:
                         logger.error(f"Error processing caption {idx}: {str(e)}")
                         stats.failed_samples += 1
                         captions[idx] = ""
-            
+
+        except Exception as e:
+            error_context = {
+                'total_samples': stats.total_samples,
+                'successful_samples': stats.successful_samples,
+                'failed_samples': stats.failed_samples,
+                'empty_captions': stats.empty_captions,
+                'error_type': type(e).__name__,
+                'error_msg': str(e),
+                'traceback': traceback.format_exc()
+            }
+            error_context['logging_level'] = logging.ERROR
+            logger.error(
+                f"Failed to process prompts - failing fast:\n"
+                f"Processing stats:\n"
+                f"- Total samples: {error_context['total_samples']}\n"
+                f"- Successful: {error_context['successful_samples']}\n"
+                f"- Failed: {error_context['failed_samples']}\n"
+                f"- Empty: {error_context['empty_captions']}\n"
+                f"Error type: {error_context['error_type']}\n"
+                f"Error message: {error_context['error_msg']}\n"
+                f"Traceback:\n{error_context['traceback']}\n"
+                f"Logging level: {logging.getLevelName(error_context['logging_level'])}",
+                extra=error_context
+            )
+            raise TextEncodingError(
+                f"Failed to process prompts: {error_context['error_msg']}\n"
+                f"Stats: {stats.successful_samples}/{stats.total_samples} successful"
+            ) from e
     def _process_caption(self, idx: int, caption: Union[str, List[str], Tuple[str, ...]]) -> Tuple[str, bool]:
         """Process a single caption with validation.
         
