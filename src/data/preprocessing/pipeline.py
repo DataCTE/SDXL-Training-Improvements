@@ -121,14 +121,34 @@ class PreprocessingPipeline:
                 ) from e
             raise
         
-        # Initialize cache manager if enabled
+        # Initialize cache manager and latent preprocessor if enabled
         self.cache_manager = None
+        self.latent_preprocessor = None
         if config.global_config.cache.use_cache:
             from .cache_manager import CacheManager
+            from .latents import LatentPreprocessor
+            
+            # Initialize cache manager with config options
             self.cache_manager = CacheManager(
                 cache_dir=self.cache_dir,
-                compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd'
+                num_proc=config.global_config.cache.num_proc,
+                chunk_size=config.global_config.cache.chunk_size,
+                compression=config.global_config.cache.compression if hasattr(config.global_config.cache, 'compression') else 'zstd',
+                verify_hashes=config.global_config.cache.verify_hashes
             )
+            
+            # Initialize latent preprocessor if models are available
+            if hasattr(config, 'models'):
+                self.latent_preprocessor = LatentPreprocessor(
+                    config=config,
+                    tokenizer_one=config.models.get('tokenizer_one'),
+                    tokenizer_two=config.models.get('tokenizer_two'),
+                    text_encoder_one=config.models.get('text_encoder_one'),
+                    text_encoder_two=config.models.get('text_encoder_two'),
+                    vae=config.models.get('vae'),
+                    device=self.device_ids[0] if self.device_ids else "cpu",
+                    use_cache=True
+                )
             
         # Validate pipeline configuration
         try:
@@ -310,7 +330,7 @@ class PreprocessingPipeline:
             self.stop_event.set()
 
     def _process_item(self, item: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Process single item with GPU acceleration and memory optimizations.
+        """Process single item with GPU acceleration, memory optimizations and caching.
         
         Args:
             item: Input tensor to process
@@ -464,19 +484,51 @@ class PreprocessingPipeline:
                         if hasattr(processed, 'data_ptr'):
                             replace_tensors_(item, processed)
                         
-                        # Move back to CPU if needed, with proper cleanup
+                        # Process with latent preprocessor if available
+                        if self.latent_preprocessor is not None:
+                            try:
+                                # Generate text embeddings and VAE latents
+                                text_embeddings = self.latent_preprocessor.encode_prompt(
+                                    [item.get('caption', '')] if isinstance(item, dict) else [''],
+                                    proportion_empty_prompts=self.config.data.proportion_empty_prompts if hasattr(self.config.data, 'proportion_empty_prompts') else 0.0
+                                )
+                                
+                                vae_latents = self.latent_preprocessor.encode_images(
+                                    processed.unsqueeze(0) if processed.dim() == 3 else processed
+                                )
+                                
+                                # Cache results if enabled
+                                if self.cache_manager is not None and isinstance(item, dict) and 'file_path' in item:
+                                    self.cache_manager.save_preprocessed_data(
+                                        latent_data=vae_latents,
+                                        text_embeddings=text_embeddings,
+                                        metadata={'original_file': str(item['file_path'])},
+                                        file_path=item['file_path']
+                                    )
+                                
+                                # Combine results
+                                processed_dict = {
+                                    "tensor": processed,
+                                    "latents": vae_latents["model_input"],
+                                    **text_embeddings
+                                }
+                            except Exception as e:
+                                logger.warning(f"Latent processing failed: {str(e)}, falling back to basic tensor")
+                                processed_dict = {"tensor": processed}
+                        else:
+                            processed_dict = {"tensor": processed}
+                            
+                        # Move to CPU if needed, with proper cleanup
                         if self.cache_dir:
                             with create_stream_context(compute_stream):
-                                # Only transfer if device mismatch
-                                if not device_equals(processed.device, torch.device('cpu')):
-                                    processed = processed.cpu()
-                                    torch_gc()
-                                
-                                # Pin memory for faster transfers if enabled
-                                if self.use_pinned_memory:
-                                    pin_tensor_(processed)
+                                for k, v in processed_dict.items():
+                                    if isinstance(v, torch.Tensor) and not device_equals(v.device, torch.device('cpu')):
+                                        processed_dict[k] = v.cpu()
+                                        if self.use_pinned_memory:
+                                            pin_tensor_(processed_dict[k])
+                                torch_gc()
                             
-                    return {"tensor": processed}
+                    return processed_dict
                 except Exception as e:
                     logger.error(f"Error processing item: {str(e)}")
                     raise
