@@ -35,6 +35,10 @@ class GlobalConfig:
         cache_dir: str = "cache"
         use_cache: bool = True
         clear_cache_on_start: bool = False
+        num_proc: int = 4  # Number of processes for cache operations
+        chunk_size: int = 1000  # Number of items per cache chunk
+        compression: str = "zstd"  # Compression algorithm (None, 'zstd', 'gzip')
+        verify_hashes: bool = True  # Whether to verify content hashes
         
     image: ImageConfig = field(default_factory=ImageConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
