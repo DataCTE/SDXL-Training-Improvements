@@ -1,10 +1,10 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="sdxl-trainer",
+    name="SDXL-Training-Improvements",
     version="0.1.0",
     description="A research-focused SDXL training framework implementing cutting-edge advances in diffusion model training",
-    author="DataCTE Team",
+    author="Alexander Rafael Izquierdo",
     packages=find_packages(),
     python_requires=">=3.8",
     install_requires=[

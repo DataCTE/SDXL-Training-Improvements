@@ -90,7 +90,7 @@ class LatentPreprocessor:
 
         # Set up cache paths if enabled
         if self.use_cache:
-            from src.utils.paths import convert_windows_path
+            from src.data.utils.paths import convert_windows_path
             self.cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             

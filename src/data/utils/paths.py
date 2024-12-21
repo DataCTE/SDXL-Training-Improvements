@@ -109,3 +109,34 @@ def convert_windows_path(path: Union[str, Path, List[Union[str, Path]]], make_ab
         if not isinstance(e, ValueError):
             raise ValueError(f"Error converting Windows path {path_str}: {str(e)}")
         raise
+
+def convert_path_list(paths: Union[str, List[str], Path, List[Path]], make_absolute: bool = True) -> List[Path]:
+    """Convert list of Windows/Unix paths to appropriate format.
+    
+    Args:
+        paths: Single path or list of paths
+        make_absolute: Whether to convert to absolute paths
+        
+    Returns:
+        List of converted Path objects
+    """
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+        
+    return [convert_windows_path(p, make_absolute) for p in paths]
+
+def get_wsl_drive_mount() -> Optional[str]:
+    """Get the WSL drive mount point.
+    
+    Returns:
+        Mount point (e.g. "/mnt") or None if not in WSL
+    """
+    if not is_wsl():
+        return None
+        
+    # Check common mount points
+    mount_points = ["/mnt"]
+    for mp in mount_points:
+        if os.path.isdir(mp):
+            return mp
+    return None

@@ -11,7 +11,7 @@ from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
 from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING, cast
-from src.utils.paths import convert_windows_path
+from src.data.utils.paths import convert_windows_path
 
 if TYPE_CHECKING:
     from ...data.config import Config

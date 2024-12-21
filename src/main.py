@@ -35,7 +35,7 @@ from src.models.base import ModelType
 from src.training.trainer import create_trainer
 
 # Local imports - utilities
-from src.utils.paths import convert_path_list
+from src.data.utils.paths import convert_path_list
 
 logger = logging.getLogger(__name__)
 
