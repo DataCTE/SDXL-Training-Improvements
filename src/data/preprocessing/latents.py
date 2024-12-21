@@ -154,7 +154,8 @@ class LatentPreprocessor:
         prompt_batch: List[str],
         proportion_empty_prompts: float = 0,
         is_train: bool = True,
-        return_tensors: bool = True
+        return_tensors: bool = True,
+        batch_size: int = 32  # Larger batch size for faster processing
     ) -> Dict[str, torch.Tensor]:
         """Encode text prompts to CLIP embeddings.
         
@@ -168,12 +169,47 @@ class LatentPreprocessor:
             Dict with prompt_embeds and pooled_prompt_embeds
         """
         try:
-            # Process prompts with validation
+            # Process prompts in parallel with validation
+            from concurrent.futures import ThreadPoolExecutor
             captions = []
             stats = ProcessingStats()
             stats.total_samples = len(prompt_batch)
-            valid_count = 0
-            invalid_texts = []
+            
+            def process_caption(caption_data):
+                idx, caption = caption_data
+                try:
+                    if torch.rand(1).item() < proportion_empty_prompts:
+                        return idx, "", True
+                    
+                    if isinstance(caption, str):
+                        text = caption.strip()
+                        return idx, text if text else "", bool(text)
+                    elif isinstance(caption, (list, tuple)):
+                        for cap in caption:
+                            if cap is not None:
+                                text = str(cap).strip()
+                                if text:
+                                    return idx, text, True
+                        return idx, "", False
+                    else:
+                        logger.warning(f"Invalid caption type at index {idx}: {type(caption)}")
+                        return idx, "", False
+                except Exception as e:
+                    logger.error(f"Error processing caption at index {idx}: {str(e)}")
+                    return idx, "", False
+                    
+            # Process captions in parallel
+            with ThreadPoolExecutor(max_workers=min(32, len(prompt_batch))) as executor:
+                results = list(executor.map(process_caption, enumerate(prompt_batch)))
+                
+            # Sort results by index and extract processed captions
+            results.sort(key=lambda x: x[0])
+            captions = [result[1] for result in results]
+            valid_mask = [result[2] for result in results]
+            
+            stats.successful_samples = sum(valid_mask)
+            stats.failed_samples = len(prompt_batch) - stats.successful_samples
+            stats.empty_captions = len([c for c in captions if not c])
             
             for idx, caption in enumerate(prompt_batch):
                 try:
@@ -274,21 +310,56 @@ class LatentPreprocessor:
 
         # Tokenize prompts
         try:
-            tokens_1 = self.tokenizer_one(
-                captions,
-                padding="max_length",
-                max_length=self.tokenizer_one.model_max_length,
-                truncation=True,
-                return_tensors="pt",
-            ).input_ids.to(self.device)
-
-            tokens_2 = self.tokenizer_two(
-                captions,
-                padding="max_length",
-                max_length=self.tokenizer_two.model_max_length,
-                truncation=True,
-                return_tensors="pt",
-            ).input_ids.to(self.device)
+            # Process in batches for better memory efficiency
+            all_tokens_1 = []
+            all_tokens_2 = []
+            
+            for i in range(0, len(captions), batch_size):
+                batch_captions = captions[i:i + batch_size]
+                
+                # Process both tokenizers in parallel
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    token_futures = [
+                        executor.submit(self.tokenizer_one, 
+                            batch_captions,
+                            padding="max_length",
+                            max_length=self.tokenizer_one.model_max_length,
+                            truncation=True,
+                            return_tensors="pt"
+                        ),
+                        executor.submit(self.tokenizer_two,
+                            batch_captions,
+                            padding="max_length", 
+                            max_length=self.tokenizer_two.model_max_length,
+                            truncation=True,
+                            return_tensors="pt"
+                        )
+                    ]
+                    
+                    tokens_1_batch = token_futures[0].result().input_ids
+                    tokens_2_batch = token_futures[1].result().input_ids
+                    
+                    if torch.cuda.is_available():
+                        # Use streams for concurrent transfer
+                        s1 = torch.cuda.Stream()
+                        s2 = torch.cuda.Stream()
+                        
+                        with torch.cuda.stream(s1):
+                            tokens_1_batch = tokens_1_batch.to(self.device, non_blocking=True)
+                        with torch.cuda.stream(s2):
+                            tokens_2_batch = tokens_2_batch.to(self.device, non_blocking=True)
+                            
+                        torch.cuda.current_stream().wait_stream(s1)
+                        torch.cuda.current_stream().wait_stream(s2)
+                    else:
+                        tokens_1_batch = tokens_1_batch.to(self.device)
+                        tokens_2_batch = tokens_2_batch.to(self.device)
+                        
+                all_tokens_1.append(tokens_1_batch)
+                all_tokens_2.append(tokens_2_batch)
+                
+            tokens_1 = torch.cat(all_tokens_1, dim=0)
+            tokens_2 = torch.cat(all_tokens_2, dim=0)
         except Exception as e:
             tokenizer_context = {
                 'tokenizer_one_max_length': self.tokenizer_one.model_max_length,
