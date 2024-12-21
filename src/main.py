@@ -48,21 +48,18 @@ def parse_args():
 
 def load_models(config: Config) -> Dict[str, torch.nn.Module]:
     """Load and configure all required models."""
-    # Initialize device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     # Initialize SDXL model
     sdxl_model = StableDiffusionXLModel(ModelType.BASE)
-    
-    # Load pipeline components into model with device placement
-    # Initialize device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     
     # Load pipeline with optimized device placement
-    device_map = "balanced" if torch.cuda.is_available() else None
+    torch_dtype = torch.floatbf16 
+    device_map="balanced" if torch.cuda.is_available() else None
+
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         config.model.pretrained_model_name,
-        torch_dtype=torch.float32,
+        torch_dtype=torch_dtype,
         device_map=device_map,
         low_cpu_mem_usage=True
     )
