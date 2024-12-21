@@ -220,18 +220,15 @@ class CacheManager:
         
         Args:
             latent_data: Dictionary containing latent tensors
+            text_embeddings: Dictionary containing text embeddings
             metadata: Associated metadata
-            index: Index identifier for the latent
+            file_path: Path to original file
             
         Returns:
             bool indicating success
         """
         try:
-            # Create latent file path
-            latent_path = self.cache_dir / f"latent_{index}.pt"
-            latent_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Save latent data with compression
+            # Create cache path based on file path
             # Create cache path based on file path
             file_hash = hashlib.sha256(str(file_path).encode()).hexdigest()[:12]
             cache_path = self.cache_dir / f"{file_hash}_latent.pt"
@@ -262,17 +259,9 @@ class CacheManager:
             }
             self._save_cache_index()
             
-            # Update index
-            self.cache_index["files"][str(index)] = {
-                "path": str(latent_path),
-                "size": latent_path.stat().st_size,
-                "timestamp": time.time(),
-                "metadata": metadata
-            }
-            
             return True
         except Exception as e:
-            logger.error(f"Error saving latent {index}: {str(e)}")
+            logger.error(f"Error saving latent for {file_path}: {str(e)}")
             return False
             
     def process_dataset(
