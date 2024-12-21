@@ -155,7 +155,8 @@ class LatentPreprocessor:
         proportion_empty_prompts: float = 0,
         is_train: bool = True,
         return_tensors: bool = True,
-        batch_size: int = 32  # Larger batch size for faster processing
+        batch_size: int = 64,  # Increased batch size
+        num_workers: int = 4  # Number of parallel workers
     ) -> Dict[str, torch.Tensor]:
         """Encode text prompts to CLIP embeddings.
         
@@ -169,48 +170,80 @@ class LatentPreprocessor:
             Dict with prompt_embeds and pooled_prompt_embeds
         """
         try:
-            # Process prompts in parallel with validation
-            from concurrent.futures import ThreadPoolExecutor
-            captions = []
+            # Process prompts in parallel with validation using multiple workers
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            captions = [None] * len(prompt_batch)  # Pre-allocate list
             stats = ProcessingStats()
             stats.total_samples = len(prompt_batch)
             valid_count = 0
             invalid_texts = []
+
+            # Create thread pool for parallel processing
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all caption processing tasks
+                future_to_idx = {
+                    executor.submit(self._process_caption, idx, caption): idx 
+                    for idx, caption in enumerate(prompt_batch)
+                }
+
+                # Process results as they complete
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        text, is_valid = future.result()
+                        captions[idx] = text
+                        if is_valid:
+                            valid_count += 1
+                            stats.successful_samples += 1
+                        else:
+                            invalid_texts.append((idx, prompt_batch[idx]))
+                            stats.empty_captions += 1
+                    except Exception as e:
+                        logger.error(f"Error processing caption {idx}: {str(e)}")
+                        stats.failed_samples += 1
+                        captions[idx] = ""
             
-            def process_caption(caption_data):
-                idx, caption = caption_data
-                try:
-                    if torch.rand(1).item() < proportion_empty_prompts:
-                        return idx, "", True
-                    
-                    if isinstance(caption, str):
-                        text = caption.strip()
-                        return idx, text if text else "", bool(text)
-                    elif isinstance(caption, (list, tuple)):
-                        for cap in caption:
-                            if cap is not None:
-                                text = str(cap).strip()
-                                if text:
-                                    return idx, text, True
-                        return idx, "", False
-                    else:
-                        logger.warning(f"Invalid caption type at index {idx}: {type(caption)}")
-                        return idx, "", False
-                except Exception as e:
-                    logger.error(f"Error processing caption at index {idx}: {str(e)}")
-                    return idx, "", False
-                    
-            # Process captions in parallel
-            with ThreadPoolExecutor(max_workers=min(32, len(prompt_batch))) as executor:
-                results = list(executor.map(process_caption, enumerate(prompt_batch)))
+    def _process_caption(self, idx: int, caption: Union[str, List[str], Tuple[str, ...]]) -> Tuple[str, bool]:
+        """Process a single caption with validation.
+        
+        Args:
+            idx: Caption index
+            caption: Input caption or list of captions
+            
+        Returns:
+            Tuple of (processed_text, is_valid)
+        """
+        try:
+            if torch.rand(1).item() < self.config.data.proportion_empty_prompts:
+                return "", True
                 
-            # Sort results by index and extract processed captions
-            results.sort(key=lambda x: x[0])
-            captions = [result[1] for result in results]
-            valid_mask = [result[2] for result in results]
-            
-            stats.successful_samples = sum(valid_mask)
-            stats.failed_samples = len(prompt_batch) - stats.successful_samples
+            if isinstance(caption, str):
+                text = caption.strip()
+                return text, bool(text)
+                
+            elif isinstance(caption, (list, tuple)):
+                for cap in caption:
+                    if cap is not None:
+                        text = str(cap).strip()
+                        if text:
+                            return text, True
+                return "", False
+                
+            else:
+                logger.warning(f"Invalid caption type at index {idx}: {type(caption)}")
+                return "", False
+                
+        except Exception as e:
+            logger.error(f"Error processing caption at index {idx}: {str(e)}")
+            return "", False
+                    
+            # Filter out empty captions
+            captions = [c for c in captions if c]
+            if not captions:
+                raise TextEncodingError("No valid captions found in batch")
+
+            # Update final statistics
+            stats.failed_samples = len(prompt_batch) - valid_count
             stats.empty_captions = len([c for c in captions if not c])
             
             for idx, caption in enumerate(prompt_batch):
