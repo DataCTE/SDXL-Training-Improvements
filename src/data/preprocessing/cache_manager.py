@@ -235,6 +235,12 @@ class CacheManager:
             cache_path = self.cache_dir / f"{file_hash}_latent.pt"
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Check device compatibility and optimize memory
+            current_device = next(
+                (t.device for t in latent_data.values() if isinstance(t, torch.Tensor)),
+                torch.device('cpu')
+            )
+
             # Save complete latent data for the file
             save_data = {
                 "latent": latent_data,
@@ -245,6 +251,20 @@ class CacheManager:
                     "timestamp": time.time()
                 }
             }
+
+            # Reuse existing tensors if devices match
+            if self.cache_index["files"].get(str(file_path)):
+                try:
+                    existing_data = torch.load(cache_path)
+                    if device_equals(
+                        next(t.device for t in existing_data["latent"].values() if isinstance(t, torch.Tensor)), 
+                        current_device
+                    ):
+                        replace_tensors_(existing_data["latent"], save_data["latent"])
+                        replace_tensors_(existing_data["text_embeddings"], save_data["text_embeddings"])
+                except Exception as e:
+                    logger.debug(f"Could not reuse tensors: {e}")
+                    torch_gc()  # Clean up any partial loads
             
             # Pin tensors before saving for faster I/O
             for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
@@ -258,6 +278,7 @@ class CacheManager:
                     cache_path,
                     _use_new_zipfile_serialization=True
                 )
+                torch_gc()  # Clean up after save
             finally:
                 # Unpin tensors after saving
                 for tensor_dict in [save_data["latent"], save_data["text_embeddings"]]:
@@ -564,6 +585,7 @@ class CacheManager:
             except FileNotFoundError:
                 logger.warning(f"Cache chunk {chunk_id} already missing")
                 
-        # Clear index
+        # Clear index and clean memory
         self.cache_index = {"files": {}, "chunks": {}}
         self._save_cache_index()
+        torch_gc()  # Ensure memory is freed after clearing cache
