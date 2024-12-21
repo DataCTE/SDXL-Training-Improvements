@@ -31,8 +31,11 @@ class ColoredFormatter(logging.Formatter):
         'function', 'line_number', 'file_path',
         'input_data', 'expected_type', 'actual_type',
         'shape', 'device', 'dtype', 'error_type',
-        'stack_info', 'process', 'thread'
+        'stack_info'
     ]
+    
+    # Fields to exclude from console output
+    exclude_fields = ['process', 'thread', 'processName', 'threadName']
     
     KEYWORDS = {
         'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
