@@ -14,6 +14,7 @@ from src.data.preprocessing.latents import LatentPreprocessor
 from src.data.preprocessing.cache_manager import CacheManager
 from dataclasses import dataclass
 from contextlib import nullcontext
+import numpy as np
 
 import torch
 import torch.cuda
@@ -23,7 +24,8 @@ import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline
 
 from src.core.memory.tensor import (
-    unpin_tensor_
+    unpin_tensor_,
+    tensors_record_stream
 )
 from .exceptions import (
     PreprocessingError, DataLoadError, PipelineConfigError,
