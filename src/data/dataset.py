@@ -260,14 +260,36 @@ class AspectBucketDataset(Dataset):
                         except Exception as e:
                             logger.error(
                                 f"Processing failed for {img_path}: {str(e)}\n"
-                                f"Image size: {image.size}, Mode: {image.mode}"
+                                f"Image details:\n"
+                                f"- Size: {image.size}\n"
+                                f"- Mode: {image.mode}\n"
+                                f"- Format: {image.format}\n"
+                                f"- Is animated: {getattr(image, 'is_animated', False)}\n"
+                                f"- Frames: {getattr(image, 'n_frames', 1)}\n"
+                                f"- Memory usage: {image.size[0] * image.size[1] * len(image.getbands())} bytes\n"
+                                f"- Bands: {image.getbands()}\n"
+                                f"- Info: {image.info}\n"
+                                f"Error context:\n"
+                                f"- Error type: {type(e).__name__}\n"
+                                f"- Stack trace:\n{traceback.format_exc()}"
                             )
                             continue
                             
                     except Exception as e:
                         logger.error(
-                            f"Unexpected error with {img_path}: {str(e)}\n"
-                            f"Stack trace: {traceback.format_exc()}"
+                            f"Unexpected error with {img_path}:\n"
+                            f"Error details:\n"
+                            f"- Message: {str(e)}\n"
+                            f"- Type: {type(e).__name__}\n"
+                            f"- File stats:\n"
+                            f"  - Size: {Path(img_path).stat().st_size} bytes\n"
+                            f"  - Modified: {time.ctime(Path(img_path).stat().st_mtime)}\n"
+                            f"  - Permissions: {oct(Path(img_path).stat().st_mode)[-3:]}\n"
+                            f"System context:\n"
+                            f"- Available GPU memory: {torch.cuda.get_device_properties(0).total_memory/1e9:.2f}GB\n"
+                            f"- Used GPU memory: {torch.cuda.memory_allocated()/1e9:.2f}GB\n"
+                            f"- Process memory: {psutil.Process().memory_info().rss/1e9:.2f}GB\n"
+                            f"Stack trace:\n{traceback.format_exc()}"
                         )
                         continue
 
