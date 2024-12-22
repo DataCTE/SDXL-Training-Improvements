@@ -297,9 +297,16 @@ def main():
             for name, model in models.items():
                 if hasattr(model, 'state_dict') and not tensors_match_device(model.state_dict(), device):
                     logger.info(f"Moving {name} to device {device}")
-                    with create_stream_context(torch.cuda.current_stream()):
-                        tensors_to_device_(model.state_dict(), device)
-                        torch_gc()
+                    try:
+                        stream = torch.cuda.current_stream() if torch.cuda.is_available() else None
+                        with create_stream_context(stream):
+                            tensors_to_device_(model.state_dict(), device)
+                            torch_gc()
+                    except Exception as e:
+                        raise TrainingSetupError(
+                            "Failed to move models to device",
+                            {"error": str(e), "model": name, "device": str(device)}
+                        )
             
             # Setup memory optimizations
             setup_memory_optimizations(models["model"].unet, config, device)
