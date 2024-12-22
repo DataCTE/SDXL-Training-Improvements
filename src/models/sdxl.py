@@ -53,7 +53,7 @@ class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
         super().__init__(
             uuid=uuid,
             token_count=text_encoder_1_vector.shape[0],
-            placeholder=placeholder,
+            placeholder=placeholder if placeholder else f"<embedding-{uuid}>"
         )
 
         self.text_encoder_1_vector = text_encoder_1_vector
