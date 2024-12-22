@@ -73,7 +73,7 @@ class AspectBucketDataset(Dataset):
         config: Config,
         image_paths: List[str],
         captions: List[str],
-        latent_preprocessor: Optional[LatentPreprocessor] = None,
+        preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True,
         enable_memory_tracking: bool = True,
@@ -110,10 +110,10 @@ class AspectBucketDataset(Dataset):
         self.is_train = is_train
 
         # Initialize components in correct order
-        self.latent_preprocessor = latent_preprocessor
+        self.preprocessing_pipeline = preprocessing_pipeline
         
-        # Initialize cache manager first if latent preprocessor is available
-        if latent_preprocessor and latent_preprocessor.model:
+        # Initialize cache manager first if preprocessing pipeline is available
+        if preprocessing_pipeline and preprocessing_pipeline.latent_preprocessor:
             self.cache_manager = CacheManager(
                 cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
                 num_proc=config.global_config.cache.num_proc,
@@ -546,7 +546,7 @@ def create_dataset(
     config: Config,
     image_paths: List[str],
     captions: List[str],
-    latent_preprocessor: Optional[LatentPreprocessor] = None,
+    preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
 ) -> AspectBucketDataset:

@@ -281,7 +281,7 @@ def setup_training(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            latent_preprocessor=latent_preprocessor,
+            preprocessing_pipeline=preprocessing_pipeline,
             enable_memory_tracking=True,
             max_memory_usage=0.8  # Set memory limit
         )
