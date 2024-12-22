@@ -480,8 +480,17 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
         raise StreamError("Invalid stream type", error_context)
 
     # Ensure we have a proper device index
-    if not hasattr(stream.device, 'index'):
-        device_index = 0 if isinstance(stream.device, str) else stream.device
+    device_index = None
+    if hasattr(stream, 'device'):
+        if isinstance(stream.device, str):
+            device_index = 0 if stream.device == "cuda" else None
+        elif hasattr(stream.device, 'index'):
+            device_index = stream.device.index
+        else:
+            device_index = 0 if stream.device == torch.device("cuda") else stream.device
+
+    if device_index is not None:
+        # Create new stream with proper device index
         stream = torch.cuda.Stream(device=device_index)
 
     try:
