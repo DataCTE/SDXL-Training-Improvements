@@ -133,12 +133,13 @@ def tensor_operation_context(operation_name: str):
                 leaked_reserved = (end_reserved - start_reserved) / 1024**2
                 peak_increase = (end_peak - start_peak) / 1024**2  # Track peak memory increase
                 
-                if leaked_allocated > 0.01 or leaked_reserved > 0.01:
-                    logger.warning(
-                        f"Memory leak detected in {operation_name}:\n"
+                # Only log if leak is significant (>1MB)
+                if leaked_allocated > 1.0 or leaked_reserved > 1.0:
+                    logger.error(
+                        f"Critical memory leak in {operation_name}:\n"
                         f"  Allocated: {leaked_allocated:.2f}MB\n"
                         f"  Reserved: {leaked_reserved:.2f}MB\n"
-                        f"  Peak Usage: {peak_increase:.2f}MB"  # Added peak memory reporting
+                        f"  Peak Usage: {peak_increase:.2f}MB"
                     )
                     
                     # Aggressive cleanup
