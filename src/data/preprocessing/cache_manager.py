@@ -318,6 +318,29 @@ class CacheManager:
             memory_stats=self.memory_stats if hasattr(self, 'memory_stats') else None
         )
 
+    def has_cached_item(self, file_path: Union[str, Path]) -> bool:
+        """Check if item exists in cache.
+        
+        Args:
+            file_path: Path to original file
+            
+        Returns:
+            bool indicating if item is cached
+        """
+        try:
+            file_info = self.cache_index["files"].get(str(file_path))
+            if not file_info:
+                return False
+                
+            latent_path = Path(file_info["latent_path"])
+            text_path = Path(file_info["text_path"])
+            
+            return latent_path.exists() and text_path.exists()
+            
+        except Exception as e:
+            logger.error(f"Error checking cache status: {str(e)}")
+            return False
+
     def get_cached_item(
         self,
         file_path: Union[str, Path],

@@ -216,7 +216,7 @@ class PreprocessingPipeline:
                             
                     except Exception as e:
                         logger.warning(f"Failed to precompute latents for {img_path}: {str(e)}")
-                        self.stats.failed_images += 1
+                        self.stats.failed += 1
                         continue
                         
                 if (i + 1) % 100 == 0:
