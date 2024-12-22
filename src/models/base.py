@@ -1,5 +1,6 @@
 """Base classes and interfaces for SDXL model implementations."""
 from enum import Enum, auto
+from random import Random
 from typing import Dict, List, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 import torch
