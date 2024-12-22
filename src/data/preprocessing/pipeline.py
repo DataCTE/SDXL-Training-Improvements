@@ -486,12 +486,12 @@ class PreprocessingPipeline:
             tensor = tensor.contiguous(memory_format=torch.channels_last)
             
             # Apply configured transforms
-            if self.config.transforms.get('normalize', True):
+            if getattr(self.config.transforms, 'normalize', True):
                 mean = torch.tensor([0.5, 0.5, 0.5], device=tensor.device)
                 std = torch.tensor([0.5, 0.5, 0.5], device=tensor.device)
                 tensor = tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
             
-            if self.config.transforms.get('random_flip', False):
+            if getattr(self.config.transforms, 'random_flip', False):
                 if torch.rand(1) > 0.5:
                     tensor = tensor.flip(-1)
             
