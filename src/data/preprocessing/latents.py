@@ -27,11 +27,7 @@ class LatentPreprocessor:
     def __init__(
         self,
         config: Config,
-        tokenizer_one: CLIPTokenizer,
-        tokenizer_two: CLIPTokenizer, 
-        text_encoder_one: CLIPTextModel,
-        text_encoder_two: CLIPTextModelWithProjection,
-        vae: AutoencoderKL,
+        sdxl_model: StableDiffusionXLModel,
         device: Union[str, torch.device] = "cuda",
         use_cache: bool = True,
         max_retries: int = 3,
@@ -40,12 +36,7 @@ class LatentPreprocessor:
     ):
         super().__init__()
         self.config = config
-        self.model = StableDiffusionXLModel(model_type=ModelType.BASE)
-        self.model.tokenizer_1 = tokenizer_one
-        self.model.tokenizer_2 = tokenizer_two
-        self.model.text_encoder_1 = text_encoder_one 
-        self.model.text_encoder_2 = text_encoder_two
-        self.model.vae = vae
+        self.model = sdxl_model
         self.model.to(device)
         self.device = torch.device(device)
         self.use_cache = use_cache
