@@ -651,22 +651,31 @@ class AspectBucketDataset(Dataset):
     ) -> None:
         """Cache processed item with memory optimization."""
         try:
-            # Generate latents and embeddings
+            # Generate latents and embeddings using SDXL model interface
             with torch.no_grad():
-                text_embeddings = self.latent_preprocessor.encode_prompt(
-                    [item_data["text"]],
-                    proportion_empty_prompts=getattr(self.config.data, 'proportion_empty_prompts', 0.0),
-                    is_train=self.is_train
+                # Get text embeddings
+                text_encoder_output, pooled_output = self.latent_preprocessor.model.encode_text(
+                    train_device=pixel_values.device,
+                    batch_size=1,
+                    text=[item_data["text"]],
+                    text_encoder_1_layer_skip=0,
+                    text_encoder_2_layer_skip=0
                 )
                 
-                vae_latents = self.latent_preprocessor.encode_images(
+                # Get VAE latents
+                vae_latents = self.latent_preprocessor.model.vae.encode(
                     pixel_values.unsqueeze(0) if pixel_values.dim() == 3 else pixel_values
-                )
+                ).latent_dist.sample()
             
             # Prepare cache data
             latent_data = {
                 "image": pixel_values,
-                "vae_latents": vae_latents["model_input"]
+                "vae_latents": vae_latents
+            }
+            
+            text_embeddings = {
+                "prompt_embeds": text_encoder_output,
+                "pooled_prompt_embeds": pooled_output
             }
             
             metadata = {
