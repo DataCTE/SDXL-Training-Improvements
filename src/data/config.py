@@ -60,6 +60,7 @@ class ModelConfig:
     dtype: str = "bfloat16"  # Model precision: float32, float16, or bfloat16
     fallback_dtype: str = "float32"  # Fallback precision when main dtype not supported
     unet_dtype: Optional[str] = None  # UNet specific dtype, falls back to main dtype if None
+    prior_dtype: Optional[str] = None  # Prior model dtype, falls back to main dtype if None
     
 @dataclass
 class MemoryConfig:
