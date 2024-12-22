@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path 
 from typing import Dict, List, Optional, Tuple, Union
-from ..utils.paths import convert_windows_path
+from src.data.utils.paths import convert_windows_path
 import torch
 from src.models import StableDiffusionXLModel
 from src.data.config import Config
@@ -20,7 +20,16 @@ class LatentPreprocessor:
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
     ):
-        super().__init__()
+        """Initialize the LatentPreprocessor.
+
+        Args:
+            config (Config): Configuration object containing cache settings
+            sdxl_model (StableDiffusionXLModel): SDXL model instance
+            device (Union[str, torch.device], optional): Device to run operations on. Defaults to "cuda".
+            max_retries (int, optional): Maximum number of retries for operations. Defaults to 3.
+            chunk_size (int, optional): Size of processing chunks. Defaults to 1000.
+            max_memory_usage (float, optional): Maximum memory usage fraction. Defaults to 0.8.
+        """
         self.config = config
         self.model = sdxl_model
         self.model.to(device)
@@ -28,11 +37,10 @@ class LatentPreprocessor:
         self.max_retries = max_retries
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
-        self.device = device
         
         # Setup cache after initializing attributes
         self._setup_cache(config)
-        
+
     def _setup_cache(self, config: Config) -> None:
         """Setup caching configuration."""
         self.use_cache = config.global_config.cache.use_cache

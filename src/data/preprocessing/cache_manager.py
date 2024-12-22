@@ -170,7 +170,7 @@ class CacheManager:
         
         Args:
             latent_data: Dictionary containing latent tensors
-            text_embeddings: Dictionary containing text embeddings 
+            text_embeddings: Dictionary containing text embeddings
             metadata: Associated metadata
             file_path: Path to original file
             
@@ -192,7 +192,7 @@ class CacheManager:
                 (t.device for t in latent_data.values() if isinstance(t, torch.Tensor)),
                 torch.device('cpu')
             )
-            
+
             # Memory optimization: Stream-based processing
             with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
                 # Pin memory for faster I/O

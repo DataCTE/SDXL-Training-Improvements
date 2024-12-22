@@ -47,9 +47,11 @@ class MemoryError(TensorError):
     """Raised for memory-related errors."""
     pass
 
-class StreamError(TensorError):
-    """Raised for CUDA stream errors."""
-    pass
+class StreamError(Exception):
+    def __init__(self, message: str, context: dict = None):
+        self.context = context
+        super().__init__(message)
+
 
 @contextmanager
 def tensor_operation_context(operation_name: str):
@@ -465,24 +467,25 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
         return
 
     if not isinstance(stream, torch.cuda.Stream):
-        raise StreamError(
-            "Invalid stream type",
-            context={
-                'type': type(stream).__name__,
-                'expected': 'torch.cuda.Stream',
-                'cuda_available': torch.cuda.is_available(),
-                'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
-                'device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-                'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
-            }
-        )
+        error_context = {
+            'type': type(stream).__name__,
+            'expected': 'torch.cuda.Stream',
+            'cuda_available': torch.cuda.is_available(),
+            'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
+            'device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+        }
+        logger.error(f"Invalid stream type", extra=error_context)
+        raise StreamError("Invalid stream type", error_context)
 
     try:
         with torch.cuda.stream(stream):
             yield
     except Exception as e:
         error_context = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
             'stream_id': id(stream),
             'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
             'stream_query': stream.query() if hasattr(stream, 'query') else None,
@@ -492,15 +495,19 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
             'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
             'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
             'device_properties': str(torch.cuda.get_device_properties(stream.device.index)) if (
-                torch.cuda.is_available() and 
-                hasattr(stream, 'device') and 
+                torch.cuda.is_available() and
+                hasattr(stream, 'device') and
                 hasattr(stream.device, 'index')
             ) else None
         }
-        raise StreamError("Stream context creation failed", context=error_context) from e
+        logger.error(f"Stream context creation failed: {str(e)}", extra=error_context)
+        raise StreamError(f"Stream context creation failed: {str(e)}", error_context) from e
     finally:
-        if stream is not None:
-            stream.synchronize()
+        try:
+            if stream is not None:
+                stream.synchronize()
+        except Exception as sync_error:
+            logger.error(f"Stream synchronization failed: {str(sync_error)}")
 
 def torch_gc() -> None:
     """Enhanced garbage collection with memory tracking."""

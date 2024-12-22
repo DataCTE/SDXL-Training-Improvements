@@ -101,11 +101,11 @@ def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Modu
                 "Failed to initialize SDXL model",
                 {"error": str(e), "model_type": "BASE"}
             )
-        
+
         # Configure model loading with device-specific settings
         torch_dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
         device_map = "balanced" if device.type == "cuda" else None
-        
+
         # Load pipeline with memory tracking
         try:
             pipeline = StableDiffusionXLPipeline.from_pretrained(
@@ -124,7 +124,7 @@ def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Modu
                     "device_map": device_map
                 }
             )
-        
+
         # Transfer components
         sdxl_model.unet = pipeline.unet
         sdxl_model.vae = pipeline.vae
@@ -133,11 +133,16 @@ def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Modu
         sdxl_model.tokenizer_1 = pipeline.tokenizer
         sdxl_model.tokenizer_2 = pipeline.tokenizer_2
         sdxl_model.noise_scheduler = pipeline.scheduler
-        
-        # Clean up pipeline
+
+        # Clean up pipeline and log memory usage
         del pipeline
         torch_gc()
         
+        if torch.cuda.is_available():
+            final_memory = torch.cuda.memory_allocated()
+            memory_diff = final_memory - initial_memory
+            logger.info(f"Model loading memory impact: {memory_diff / 1024**2:.2f}MB")
+
         return {
             "tokenizer_one": sdxl_model.tokenizer_1,
             "tokenizer_two": sdxl_model.tokenizer_2,
@@ -147,7 +152,6 @@ def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Modu
             "unet": sdxl_model.unet,
             "model": sdxl_model
         }
-        
     except Exception as e:
         raise TrainingSetupError(
             "Failed to load models",
