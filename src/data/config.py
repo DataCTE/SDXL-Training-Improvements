@@ -124,6 +124,7 @@ class TrainingConfig:
     center_crop: bool = True
     method: str = "ddpm"  # ddpm or flow_matching
     prediction_type: str = "v_prediction"  # v_prediction, epsilon, or sample
+    zero_terminal_snr: bool = True  # Enable zero terminal SNR for better quality
     ddpm: DDPMConfig = field(default_factory=DDPMConfig)
     flow_matching: FlowMatchingConfig = field(default_factory=FlowMatchingConfig)
     
