@@ -226,109 +226,40 @@ class PreprocessingPipeline:
 
         return pipe
 
-    @torch.no_grad()
-    def process_image(
+    def process_batch(
         self,
-        image: Image.Image,
-        target_size: Tuple[int, int],
-        device: Optional[torch.device] = None
-    ) -> torch.Tensor:
-        """Process single image with optimized memory handling."""
-        try:
-            # Convert to tensor and normalize
-            tensor = self.transforms(image)
-            
-            # Move to device if specified
-            if device is not None:
-                tensor = tensor.to(device)
-                
-            # Apply optimized transforms
-            tensor = self._apply_optimized_transforms(tensor)
-            
-            return tensor
-            
-        except Exception as e:
-            raise PreprocessingError(
-                "Image processing failed",
-                context={
-                    "image_size": image.size,
-                    "target_size": target_size,
-                    "error": str(e)
-                }
-            )
-
-    def _process_tensor_batch(
-        self,
-        tensor: torch.Tensor,
+        tensors: List[torch.Tensor],
         device_id: int,
-        text: Optional[str] = None
+        latent_preprocessor: LatentPreprocessor
     ) -> Dict[str, torch.Tensor]:
         """Process tensor batch with optimized memory handling."""
-        
         try:
-            # Validate tensor shape and properties
-            if tensor.dim() != 4:
-                raise PreprocessingError("Expected 4D tensor")
-                
             # Track memory if enabled
             if self.enable_memory_tracking:
-                self._track_memory_usage("tensor_validation")
-                
-            # Process tensor with memory optimization
-            processed_tensor = tensor.to(
+                self._track_memory_usage("batch_processing")
+
+            # Stack tensors and move to device
+            batch = torch.stack(tensors).to(
                 device=torch.device(device_id),
                 memory_format=torch.channels_last,
                 non_blocking=self.use_pinned_memory
             )
-            
-            # Generate outputs
+
+            # Process through latent preprocessor
             with autocast():
-                # Generate latents using VAE
-                latents = self.model.vae.encode(processed_tensor).latent_dist.sample()
-                
-                # Generate text embeddings if text provided
-                if text and hasattr(self, 'model'):
-                    # Use high-level SDXL model interface for text encoding
-                    text_encoder_output, pooled_output = self.model.encode_text(
-                        train_device=torch.device(device_id),
-                        batch_size=processed_tensor.size(0),
-                        text=text,
-                        text_encoder_1_layer_skip=0,
-                        text_encoder_2_layer_skip=0,
-                        text_encoder_1_output=None,
-                        text_encoder_2_output=None
-                    )
-                    
-                    processed = {
-                        "latents": latents,
-                        "text_encoder_output": text_encoder_output,
-                        "pooled_output": pooled_output
-                    }
-                else:
-                    processed = {
-                        "latents": latents
-                    }
-                    
+                result = latent_preprocessor.encode_images(batch)
+
             self.stats.successful += 1
-            
-            return {
-                "tensor": processed,
-                "metadata": {
-                    "device_id": device_id,
-                    "shape": tuple(processed.shape),
-                    "dtype": str(processed.dtype),
-                    "memory_allocated": torch.cuda.memory_allocated(device_id)
-                }
-            }
-            
+            return result
+
         except Exception as e:
             self.stats.failed += 1
             raise PreprocessingError(
-                "Tensor batch processing failed",
+                "Batch processing failed",
                 context={
                     "error": str(e),
                     "device_id": device_id,
-                    "tensor_shape": tuple(tensor.shape) if isinstance(tensor, torch.Tensor) else None
+                    "batch_size": len(tensors)
                 }
             )
 
