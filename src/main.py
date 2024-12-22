@@ -90,8 +90,37 @@ def setup_device_and_logging(config: Config) -> torch.device:
 def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Module]:
     """Load and configure models with enhanced error handling and memory tracking."""
     try:
-       # Load models
+        # Initialize model dictionary
+        models = {}
 
+        # Load base SDXL model with memory optimization
+        with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
+            models["model"] = StableDiffusionXLModel(
+                model_type=ModelType.SDXL,
+                pretrained_model_name=config.model.pretrained_model_name,
+                dtype=config.model.dtype,
+                fallback_dtype=config.model.fallback_dtype
+            )
+
+            # Move model to device with optimized memory transfer
+            models["model"].to(device)
+
+            # Extract UNet for training
+            models["unet"] = models["model"].unet
+
+            # Configure UNet training mode
+            models["unet"].train()
+            if config.training.gradient_checkpointing:
+                models["unet"].enable_gradient_checkpointing()
+
+            # Create inference pipeline if needed
+            if config.training.validation_steps > 0:
+                models["pipeline"] = StableDiffusionXLPipeline(
+                    models["model"],
+                    scheduler_type=config.training.validation_scheduler
+                )
+
+        return models
        
 
 
