@@ -342,27 +342,26 @@ def main():
                             # Ensure proper stream synchronization
                             if stream:
                                 stream.synchronize()
-                        
-                        # Clean up after transfer
-                        torch_sync()
-                        
+                            
+                            # Clean up after transfer
+                            torch_sync()
+                    
                     # Track memory impact
                     if torch.cuda.is_available():
                         post_transfer_memory = torch.cuda.memory_allocated()
                         memory_delta = post_transfer_memory - pre_transfer_memory
                         logger.debug(f"Memory delta: {memory_delta / 1024**2:.1f}MB")
-                            
-                    except Exception as e:
-                        raise TrainingSetupError(
-                            "Failed to move models to device",
-                            {
-                                "error": str(e),
-                                "model": name,
-                                "device": str(device),
-                                "cuda_available": torch.cuda.is_available(),
-                                "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-                            }
-                        )
+                
+                except Exception as e:
+                    raise TrainingSetupError(
+                        "Failed to move models to device",
+                        {
+                            "error": str(e),
+                            "device": str(device),
+                            "cuda_available": torch.cuda.is_available(),
+                            "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                        }
+                    )
             
             # Setup memory optimizations
             setup_memory_optimizations(models["model"].unet, config, device)
