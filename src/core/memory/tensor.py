@@ -463,7 +463,7 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
     if not isinstance(stream, torch.cuda.Stream):
         yield nullcontext()
         return
-        
+
     try:
         with torch.cuda.stream(stream):
             yield torch.cuda.StreamContext(stream)
@@ -472,7 +472,7 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
             'stream_id': id(stream) if stream else None,
             'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu'
         }
-        raise StreamError("Stream context creation failed", error_context) from e
+        raise StreamError(f"Stream context creation failed: {error_context}") from e
     finally:
         if stream is not None:
             stream.synchronize()
