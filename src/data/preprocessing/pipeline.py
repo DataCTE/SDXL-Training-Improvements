@@ -19,9 +19,6 @@ import numpy as np
 import torch
 import torch.cuda
 from torch.cuda.amp import autocast
-import nvidia.dali as dali
-import nvidia.dali.fn as fn
-from nvidia.dali.pipeline import Pipeline
 
 from src.core.memory.tensor import (
     unpin_tensor_,
@@ -152,19 +149,19 @@ class PreprocessingPipeline:
                     context={'error': str(e)}
                 )
                 
-        # Initialize encoders and pipeline with enhanced error handling
+        # Initialize pipeline with enhanced error handling
         try:
             if latent_preprocessor:
                 self.model = latent_preprocessor.model
                     
-            # Create DALI pipeline with fallback
-            self.dali_pipeline = self._create_optimized_dali_pipeline()
-            if self.dali_pipeline is None:
-                logger.warning("DALI pipeline creation failed, falling back to CPU processing")
+            # Create CUDA stream pipeline
+            self.cuda_stream = self._create_cuda_pipeline()
+            if self.cuda_stream is None:
+                logger.warning("CUDA pipeline creation failed, falling back to CPU processing")
                     
         except Exception as e:
             logger.warning(f"Pipeline initialization warning: {str(e)}")
-            self.dali_pipeline = None
+            self.cuda_stream = None
             # Don't raise here - allow fallback to CPU processing
 
     def precompute_latents(
@@ -267,16 +264,16 @@ class PreprocessingPipeline:
             
             # Convert to tensor with memory optimization
             with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                # Process through DALI if available
-                if self.dali_pipeline:
+                # Process with CUDA if available
+                if self.cuda_stream and torch.cuda.is_available():
                     try:
-                        tensor = self._process_with_dali(img)
+                        tensor = self._process_with_cuda(img)
                     except Exception as e:
-                        logger.warning(f"DALI processing failed, falling back to CPU: {e}")
+                        logger.warning(f"CUDA processing failed, falling back to CPU: {e}")
                         tensor = None
                         
                 # CPU fallback
-                if not self.dali_pipeline or tensor is None:
+                if not self.cuda_stream or tensor is None:
                     tensor = self._apply_optimized_transforms(
                         torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
                     )
@@ -435,88 +432,19 @@ class PreprocessingPipeline:
                 'peak': self.memory_tracker['peak_allocated']
             })
 
-    def _create_optimized_dali_pipeline(self) -> Optional[Pipeline]:
-        """Create DALI pipeline with optimized settings and proper error handling."""
+    def _create_cuda_pipeline(self) -> Optional[torch.cuda.Stream]:
+        """Create CUDA stream pipeline with optimized settings."""
         if not torch.cuda.is_available():
-            logger.warning("cuda not available, skipping DALI pipeline creation")
+            logger.warning("CUDA not available, skipping pipeline creation")
             return None
 
         try:
-            # Create pipeline with device verification
-            device_id = self.device_ids[0] if self.device_ids else 0
-            if device_id >= torch.cuda.device_count():
-                raise DALIError(f"Invalid device ID {device_id}")
-
-            pipe = Pipeline(
-                batch_size=32,
-                num_threads=self.num_cpu_workers,
-                device_id=device_id,
-                prefetch_queue_depth=self.prefetch_factor,
-                enable_memory_stats=self.enable_memory_tracking
-            )
-
-            # Setup pipeline operations within context
-            with pipe:
-                # Enhanced error handling for readers with stream synchronization
-                with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                    try:
-                        images = fn.readers.file(
-                            name="Reader",
-                            pad_last_batch=True,
-                            random_shuffle=True,
-                            prefetch_queue_depth=self.prefetch_factor
-                        )
-                    except Exception as e:
-                        raise DALIError(
-                            "Failed to initialize DALI file reader",
-                            context={'error': str(e)}
-                        )
-
-                    # Optimized decode settings with memory padding
-                    try:
-                        decoded = fn.decoders.image(
-                            images,
-                            device="mixed",
-                            output_type=dali.types.RGB,
-                            hybrid_huffman_threshold=100000,
-                            host_memory_padding=512,  # Increased padding
-                            device_memory_padding=512
-                        )
-                    except Exception as e:
-                        raise DALIError(
-                            "Failed to initialize DALI image decoder",
-                            context={'error': str(e)}
-                        )
-
-                    # Enhanced normalization with better precision
-                    try:
-                        normalized = fn.crop_mirror_normalize(
-                            decoded,
-                            dtype=dali.types.FLOAT,
-                            mean=[0.5 * 255] * 3,
-                            std=[0.5 * 255] * 3,
-                            output_layout="CHW",
-                            pad_output=False
-                        )
-                    except Exception as e:
-                        raise DALIError(
-                            "Failed to initialize DALI normalization",
-                            context={'error': str(e)}
-                        )
-
-                    # Set pipeline output with proper expansion using *
-                    pipe.set_outputs(*[normalized])
-
-            # Build and verify pipeline
-            try:
-                pipe.build()
-                return pipe
-            except Exception as e:
-                logger.error(f"Failed to build DALI pipeline: {str(e)}")
-                return None
+            # Create dedicated CUDA stream for pipeline
+            stream = torch.cuda.Stream()
+            return stream
             
         except Exception as e:
-            logger.error(f"Failed to create DALI pipeline: {str(e)}")
+            logger.error(f"Failed to create CUDA pipeline: {str(e)}")
             return None
 
     def _apply_optimized_transforms(
