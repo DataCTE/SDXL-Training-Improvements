@@ -18,8 +18,7 @@ class LatentPreprocessor:
         device: Union[str, torch.device] = "cuda",
         max_retries: int = 3,
         chunk_size: int = 1000,
-        max_memory_usage: float = 0.8,
-        use_cache: Optional[bool] = None
+        max_memory_usage: float = 0.8
     ):
         super().__init__()
         self.config = config
