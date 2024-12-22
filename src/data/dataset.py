@@ -112,15 +112,13 @@ class AspectBucketDataset(Dataset):
         # Initialize preprocessing components first
         self.latent_preprocessor = latent_preprocessor
         
-        # Always initialize preprocessing pipeline
+        # Always initialize preprocessing pipeline with config
         self.preprocessing_pipeline = PreprocessingPipeline(
             config=config,
             latent_preprocessor=latent_preprocessor,
-            num_gpu_workers=1,  # Single GPU worker for better memory management
-            num_cpu_workers=config.data.num_workers,
-            num_io_workers=2,
-            prefetch_factor=2,
-            use_pinned_memory=True
+            tag_weighter=self.tag_weighter,
+            cache_manager=self.cache_manager,
+            is_train=self.is_train
         )
         
         # Initialize cache manager if latent preprocessor is available
