@@ -4,6 +4,7 @@ import time
 import psutil
 from pathlib import Path 
 from typing import Dict, List, Optional, Tuple, Union
+from ..utils.paths import convert_windows_path
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
@@ -74,7 +75,7 @@ class LatentPreprocessor:
             return
             
         try:
-            cache_dir = Path(config.global_config.cache.cache_dir)
+            cache_dir = Path(convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True))
             cache_dir.mkdir(parents=True, exist_ok=True)
             
             self.cache_manager = CacheManager(

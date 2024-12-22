@@ -5,6 +5,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from pathlib import Path
 from queue import Queue
+from ..utils.paths import convert_windows_path
 from threading import Event, Thread
 from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING
 from src.data.config import Config

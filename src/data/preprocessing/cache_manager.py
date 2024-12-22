@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+from ..utils.paths import convert_windows_path
 import hashlib
 import json
 import torch
