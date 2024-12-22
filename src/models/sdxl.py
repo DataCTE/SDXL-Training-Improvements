@@ -98,13 +98,13 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     """StableDiffusionXL model with training optimizations."""
 
     def __init__(self, model_type: ModelType):
-        torch.nn.Module.__init__(self)
         """Initialize SDXL model.
         
         Args:
             model_type: Type of model (base, inpainting, etc)
         """
-        super().__init__(model_type=model_type)
+        torch.nn.Module.__init__(self)
+        BaseModel.__init__(self, model_type=model_type)
 
         # Training state
         self.training = True
