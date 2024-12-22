@@ -27,6 +27,8 @@ from src.core.memory.tensor import (
     device_equals,
     replace_tensors_
 )
+from src.models.encoders.vae import VAEEncoder
+from src.models.encoders.clip import encode_clip
 from src.core.memory.optimizations import (
     setup_memory_optimizations,
     verify_memory_optimizations
@@ -135,12 +137,19 @@ class PreprocessingPipeline:
                     context={'error': str(e)}
                 )
                 
-        # Initialize DALI pipeline with optimized parameters
+        # Initialize encoders and pipeline
         try:
+            if latent_preprocessor:
+                self.vae_encoder = latent_preprocessor.vae_encoder
+                self.text_encoder_one = latent_preprocessor.text_encoder_one
+                self.text_encoder_two = latent_preprocessor.text_encoder_two
+                self.tokenizer_one = latent_preprocessor.tokenizer_one
+                self.tokenizer_two = latent_preprocessor.tokenizer_two
+            
             self.dali_pipeline = self._create_optimized_dali_pipeline()
         except Exception as e:
             raise DALIError(
-                "Failed to create DALI pipeline",
+                "Failed to create pipeline",
                 context={'error': str(e)}
             )
 
@@ -235,7 +244,8 @@ class PreprocessingPipeline:
     def _process_tensor_batch(
         self,
         tensor: torch.Tensor,
-        device_id: int
+        device_id: int,
+        text: Optional[str] = None
     ) -> Dict[str, torch.Tensor]:
         """Process tensor batch with optimized memory handling and enhanced error checking."""
         try:
@@ -269,9 +279,58 @@ class PreprocessingPipeline:
                         # Wait for transfer
                         compute_stream.wait_stream(transfer_stream)
                         
-                        # Process with autocast for better performance
+                        # Process with optimized encoders
                         with autocast():
-                            processed = self._apply_optimized_transforms(tensor)
+                            # Generate VAE latents
+                            latents = self.vae_encoder.encode(tensor, return_dict=False)
+                            
+                            # Generate text embeddings if text provided
+                            if text and hasattr(self, 'text_encoder_one'):
+                                # Tokenize
+                                tokens_1 = self.tokenizer_one(
+                                    text,
+                                    padding="max_length",
+                                    max_length=self.tokenizer_one.model_max_length,
+                                    truncation=True,
+                                    return_tensors="pt"
+                                ).input_ids.to(device_id)
+                                
+                                tokens_2 = self.tokenizer_two(
+                                    text,
+                                    padding="max_length",
+                                    max_length=self.tokenizer_two.model_max_length,
+                                    truncation=True,
+                                    return_tensors="pt"
+                                ).input_ids.to(device_id)
+                                
+                                # Encode text
+                                text_embeddings_1, _ = encode_clip(
+                                    text_encoder=self.text_encoder_one,
+                                    tokens=tokens_1,
+                                    default_layer=-2,
+                                    layer_skip=0,
+                                    use_attention_mask=False,
+                                    add_layer_norm=False
+                                )
+                                
+                                text_embeddings_2, pooled_embeddings = encode_clip(
+                                    text_encoder=self.text_encoder_two,
+                                    tokens=tokens_2,
+                                    default_layer=-2,
+                                    layer_skip=0,
+                                    add_pooled_output=True,
+                                    use_attention_mask=False,
+                                    add_layer_norm=False
+                                )
+                                
+                                processed = {
+                                    "latents": latents,
+                                    "text_embeddings_1": text_embeddings_1,
+                                    "text_embeddings_2": text_embeddings_2,
+                                    "pooled_embeddings": pooled_embeddings
+                                }
+                            else:
+                                processed = {"latents": latents}
                             
                         # Ensure compute is done
                         compute_stream.synchronize()
