@@ -467,7 +467,15 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
     if not isinstance(stream, torch.cuda.Stream):
         raise StreamError(
             "Invalid stream type",
-            context={'type': type(stream).__name__}
+            context={
+                'type': type(stream).__name__,
+                'expected': 'torch.cuda.Stream',
+                'cuda_available': torch.cuda.is_available(),
+                'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
+                'device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+            }
         )
 
     try:
@@ -475,10 +483,21 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
             yield
     except Exception as e:
         error_context = {
-            'stream_id': id(stream) if stream else None,
-            'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu'
+            'stream_id': id(stream),
+            'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
+            'stream_query': stream.query() if hasattr(stream, 'query') else None,
+            'stream_device': stream.device if hasattr(stream, 'device') else None,
+            'stream_priority': stream.priority if hasattr(stream, 'priority') else None,
+            'cuda_error': str(e),
+            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
+            'device_properties': str(torch.cuda.get_device_properties(stream.device.index)) if (
+                torch.cuda.is_available() and 
+                hasattr(stream, 'device') and 
+                hasattr(stream.device, 'index')
+            ) else None
         }
-        raise StreamError(f"Stream context creation failed: {error_context}") from e
+        raise StreamError("Stream context creation failed", context=error_context) from e
     finally:
         if stream is not None:
             stream.synchronize()
