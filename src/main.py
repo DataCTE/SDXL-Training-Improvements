@@ -364,9 +364,9 @@ def main():
                     )
             
             # Setup memory optimizations
-            setup_memory_optimizations(models["model"].unet, config, device)
+            setup_memory_optimizations(models.unet, config, device)
             if is_main_process():
-                verify_memory_optimizations(models["model"].unet, config, device, logger)
+                verify_memory_optimizations(models.unet, config, device, logger)
             
             # Load training data
             logger.info("Loading training data...")
@@ -376,7 +376,7 @@ def main():
             logger.info("Setting up training...")
             train_dataloader, optimizer, wandb_logger = setup_training(
                 config=config,
-                model=models,  # Pass the model directly
+                model=models,
                 device=device,
                 image_paths=image_paths,
                 captions=captions
