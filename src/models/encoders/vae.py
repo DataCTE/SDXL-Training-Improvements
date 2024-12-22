@@ -137,7 +137,7 @@ class VAEEncoder:
         """Encode large images using tiling.
         
         Args:
-            pixel_values: Input images
+            pixel_values: Input images [B, C, H, W]
             
         Returns:
             Encoded latents
@@ -149,14 +149,21 @@ class VAEEncoder:
         num_h = (height - 1) // self.vae_tile_size + 1
         num_w = (width - 1) // self.vae_tile_size + 1
         
-        latents = []
+        # Initialize output tensor
+        latent_channels = self.vae.config.latent_channels
+        latent_h = height // self.vae.config.scaling_factor
+        latent_w = width // self.vae.config.scaling_factor
+        latents = torch.zeros(
+            (batch_size, latent_channels, latent_h, latent_w),
+            device=pixel_values.device,
+            dtype=pixel_values.dtype
+        )
         
         # Process tiles
         for h in range(num_h):
             h_start = h * self.vae_tile_size
             h_end = min(height, (h + 1) * self.vae_tile_size)
             
-            row_latents = []
             for w in range(num_w):
                 w_start = w * self.vae_tile_size
                 w_end = min(width, (w + 1) * self.vae_tile_size)
@@ -165,20 +172,15 @@ class VAEEncoder:
                 tile = pixel_values[:, :, h_start:h_end, w_start:w_end]
                 with torch.no_grad():
                     tile_latents = self.vae.encode(tile).latent_dist.sample()
-                row_latents.append(tile_latents)
                 
-            # Combine row
-            if len(row_latents) > 1:
-                row_latents = torch.cat(row_latents, dim=3)
-            else:
-                row_latents = row_latents[0]
-            latents.append(row_latents)
-            
-        # Combine all rows
-        if len(latents) > 1:
-            latents = torch.cat(latents, dim=2)
-        else:
-            latents = latents[0]
+                # Calculate latent coordinates
+                lat_h_start = h_start // self.vae.config.scaling_factor
+                lat_h_end = h_end // self.vae.config.scaling_factor
+                lat_w_start = w_start // self.vae.config.scaling_factor
+                lat_w_end = w_end // self.vae.config.scaling_factor
+                
+                # Place tile in output tensor
+                latents[:, :, lat_h_start:lat_h_end, lat_w_start:lat_w_end] = tile_latents
             
         return latents
         
