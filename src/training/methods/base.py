@@ -63,7 +63,13 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
             prediction_type=config.training.prediction_type,
             rescale_betas_zero_snr=config.training.zero_terminal_snr
         )
-        self.noise_scheduler.to(unet.device)
+        # Move scheduler tensors to device if needed
+        if hasattr(self.noise_scheduler, 'betas'):
+            self.noise_scheduler.betas = self.noise_scheduler.betas.to(unet.device)
+        if hasattr(self.noise_scheduler, 'alphas'):
+            self.noise_scheduler.alphas = self.noise_scheduler.alphas.to(unet.device)
+        if hasattr(self.noise_scheduler, 'alphas_cumprod'):
+            self.noise_scheduler.alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(unet.device)
 
     @abstractmethod
     def compute_loss(
