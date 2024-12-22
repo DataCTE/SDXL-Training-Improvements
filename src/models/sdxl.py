@@ -205,7 +205,8 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 if not torch.cuda.is_available():
                     raise RuntimeError("cuda is not available")
                 # Ensure CUDA device is properly initialized
-                torch.cuda.set_device(device)
+                device_idx = device.index if device.index is not None else 0
+                torch.cuda.set_device(device_idx)
             
             if not tensors_match_device(self.vae.state_dict(), device):
                 with create_stream_context(torch.cuda.current_stream()):
@@ -218,8 +219,9 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         if device.type == "cuda":
             if not torch.cuda.is_available():
                 raise RuntimeError("cuda is not available")
-            # Initialize CUDA device
-            torch.cuda.set_device(device)
+            # Initialize CUDA device with proper index handling
+            device_idx = device.index if device.index is not None else 0
+            torch.cuda.set_device(device_idx)
         
         with create_stream_context(torch.cuda.current_stream()):
             # Move encoders with CUDA optimization
@@ -260,7 +262,8 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             if not torch.cuda.is_available():
                 raise RuntimeError("cuda is not available")
             # Initialize CUDA device
-            torch.cuda.set_device(device)
+            device_idx = device.index if device.index is not None else 0
+            torch.cuda.set_device(device_idx)
         
         with create_stream_context(torch.cuda.current_stream()):
             # Move UNet with CUDA optimization
