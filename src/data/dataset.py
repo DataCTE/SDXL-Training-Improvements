@@ -454,172 +454,78 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Memory tracking failed in {context}: {str(e)}")
             raise
 
-    def _process_image(
-        self,
-        image: Image.Image,
-        target_size: Tuple[int, int],
-        device: Optional[torch.device] = None
-    ) -> torch.Tensor:
-        """Process single image using preprocessing pipeline."""
+    def _process_image(self, image_path: Path) -> Dict[str, Any]:
+        """Process image through preprocessing pipeline."""
         if not self.preprocessing_pipeline:
             raise ProcessingError("Preprocessing pipeline not initialized")
             
         try:
+            # Use pipeline's built-in processing
             return self.preprocessing_pipeline.process_image(
-                image,
-                target_size,
-                device
+                image_path,
+                self.latent_preprocessor.device if self.latent_preprocessor else None
             )
         except Exception as e:
-            raise ProcessingError(
-                "Image processing failed",
-                {"error": str(e), "image_size": image.size}
-            )
+            raise ProcessingError(f"Image processing failed: {str(e)}")
 
-    def _process_cached_item(
-        self,
-        index: int,
-        device: Optional[torch.device] = None
-    ) -> Optional[Dict[str, torch.Tensor]]:
-        """Retrieve and process cached item."""
+    def _get_cached_item(self, index: int) -> Optional[Dict[str, Any]]:
+        """Get cached item through cache manager."""
         if not self.cache_manager:
             return None
             
-        try:
-            file_path = self.image_paths[index]
-            cached_data = self.cache_manager.get_cached_item(file_path, device)
-            
-            if cached_data:
-                self.stats.cache_hits += 1
-                return cached_data
-                
-            self.stats.cache_misses += 1
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error processing cached item at index {index}: {str(e)}")
-            return None
+        return self.cache_manager.get_cached_item(
+            self.image_paths[index],
+            self.latent_preprocessor.device if self.latent_preprocessor else None
+        )
 
-    def _cache_processed_item(
-        self,
-        item_data: Dict[str, Any],
-        image_path: Path,
-        pixel_values: torch.Tensor
-    ) -> None:
-        """Cache processed item with memory optimization."""
-        try:
-            # Use latent preprocessor's model for consistent processing
-            model = self.latent_preprocessor.model
+    def _cache_processed_item(self, processed_data: Dict[str, Any], image_path: Path) -> None:
+        """Cache processed item through cache manager."""
+        if not self.cache_manager:
+            return
             
-            # Generate latents and embeddings
-            with torch.no_grad():
-                # Get text embeddings through SDXL interface
-                text_encoder_output, pooled_output = model.encode_text(
-                    train_device=pixel_values.device,
-                    batch_size=1,
-                    text=[item_data["text"]],
-                    text_encoder_1_layer_skip=0,
-                    text_encoder_2_layer_skip=0
-                )
-                
-                # Get VAE latents through SDXL interface
-                vae_latents = model.vae.encode(
-                    pixel_values.unsqueeze(0) if pixel_values.dim() == 3 else pixel_values
-                ).latent_dist.sample()
-            
-            # Prepare cache data with consistent structure
-            latent_data = {
-                "image": pixel_values,
-                "vae_latents": vae_latents
-            }
-            
-            text_embeddings = {
-                "prompt_embeds": text_encoder_output,
-                "pooled_prompt_embeds": pooled_output
-            }
-            
-            metadata = {
-                "original_size": item_data["original_size"],
-                "crop_top_left": item_data["crop_top_left"],
-                "target_size": item_data["target_size"],
-                "cached_at": time.time()
-            }
-            
-            # Save to cache
-            self.cache_manager.save_preprocessed_data(
-                latent_data=latent_data,
-                text_embeddings=text_embeddings,
-                metadata=metadata,
-                file_path=image_path
-            )
-            
-        except Exception as e:
-            logger.error(f"Failed to cache processed item: {str(e)}")
+        self.cache_manager.save_preprocessed_data(
+            latent_data=processed_data["latent"],
+            text_embeddings=processed_data["text_embeddings"],
+            metadata=processed_data["metadata"],
+            file_path=image_path
+        )
 
     def __len__(self) -> int:
         """Get dataset length."""
         return len(self.image_paths)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Get dataset item with caching support."""
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Get dataset item using preprocessing components."""
         try:
             # Check cache first
-            cached_item = self._process_cached_item(idx)
+            cached_item = self._get_cached_item(idx)
             if cached_item:
                 return {
-                    "pixel_values": cached_item["latent"]["image"],
+                    **cached_item["latent"],
+                    **cached_item["text_embeddings"],
+                    **cached_item["metadata"],
                     "text": self.captions[idx],
-                    "original_size": cached_item["metadata"].get("original_size"),
-                    "crop_top_left": cached_item["metadata"].get("crop_top_left", (0, 0)),
-                    "target_size": cached_item["metadata"].get("target_size"),
-                    "prompt_embeds": cached_item["text_embeddings"].get("prompt_embeds"),
-                    "pooled_prompt_embeds": cached_item["text_embeddings"].get("pooled_prompt_embeds"),
-                    "loss_weight": self.tag_weighter.get_caption_weight(self.captions[idx])
+                    "loss_weight": self.tag_weighter.get_caption_weight(self.captions[idx]) 
                         if self.tag_weighter else 1.0
                 }
-            
-            # Process image if not cached
+
+            # Process through pipeline if not cached
             with self._track_memory("item_processing"):
-                # Load and validate image
                 image_path = self._validate_image_path(self.image_paths[idx])
-                image = self._load_image(image_path)
-                bucket_idx = self.bucket_indices[idx]
-                target_h, target_w = self.buckets[bucket_idx]
-                crop_top, crop_left = self._get_crop_coordinates(image, target_h, target_w)
+                processed_data = self._process_image(image_path)
                 
-                # Process image through pipeline
-                image = crop(image, crop_top, crop_left, target_h, target_w)
+                # Cache results
+                if self.cache_manager:
+                    self._cache_processed_item(processed_data, image_path)
                 
-                with self.preprocessing_pipeline:
-                    processed = self.preprocessing_pipeline.process_image(
-                        image,
-                        target_size=(target_w, target_h),
-                        device=self.latent_preprocessor.device if self.latent_preprocessor else None
-                    )
-                    
-                original_size = image.size
-                pixel_values = processed
-                
-                # Prepare item data
-                item_data = {
-                    "pixel_values": pixel_values,
+                return {
+                    **processed_data["latent"],
+                    **processed_data["text_embeddings"], 
+                    **processed_data["metadata"],
                     "text": self.captions[idx],
-                    "original_size": original_size,
-                    "crop_top_left": (crop_top, crop_left),
-                    "target_size": (target_h, target_w),
                     "loss_weight": self.tag_weighter.get_caption_weight(self.captions[idx])
                         if self.tag_weighter else 1.0
                 }
-                
-                # Cache processed data if manager available
-                if self.cache_manager and self.latent_preprocessor:
-                    self._cache_processed_item(
-                        item_data,
-                        image_path,
-                        pixel_values
-                    )
-                
-                return item_data
                 
         except Exception as e:
             logger.error(f"Error getting dataset item {idx}: {str(e)}")
