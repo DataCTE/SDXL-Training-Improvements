@@ -6,9 +6,7 @@ import torch
 from src.models import StableDiffusionXLModel
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
-from src.core.memory.tensor import (
-    device_equals
-)
+
 
 logger = logging.getLogger(__name__)
 
