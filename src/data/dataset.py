@@ -88,6 +88,15 @@ class AspectBucketDataset(Dataset):
             max_memory_usage: Maximum fraction of GPU memory to use
         """
         super().__init__()
+
+        # Precompute latents if needed
+        if latent_preprocessor and config.global_config.cache.use_cache:
+            self._precompute_latents(
+                image_paths,
+                captions,
+                latent_preprocessor,
+                config
+            )
         
         # Initialize statistics tracking
         self.stats = DatasetStats()
@@ -170,6 +179,100 @@ class AspectBucketDataset(Dataset):
             raise DatasetError("No valid image paths found")
             
         return validated_paths
+
+    def _precompute_latents(
+        self,
+        image_paths: List[str],
+        captions: List[str],
+        latent_preprocessor: LatentPreprocessor,
+        config: Config
+    ) -> None:
+        """Precompute and cache latents for all images."""
+        logger.info("Checking for cached latents...")
+        
+        # Get list of uncached images
+        uncached_indices = []
+        uncached_paths = []
+        uncached_captions = []
+        
+        for idx, (img_path, caption) in enumerate(zip(image_paths, captions)):
+            if not self.cache_manager.get_cached_item(img_path):
+                uncached_indices.append(idx)
+                uncached_paths.append(img_path)
+                uncached_captions.append(caption)
+
+        if not uncached_paths:
+            logger.info("All latents are cached")
+            return
+
+        logger.info(f"Precomputing latents for {len(uncached_paths)} images...")
+        
+        # Process in batches
+        batch_size = config.training.batch_size
+        for i in tqdm(range(0, len(uncached_paths), batch_size), desc="Caching latents"):
+            batch_paths = uncached_paths[i:i + batch_size]
+            batch_captions = uncached_captions[i:i + batch_size]
+            
+            try:
+                # Load and process images
+                images = []
+                for img_path in batch_paths:
+                    try:
+                        image = Image.open(img_path).convert('RGB')
+                        images.append(self._process_image(
+                            image,
+                            self.target_size,
+                            latent_preprocessor.vae.device
+                        ))
+                    except Exception as e:
+                        logger.error(f"Error processing {img_path}: {str(e)}")
+                        continue
+
+                if not images:
+                    continue
+
+                # Stack images and generate embeddings
+                pixel_values = torch.stack(images)
+                text_embeddings = latent_preprocessor.encode_prompt(
+                    batch_captions,
+                    proportion_empty_prompts=config.data.proportion_empty_prompts,
+                    is_train=self.is_train
+                )
+                
+                # Generate latents
+                with torch.no_grad():
+                    vae_output = latent_preprocessor.encode_images(pixel_values)
+                
+                # Cache results
+                for j, img_path in enumerate(batch_paths):
+                    if j >= len(images):
+                        continue
+                        
+                    self.cache_manager.save_preprocessed_data(
+                        latent_data={
+                            "image": images[j],
+                            "vae_latents": vae_output["model_input"][j:j+1]
+                        },
+                        text_embeddings={
+                            "prompt_embeds": text_embeddings["prompt_embeds"][j:j+1],
+                            "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"][j:j+1]
+                        },
+                        metadata={
+                            "original_size": self.target_size,
+                            "crop_top_left": (0, 0),
+                            "target_size": self.target_size
+                        },
+                        file_path=img_path
+                    )
+
+            except Exception as e:
+                logger.error(f"Error processing batch: {str(e)}")
+                continue
+                
+            # Clean up GPU memory
+            torch_gc()
+
+        logger.info("Latent precomputation complete")
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
         """Create aspect ratio buckets from config."""
