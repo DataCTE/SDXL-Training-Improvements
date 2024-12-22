@@ -79,7 +79,10 @@ class PreprocessingPipeline:
             device_ids=device_ids
         )
         
+        # Store initialization parameters
         self.config = config
+        self.cache_manager = cache_manager
+        self.is_train = is_train
         self.num_gpu_workers = num_gpu_workers
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
@@ -167,10 +170,8 @@ class PreprocessingPipeline:
         image_paths: List[str],
         captions: List[str],
         latent_preprocessor: Optional[LatentPreprocessor],
-        cache_manager: Optional[CacheManager],
         batch_size: int = 1,
-        proportion_empty_prompts: float = 0.0,
-        is_train: bool = True
+        proportion_empty_prompts: float = 0.0
     ) -> None:
         """Precompute and cache latents for a dataset.
         
@@ -183,8 +184,13 @@ class PreprocessingPipeline:
             proportion_empty_prompts: Proportion of prompts to leave empty
             is_train: Whether this is for training data
         """
-        if not latent_preprocessor or not cache_manager:
+        if not latent_preprocessor or not self.cache_manager:
             logger.info("Skipping latent precomputation - missing preprocessor or cache manager")
+            return
+            
+        # Use training mode setting from initialization
+        if not self.is_train:
+            logger.info("Skipping latent precomputation for validation data")
             return
             
         logger.info(f"Precomputing latents for {len(image_paths)} images")
@@ -198,14 +204,14 @@ class PreprocessingPipeline:
                 for img_path, caption in zip(batch_paths, batch_captions):
                     try:
                         # Skip if already cached
-                        if cache_manager.has_cached_item(img_path):
+                        if self.cache_manager.has_cached_item(img_path):
                             self.stats.cache_hits += 1
                             continue
                             
                         # Process image and cache results
                         processed = self._process_image(img_path)
                         if processed:
-                            cache_manager.save_preprocessed_data(
+                            self.cache_manager.save_preprocessed_data(
                                 latent_data=processed["latent"],
                                 text_embeddings=processed.get("text_embeddings"),
                                 metadata=processed.get("metadata", {}),
