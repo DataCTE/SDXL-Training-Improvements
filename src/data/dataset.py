@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import torch
 from PIL import Image
