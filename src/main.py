@@ -11,7 +11,7 @@ from torch.distributed import init_process_group
 
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from src.core.logging import setup_logging, WandbLogger
-from src.data.preprocessing import CacheManager
+from src.data.preprocessing import CacheManager, PreprocessingPipeline
 from src.data.utils.paths import convert_windows_path
 from src.core.memory.tensor import (
     tensors_to_device_,
