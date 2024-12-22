@@ -247,6 +247,14 @@ class StableDiffusionXLModel(BaseModel):
         self.text_encoder_2.eval()
         self.unet.eval()
 
+    def parameters(self):
+        """Get trainable parameters of the model.
+        
+        Returns:
+            Iterator over model parameters
+        """
+        return self.unet.parameters()
+
     def create_pipeline(self) -> DiffusionPipeline:
         """Create SDXL pipeline from model components."""
         return StableDiffusionXLPipeline(
