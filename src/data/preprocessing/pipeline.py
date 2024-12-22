@@ -6,7 +6,9 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
-from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING, cast
+from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING
+from src.data.config import Config
+from src.data.preprocessing.latents import LatentPreprocessor
 from dataclasses import dataclass
 
 import torch
@@ -60,7 +62,8 @@ class PreprocessingPipeline:
     
     def __init__(
         self,
-        config: "Config",
+        config: Config,
+        latent_preprocessor: Optional[LatentPreprocessor] = None,
         num_gpu_workers: int = 1,
         num_cpu_workers: int = 4,
         num_io_workers: int = 2,
