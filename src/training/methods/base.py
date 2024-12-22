@@ -63,13 +63,14 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
             prediction_type=config.training.prediction_type,
             rescale_betas_zero_snr=config.training.zero_terminal_snr
         )
-        # Move scheduler tensors to device if needed
-        if hasattr(self.noise_scheduler, 'betas'):
-            self.noise_scheduler.betas = self.noise_scheduler.betas.to(unet.device)
-        if hasattr(self.noise_scheduler, 'alphas'):
-            self.noise_scheduler.alphas = self.noise_scheduler.alphas.to(unet.device)
-        if hasattr(self.noise_scheduler, 'alphas_cumprod'):
-            self.noise_scheduler.alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(unet.device)
+        
+        # Move all scheduler tensors to device
+        for attr_name in dir(self.noise_scheduler):
+            if attr_name.startswith('__'):
+                continue
+            attr = getattr(self.noise_scheduler, attr_name)
+            if isinstance(attr, torch.Tensor):
+                setattr(self.noise_scheduler, attr_name, attr.to(unet.device))
 
     @abstractmethod
     def compute_loss(
