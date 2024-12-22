@@ -109,19 +109,10 @@ class AspectBucketDataset(Dataset):
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
         self.is_train = is_train
 
-        # Initialize preprocessing components first
+        # Initialize components in correct order
         self.latent_preprocessor = latent_preprocessor
         
-        # Always initialize preprocessing pipeline with config
-        self.preprocessing_pipeline = PreprocessingPipeline(
-            config=config,
-            latent_preprocessor=latent_preprocessor,
-            tag_weighter=self.tag_weighter,
-            cache_manager=self.cache_manager,
-            is_train=self.is_train
-        )
-        
-        # Initialize cache manager if latent preprocessor is available
+        # Initialize cache manager first if latent preprocessor is available
         if latent_preprocessor and latent_preprocessor.model:
             self.cache_manager = CacheManager(
                 cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
@@ -134,6 +125,15 @@ class AspectBucketDataset(Dataset):
             )
         else:
             self.cache_manager = None
+            
+        # Initialize preprocessing pipeline after cache manager
+        self.preprocessing_pipeline = PreprocessingPipeline(
+            config=config,
+            latent_preprocessor=latent_preprocessor,
+            tag_weighter=self.tag_weighter,
+            cache_manager=self.cache_manager,
+            is_train=self.is_train
+        )
         
         # Setup image configuration
         self._setup_image_config()
