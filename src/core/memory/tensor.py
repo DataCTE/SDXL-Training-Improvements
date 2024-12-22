@@ -80,17 +80,20 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
         }
         raise StreamError("Stream context creation failed", error_context) from e
 
+@contextmanager
 def tensor_operation_context(operation_name: str):
     """Context manager for tensor operations with enhanced memory tracking."""
+    if torch.cuda.is_available():
+        # Synchronize and record initial state
+        torch.cuda.synchronize()
+        start_memory = torch.cuda.memory_allocated()
+        start_reserved = torch.cuda.memory_reserved()
+    else:
+        start_memory = 0
+        start_reserved = 0
+        
     try:
-        if torch.cuda.is_available():
-            # Synchronize and record initial state
-            torch.cuda.synchronize()
-            start_memory = torch.cuda.memory_allocated()
-            start_reserved = torch.cuda.memory_reserved()
-        
         yield
-        
     except Exception as e:
         error_context = {
             'operation': operation_name,
