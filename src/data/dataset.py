@@ -188,10 +188,30 @@ class AspectBucketDataset(Dataset):
         ])
 
     def _validate_paths(self, paths: List[str]) -> List[str]:
-        """Validate paths using preprocessing pipeline."""
-        if not self.preprocessing_pipeline:
-            raise ValueError("Preprocessing pipeline not initialized")
-        return self.preprocessing_pipeline.validate_paths(paths)
+        """Validate image paths exist and are readable."""
+        valid_paths = []
+        for path in paths:
+            try:
+                path = Path(convert_windows_path(path, make_absolute=True))
+                if not path.exists():
+                    logger.warning(f"Image not found: {path}")
+                    continue
+                if not path.is_file():
+                    logger.warning(f"Not a file: {path}")
+                    continue
+                try:
+                    # Try opening the image to verify it's valid
+                    Image.open(path).verify()
+                    valid_paths.append(str(path))
+                except Exception as e:
+                    logger.warning(f"Invalid image file {path}: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Error validating path {path}: {str(e)}")
+                
+        if not valid_paths:
+            raise DatasetError("No valid image paths found")
+            
+        return valid_paths
 
     def _precompute_latents(
         self,
