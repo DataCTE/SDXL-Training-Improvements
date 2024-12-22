@@ -9,6 +9,7 @@ class ModelType(Enum):
     BASE = auto()
     INPAINTING = auto()
     REFINER = auto()
+    SDXL = auto()  # Added for SDXL model type
 
 class BaseModelEmbedding:
     """Base class for model embeddings."""
