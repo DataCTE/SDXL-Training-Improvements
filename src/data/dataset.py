@@ -102,18 +102,14 @@ class AspectBucketDataset(Dataset):
         if torch.cuda.is_available():
             self._setup_cuda_optimizations()
             
-        # Process and validate paths
-        self.image_paths = self._validate_paths(image_paths)
-        self.stats.total_images = len(self.image_paths)
-        
         # Store configuration
         self.config = config
         self.captions = captions
         self.latent_preprocessor = latent_preprocessor
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
         self.is_train = is_train
-        
-        # Initialize preprocessing components
+
+        # Initialize preprocessing components first
         self.latent_preprocessor = latent_preprocessor
         
         # Always initialize preprocessing pipeline
