@@ -7,7 +7,8 @@ from pathlib import Path
 from queue import Queue
 from src.data.utils.paths import convert_windows_path
 from threading import Event, Thread
-from typing import Dict, List, Optional, Union, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Union, Any, Tuple, TYPE_CHECKING
+from PIL import Image
 from src.data.config import Config
 from src.data.preprocessing.latents import LatentPreprocessor
 from dataclasses import dataclass
@@ -280,22 +281,19 @@ class PreprocessingPipeline:
         """Process tensor batch with optimized memory handling."""
         
         try:
-            # Validate tensor
-            if not validate_tensor(
-                tensor,
-                expected_dims=4,
-                enable_memory_tracking=self.enable_memory_tracking,
-                memory_stats=self.memory_tracker
-            ):
-                raise PreprocessingError("Invalid tensor")
+            # Validate tensor shape and properties
+            if tensor.dim() != 4:
+                raise PreprocessingError("Expected 4D tensor")
                 
-            # Process tensor
-            processed_tensor = process_tensor_batch(
-                tensor,
-                device_id,
-                use_pinned_memory=self.use_pinned_memory,
-                enable_memory_tracking=self.enable_memory_tracking,
-                memory_stats=self.memory_tracker
+            # Track memory if enabled
+            if self.enable_memory_tracking:
+                self._track_memory_usage("tensor_validation")
+                
+            # Process tensor with memory optimization
+            processed_tensor = tensor.to(
+                device=torch.device(device_id),
+                memory_format=torch.channels_last,
+                non_blocking=self.use_pinned_memory
             )
             
             # Generate outputs
