@@ -76,26 +76,16 @@ class LatentPreprocessor:
         proportion_empty_prompts: float = 0,
         batch_size: int = 64
     ) -> Dict[str, torch.Tensor]:
-        """Encode text prompts with optimized memory handling."""
+        """Encode text prompts using SDXL model interface."""
         try:
-            # Tokenize prompts
-            tokens_1 = []
-            tokens_2 = []
-            
-            for i in range(0, len(prompt_batch), batch_size):
-                batch = prompt_batch[i:i + batch_size]
-                
-                # Use high-level SDXL model interface
-                with torch.no_grad():
-                    text_encoder_output, pooled_output = self.model.encode_text(
-                        train_device=self.device,
-                        batch_size=len(batch),
-                        text=batch,
-                        text_encoder_1_layer_skip=0,
-                        text_encoder_2_layer_skip=0,
-                        text_encoder_1_output=None,
-                        text_encoder_2_output=None
-                    )
+            with torch.no_grad():
+                text_encoder_output, pooled_output = self.model.encode_text(
+                    train_device=self.device,
+                    batch_size=len(prompt_batch),
+                    text=prompt_batch,
+                    text_encoder_1_layer_skip=0,
+                    text_encoder_2_layer_skip=0
+                )
 
             return {
                 "prompt_embeds": text_encoder_output,
@@ -105,66 +95,26 @@ class LatentPreprocessor:
         except Exception as e:
             logger.error(f"Failed to encode prompts: {str(e)}")
             raise
-            
-        finally:
-            torch_gc()
 
     def encode_images(
         self,
-        pixel_values: torch.Tensor,
-        batch_size: int = 8
+        pixel_values: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
-        """Encode images with optimized memory handling."""
+        """Encode images using SDXL VAE."""
         try:
             if not isinstance(pixel_values, torch.Tensor):
                 pixel_values = torch.stack(list(pixel_values))
-                
-            # Pin memory for faster host-device transfer    
-            pin_tensor_(pixel_values)
-            
-            latents = []
-            for idx in range(0, len(pixel_values), batch_size):
-                batch = pixel_values[idx:idx + batch_size]
-                
-                # Create stream for pipelined processing
-                with create_stream_context() as (compute_stream,):
-                    with compute_stream:
-                        # Move to device if needed
-                        if not device_equals(batch.device, self.device):
-                            tensors_to_device_([batch], self.device)
-                            
-                        # Use optimized VAE encoder
-                        batch_latents = self.vae_encoder.encode(batch, return_dict=False)
-                        
-                        # Pin and record stream
-                        pin_tensor_(batch_latents)
-                        tensors_record_stream(compute_stream, batch_latents)
-                        
-                        # Store result
-                        latents.append(batch_latents.cpu())
-                        
-                        # Clean up
-                        unpin_tensor_(batch_latents)
-                        
-                        # Log memory stats
-                        if self.enable_memory_tracking:
-                            stats = self.vae_encoder.get_memory_stats()
-                            logger.debug(f"VAE encoder memory stats: {stats}")
-                        
-                        # Replace tensors to reuse memory
-                        if latents:
-                            replace_tensors_(latents[-1], batch_latents)
-                            
-            # Combine results            
-            latents = torch.cat(latents)
-            
+
+            # Move to device if needed
+            if not device_equals(pixel_values.device, self.device):
+                tensors_to_device_([pixel_values], self.device)
+
+            # Use VAE to encode
+            with torch.no_grad():
+                latents = self.model.vae.encode(pixel_values).latent_dist.sample()
+
             return {"model_input": latents}
-            
+
         except Exception as e:
             logger.error(f"Failed to encode images: {str(e)}")
             raise
-            
-        finally:
-            # Clean up
-            unpin_tensor_(pixel_values)
-            torch_gc()

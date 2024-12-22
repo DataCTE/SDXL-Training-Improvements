@@ -444,7 +444,7 @@ class AspectBucketDataset(Dataset):
         target_size: Tuple[int, int],
         device: Optional[torch.device] = None
     ) -> torch.Tensor:
-        """Process single image with memory optimization and enhanced error handling."""
+        """Process single image using preprocessing pipeline."""
         with self._track_memory("image_processing"):
             try:
                 # Validate input image with detailed checks
