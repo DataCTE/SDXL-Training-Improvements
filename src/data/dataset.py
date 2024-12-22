@@ -191,25 +191,10 @@ class AspectBucketDataset(Dataset):
         ])
 
     def _validate_paths(self, paths: List[str]) -> List[str]:
-        """Validate and convert image paths with error tracking."""
-        validated_paths = []
-        
-        for path in paths:
-            try:
-                converted = convert_windows_path(path, make_absolute=True)
-                if os.path.exists(str(converted)):
-                    validated_paths.append(str(converted))
-                else:
-                    self.stats.failed_images += 1
-                    logger.warning(f"Path does not exist: {converted}")
-            except Exception as e:
-                self.stats.failed_images += 1
-                logger.error(f"Path validation failed: {str(e)}")
-                
-        if not validated_paths:
-            raise DatasetError("No valid image paths found")
-            
-        return validated_paths
+        """Validate paths using preprocessing pipeline."""
+        if self.preprocessing_pipeline:
+            return self.preprocessing_pipeline.validate_paths(paths)
+        return [str(convert_windows_path(p, make_absolute=True)) for p in paths]
 
     def _precompute_latents(
         self,
@@ -218,156 +203,17 @@ class AspectBucketDataset(Dataset):
         latent_preprocessor: LatentPreprocessor,
         config: Config
     ) -> None:
-        """Precompute and cache latents for all images."""
-        logger.info("Checking for cached latents...")
-        
-        # Get list of uncached images
-        uncached_indices = []
-        uncached_paths = []
-        uncached_captions = []
-        
-        for idx, (img_path, caption) in enumerate(zip(image_paths, captions)):
-            if not self.cache_manager.get_cached_item(img_path):
-                uncached_indices.append(idx)
-                uncached_paths.append(img_path)
-                uncached_captions.append(caption)
-
-        if not uncached_paths:
-            logger.info("All latents are cached")
-            return
-
-        logger.info(f"Precomputing latents for {len(uncached_paths)} images...")
-        
-        # Process in batches
-        batch_size = config.training.batch_size
-        for i in tqdm(range(0, len(uncached_paths), batch_size), desc="Caching latents"):
-            batch_paths = uncached_paths[i:i + batch_size]
-            batch_captions = uncached_captions[i:i + batch_size]
-            
-            try:
-                # Load and process images with detailed error handling
-                images = []
-                for img_path in batch_paths:
-                    try:
-                        # Validate path
-                        if not Path(img_path).exists():
-                            logger.error(f"Image not found: {img_path}")
-                            continue
-                            
-                        # Check file size
-                        file_size = Path(img_path).stat().st_size
-                        if file_size == 0:
-                            logger.error(f"Empty image file: {img_path}")
-                            continue
-                            
-                        # Load image
-                        try:
-                            image = Image.open(img_path)
-                        except Exception as e:
-                            logger.error(f"Failed to open {img_path}: {str(e)}")
-                            continue
-                            
-                        # Validate format
-                        if image.format not in ('JPEG', 'PNG', 'WEBP'):
-                            logger.error(f"Unsupported format {image.format} for {img_path}")
-                            continue
-                            
-                        # Convert to RGB
-                        try:
-                            image = image.convert('RGB')
-                        except Exception as e:
-                            logger.error(f"RGB conversion failed for {img_path}: {str(e)}")
-                            continue
-                            
-                        # Process image
-                        try:
-                            processed = self._process_image(
-                                image,
-                                self.target_size,
-                                latent_preprocessor.vae.device
-                            )
-                            images.append(processed)
-                        except Exception as e:
-                            logger.error(
-                                f"Processing failed for {img_path}: {str(e)}\n"
-                                f"Image details:\n"
-                                f"- Size: {image.size}\n"
-                                f"- Mode: {image.mode}\n"
-                                f"- Format: {image.format}\n"
-                                f"- Is animated: {getattr(image, 'is_animated', False)}\n"
-                                f"- Frames: {getattr(image, 'n_frames', 1)}\n"
-                                f"- Memory usage: {image.size[0] * image.size[1] * len(image.getbands())} bytes\n"
-                                f"- Bands: {image.getbands()}\n"
-                                f"- Info: {image.info}\n"
-                                f"Error context:\n"
-                                f"- Error type: {type(e).__name__}\n"
-                                f"- Stack trace:\n{traceback.format_exc()}"
-                            )
-                            continue
-                            
-                    except Exception as e:
-                        logger.error(
-                            f"Unexpected error with {img_path}:\n"
-                            f"Error details:\n"
-                            f"- Message: {str(e)}\n"
-                            f"- Type: {type(e).__name__}\n"
-                            f"- File stats:\n"
-                            f"  - Size: {Path(img_path).stat().st_size} bytes\n"
-                            f"  - Modified: {time.ctime(Path(img_path).stat().st_mtime)}\n"
-                            f"  - Permissions: {oct(Path(img_path).stat().st_mode)[-3:]}\n"
-                            f"System context:\n"
-                            f"- Available GPU memory: {torch.cuda.get_device_properties(0).total_memory/1e9:.2f}GB\n"
-                            f"- Used GPU memory: {torch.cuda.memory_allocated()/1e9:.2f}GB\n"
-                            f"- Process memory: {psutil.Process().memory_info().rss/1e9:.2f}GB\n"
-                            f"Stack trace:\n{traceback.format_exc()}"
-                        )
-                        continue
-
-                if not images:
-                    continue
-
-                # Stack images and generate embeddings
-                pixel_values = torch.stack(images)
-                text_embeddings = latent_preprocessor.encode_prompt(
-                    batch_captions,
-                    proportion_empty_prompts=config.data.proportion_empty_prompts,
-                    is_train=self.is_train
-                )
-                
-                # Generate latents
-                with torch.no_grad():
-                    vae_output = latent_preprocessor.encode_images(pixel_values)
-                
-                # Cache results
-                for j, img_path in enumerate(batch_paths):
-                    if j >= len(images):
-                        continue
-                        
-                    self.cache_manager.save_preprocessed_data(
-                        latent_data={
-                            "image": images[j],
-                            "vae_latents": vae_output["model_input"][j:j+1]
-                        },
-                        text_embeddings={
-                            "prompt_embeds": text_embeddings["prompt_embeds"][j:j+1],
-                            "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"][j:j+1]
-                        },
-                        metadata={
-                            "original_size": self.target_size,
-                            "crop_top_left": (0, 0),
-                            "target_size": self.target_size
-                        },
-                        file_path=img_path
-                    )
-
-            except Exception as e:
-                logger.error(f"Error processing batch: {str(e)}")
-                continue
-                
-            # Clean up GPU memory
-            torch_gc()
-
-        logger.info("Latent precomputation complete")
+        """Delegate latent precomputation to preprocessing pipeline."""
+        if self.preprocessing_pipeline:
+            self.preprocessing_pipeline.precompute_latents(
+                image_paths=image_paths,
+                captions=captions,
+                latent_preprocessor=latent_preprocessor,
+                cache_manager=self.cache_manager,
+                batch_size=config.training.batch_size,
+                proportion_empty_prompts=config.data.proportion_empty_prompts,
+                is_train=self.is_train
+            )
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
         """Create aspect ratio buckets from config."""
@@ -495,38 +341,28 @@ class AspectBucketDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """Get dataset item using preprocessing components."""
+        """Get dataset item using preprocessing pipeline."""
         try:
-            # Check cache first
-            cached_item = self._get_cached_item(idx)
-            if cached_item:
-                return {
-                    **cached_item["latent"],
-                    **cached_item["text_embeddings"],
-                    **cached_item["metadata"],
-                    "text": self.captions[idx],
-                    "loss_weight": self.tag_weighter.get_caption_weight(self.captions[idx]) 
-                        if self.tag_weighter else 1.0
-                }
-
-            # Process through pipeline if not cached
-            with self._track_memory("item_processing"):
-                image_path = self._validate_image_path(self.image_paths[idx])
-                processed_data = self._process_image(image_path)
-                
-                # Cache results
-                if self.cache_manager:
-                    self._cache_processed_item(processed_data, image_path)
-                
-                return {
-                    **processed_data["latent"],
-                    **processed_data["text_embeddings"], 
-                    **processed_data["metadata"],
-                    "text": self.captions[idx],
-                    "loss_weight": self.tag_weighter.get_caption_weight(self.captions[idx])
-                        if self.tag_weighter else 1.0
-                }
-                
+            image_path = self.image_paths[idx]
+            caption = self.captions[idx]
+            
+            # Get processed data through pipeline
+            processed_data = self.preprocessing_pipeline.get_processed_item(
+                image_path=image_path,
+                caption=caption,
+                cache_manager=self.cache_manager,
+                latent_preprocessor=self.latent_preprocessor
+            )
+            
+            # Add caption and loss weight
+            processed_data.update({
+                "text": caption,
+                "loss_weight": self.tag_weighter.get_caption_weight(caption) 
+                    if self.tag_weighter else 1.0
+            })
+            
+            return processed_data
+            
         except Exception as e:
             logger.error(f"Error getting dataset item {idx}: {str(e)}")
             raise
