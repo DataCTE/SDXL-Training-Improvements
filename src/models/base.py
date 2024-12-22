@@ -46,10 +46,13 @@ class BaseModel(ABC):
 
     @abstractmethod
     def to(self, device: torch.device) -> None:
-        """Move model components to device.
+        """Move all model components to device with optimized transfer.
         
         Args:
             device: Target device
+            
+        Raises:
+            RuntimeError: If CUDA is not available when required
         """
         pass
 
@@ -109,6 +112,7 @@ class BaseModel(ABC):
         self,
         train_device: torch.device,
         batch_size: int,
+        rand: Optional[Random] = None,
         text: Optional[str] = None,
         tokens_1: Optional[Tensor] = None,
         tokens_2: Optional[Tensor] = None,
@@ -120,9 +124,24 @@ class BaseModel(ABC):
         text_encoder_2_dropout_probability: Optional[float] = None,
         pooled_text_encoder_2_output: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
-        """Encode text using model text encoders.
+        """Encode text using both SDXL text encoders with optimized processing.
         
+        Args:
+            train_device: Device to run encoding on
+            batch_size: Size of batch being processed
+            rand: Optional random number generator for dropout
+            text: Optional text to encode
+            tokens_1: Optional pre-tokenized input for encoder 1
+            tokens_2: Optional pre-tokenized input for encoder 2
+            text_encoder_1_layer_skip: Number of layers to skip in encoder 1
+            text_encoder_2_layer_skip: Number of layers to skip in encoder 2
+            text_encoder_1_output: Optional cached output from encoder 1
+            text_encoder_2_output: Optional cached output from encoder 2
+            text_encoder_1_dropout_probability: Optional dropout prob for encoder 1
+            text_encoder_2_dropout_probability: Optional dropout prob for encoder 2
+            pooled_text_encoder_2_output: Optional cached pooled output
+            
         Returns:
-            Tuple of (text_encoder_output, pooled_text_encoder_2_output)
+            Tuple of (combined_encoder_output, pooled_encoder_2_output)
         """
         pass
