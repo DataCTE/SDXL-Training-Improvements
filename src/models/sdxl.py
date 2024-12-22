@@ -21,7 +21,9 @@ from src.core.memory.tensor import (
     tensors_match_device,
     device_equals,
     torch_gc,
-    torch_sync
+    torch_sync,
+    create_stream_context,
+    tensors_record_stream
 )
 from src.models.encoders.vae import VAEEncoder
 from src.core.types import DataType
