@@ -82,21 +82,10 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
 
 @contextmanager
 def tensor_operation_context(operation_name: str):
-    """Context manager for tensor operations with enhanced memory tracking and cleanup."""
+    """Context manager for tensor operations with enhanced memory tracking."""
     if torch.cuda.is_available():
-        # Initial cleanup
-        gc.collect()
-        torch.cuda.empty_cache()
+        # Synchronize and record initial state
         torch.cuda.synchronize()
-        
-        # Record initial state
-        start_memory = torch.cuda.memory_allocated()
-        start_reserved = torch.cuda.memory_reserved()
-        start_peak = torch.cuda.max_memory_allocated()  # Renamed for clarity
-        torch.cuda.reset_peak_memory_stats()
-    else:
-        start_memory = start_reserved = start_peak = 0
-        
     try:
         yield
     except Exception as e:
@@ -105,50 +94,16 @@ def tensor_operation_context(operation_name: str):
             'cuda_available': torch.cuda.is_available(),
             'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
             'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
-            'peak_memory': torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0  # Added peak memory
+            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
         }
         logger.error(f"Tensor operation failed: {str(e)}", extra=error_context)
         raise TensorError(f"Failed during {operation_name}", error_context) from e
         
     finally:
         if torch.cuda.is_available():
-            # Synchronize and initial cleanup
+            # Clean up and check for leaks
             torch.cuda.synchronize()
-            gc.collect()
-            torch.cuda.empty_cache()
             
-            # Get final memory state
-            end_memory = torch.cuda.memory_allocated()
-            end_reserved = torch.cuda.memory_reserved()
-            end_peak = torch.cuda.max_memory_allocated()
-            
-            # Update stats
-            tensor_stats.memory_allocated = end_memory
-            tensor_stats.peak_memory = max(tensor_stats.peak_memory, end_peak)
-            
-            # Check for memory leaks and peak usage
-            if end_memory > start_memory or end_reserved > start_reserved:
-                leaked_allocated = (end_memory - start_memory) / 1024**2
-                leaked_reserved = (end_reserved - start_reserved) / 1024**2
-                peak_increase = (end_peak - start_peak) / 1024**2  # Track peak memory increase
-                
-                # Aggressive cleanup
-                for _ in range(2):
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    
-                    # Check if cleanup helped
-                    current_memory = torch.cuda.memory_allocated()
-                    current_reserved = torch.cuda.memory_reserved()
-                    if (current_memory <= start_memory and 
-                        current_reserved <= start_reserved):
-                        break
-                            
-            # Reset peak stats for next operation
-            torch.cuda.reset_peak_memory_stats()
-
 def get_tensors(
     data: Union[torch.Tensor, List, Tuple, Dict],
     include_parameter_indices: Optional[List[int]] = None
@@ -187,82 +142,30 @@ def get_tensors(
 
 def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.device, non_blocking: bool = True) -> None:
     """Move tensors to device with enhanced error handling and memory tracking."""
-    with tensor_operation_context("tensor_transfer") as ctx:
-        # Track initial memory state
-        initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+    with tensor_operation_context("tensor_transfer"):
         try:
             if isinstance(data, torch.Tensor):
-                # Profile memory for this transfer
-                transfer_size = data.element_size() * data.nelement()
-                logger.debug(f"Transferring tensor of size {transfer_size/1024**2:.2f}MB to {device}")
-                
                 if data.is_pinned() and device.type == "cuda":
-                    # Use event-based synchronization
-                    start_event = torch.cuda.Event(enable_timing=True)
-                    end_event = torch.cuda.Event(enable_timing=True)
-                    start_event.record()
-                    # Handle pinned memory transfers with explicit stream and events
-                    stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                    with create_stream_context(stream):
-                        new_data = data.to(device, non_blocking=True)
-                        if stream:
-                            new_data.record_stream(stream)
-                            end_event.record()
-                            end_event.synchronize()
-                            # Calculate transfer time
-                            transfer_time = start_event.elapsed_time(end_event)
-                            logger.debug(f"Transfer completed in {transfer_time:.2f}ms")
+                    # Handle pinned memory transfers
+                    data = data.to(device, non_blocking=non_blocking)
+                    if non_blocking:
+                        with create_stream_context(torch.cuda.current_stream()) as stream:
+                            data.record_stream(stream)
                 else:
-                    # Regular transfer with synchronization
-                    new_data = data.to(device, non_blocking=False)
-                    if device.type == "cuda":
-                        torch.cuda.current_stream().synchronize()
-                
-                # Explicitly clear old reference and cache
-                if hasattr(data, 'data_ptr'):
-                    data.untyped_storage().resize_(0)
-                del data
-                torch.cuda.empty_cache()
-                data = new_data
-                
-                # Check for memory leaks with detailed reporting
-                if torch.cuda.is_available():
-                    end_mem = torch.cuda.memory_allocated()
-                    if end_mem > initial_memory:
-                        leaked = (end_mem - initial_memory) / 1024**2
-                        logger.warning(
-                            f"Memory leak detected: {leaked:.2f}MB\n"
-                            f"Transfer size: {transfer_size/1024**2:.2f}MB\n"
-                            f"Current memory: {end_mem/1024**2:.2f}MB"
-                        )
-                        # Aggressive cleanup
-                        for _ in range(3):
-                            gc.collect()
-                            torch.cuda.empty_cache()
-                            torch.cuda.synchronize()
-                            current_mem = torch.cuda.memory_allocated()
-                            if current_mem <= initial_memory:
-                                logger.info("Memory leak resolved after cleanup")
-                                break
-                            logger.debug(f"Cleanup iteration, memory: {current_mem/1024**2:.2f}MB")
-                
+                    # Regular transfer
+                    data = data.to(device, non_blocking=False)
+                    
                 tensor_stats.device_transfers += 1
                 
             elif isinstance(data, dict):
-                for key, value in data.items():
+                for value in data.values():
                     if isinstance(value, (torch.Tensor, dict, list)):
-                        old_value = value
                         tensors_to_device_(value, device, non_blocking)
-                        if id(old_value) != id(value):
-                            del old_value
                         
             elif isinstance(data, list):
-                for i, item in enumerate(data):
+                for item in data:
                     if isinstance(item, (torch.Tensor, dict, list)):
-                        old_item = item
                         tensors_to_device_(item, device, non_blocking)
-                        if id(old_item) != id(item):
-                            del old_item
                         
         except Exception as e:
             error_context = {
