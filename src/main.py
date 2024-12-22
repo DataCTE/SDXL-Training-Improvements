@@ -2,7 +2,7 @@
 import argparse
 import logging
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Dict, List, Optional
 
