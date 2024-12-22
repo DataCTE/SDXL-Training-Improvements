@@ -67,7 +67,28 @@ class BaseModel(ABC):
 
     @abstractmethod 
     def text_encoder_to(self, device: torch.device) -> None:
-        """Move text encoders to device.
+        """Move text encoders to device with CUDA optimization.
+        
+        Args:
+            device: Target device
+            
+        Raises:
+            RuntimeError: If CUDA is not available when required
+        """
+        pass
+
+    @abstractmethod
+    def text_encoder_1_to(self, device: torch.device) -> None:
+        """Move first text encoder to device with optimized transfer.
+        
+        Args:
+            device: Target device
+        """
+        pass
+
+    @abstractmethod
+    def text_encoder_2_to(self, device: torch.device) -> None:
+        """Move second text encoder to device with optimized transfer.
         
         Args:
             device: Target device
