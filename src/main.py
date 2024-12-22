@@ -93,39 +93,72 @@ def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Modu
         # Initialize model dictionary
         models = {}
 
+        # Create CUDA stream with proper error handling
+        stream = None
+        if torch.cuda.is_available():
+            try:
+                stream = torch.cuda.Stream()
+                if not stream.query():
+                    logger.warning("Stream creation failed, falling back to default stream")
+                    stream = None
+            except Exception as e:
+                logger.warning(f"Stream creation failed: {str(e)}, using default stream")
+                stream = None
+
         # Load base SDXL model with memory optimization
-        with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-            models["model"] = StableDiffusionXLModel(
-                model_type=ModelType.SDXL
-            )
-
-            # Move model to device with optimized memory transfer
-            models["model"].to(device)
-
-            # Extract UNet for training
-            models["unet"] = models["model"].unet
-
-            # Configure UNet training mode
-            models["unet"].train()
-            if config.training.gradient_checkpointing:
-                models["unet"].enable_gradient_checkpointing()
-
-            # Create inference pipeline if needed
-            if config.training.validation_steps > 0:
-                models["pipeline"] = StableDiffusionXLPipeline(
-                    models["model"],
-                    scheduler_type=config.training.validation_scheduler
+        with torch.cuda.stream(stream) if stream else nullcontext():
+            try:
+                # Initialize model
+                models["model"] = StableDiffusionXLModel(
+                    model_type=ModelType.SDXL
                 )
 
-        return models
-       
+                # Move model to device with optimized memory transfer
+                if device.type == "cuda" and not torch.cuda.is_available():
+                    raise RuntimeError("CUDA device requested but not available")
+                    
+                models["model"].to(device)
 
+                # Extract UNet for training
+                models["unet"] = models["model"].unet
+
+                # Configure UNet training mode
+                models["unet"].train()
+                if config.training.gradient_checkpointing:
+                    models["unet"].enable_gradient_checkpointing()
+
+                # Create inference pipeline if needed
+                if config.training.validation_steps > 0:
+                    models["pipeline"] = StableDiffusionXLPipeline(
+                        models["model"],
+                        scheduler_type=config.training.validation_scheduler
+                    )
+
+                # Ensure stream synchronization
+                if stream:
+                    stream.synchronize()
+
+                return models
+
+            except Exception as e:
+                # Clean up on error
+                if stream:
+                    try:
+                        stream.synchronize()
+                    except:
+                        pass
+                torch.cuda.empty_cache()
+                raise
 
     except Exception as e:
-        raise TrainingSetupError(
-            "Failed to load models",
-            {"error": str(e), "device": str(device)}
-        )
+        error_context = {
+            "error": str(e),
+            "device": str(device),
+            "cuda_available": torch.cuda.is_available(),
+            "device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+        }
+        raise TrainingSetupError("Failed to load models", error_context)
 
 def load_training_data(config: Config) -> tuple[List[str], List[str]]:
     """Load and validate training data."""
