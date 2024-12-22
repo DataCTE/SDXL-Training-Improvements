@@ -151,6 +151,7 @@ class PreprocessingPipeline:
                 
         # Initialize pipeline with enhanced error handling
         try:
+            self.latent_preprocessor = latent_preprocessor
             if latent_preprocessor:
                 self.model = latent_preprocessor.model
                     
