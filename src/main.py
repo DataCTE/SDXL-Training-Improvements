@@ -88,22 +88,42 @@ def setup_device_and_logging(config: Config) -> torch.device:
     return device
 
 def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Module]:
-    """Load and configure models with error handling."""
+    """Load and configure models with enhanced error handling and memory tracking."""
     try:
-        # Initialize base model
-        sdxl_model = StableDiffusionXLModel(ModelType.BASE)
+        # Track initial memory state
+        initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
         
-        # Configure model loading
+        # Initialize base model with error context
+        try:
+            sdxl_model = StableDiffusionXLModel(ModelType.BASE)
+        except Exception as e:
+            raise TrainingSetupError(
+                "Failed to initialize SDXL model",
+                {"error": str(e), "model_type": "BASE"}
+            )
+        
+        # Configure model loading with device-specific settings
         torch_dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
         device_map = "balanced" if device.type == "cuda" else None
         
-        # Load pipeline
-        pipeline = StableDiffusionXLPipeline.from_pretrained(
-            config.model.pretrained_model_name,
-            torch_dtype=torch_dtype,
-            device_map=device_map,
-            low_cpu_mem_usage=True
-        )
+        # Load pipeline with memory tracking
+        try:
+            pipeline = StableDiffusionXLPipeline.from_pretrained(
+                config.model.pretrained_model_name,
+                torch_dtype=torch_dtype,
+                device_map=device_map,
+                low_cpu_mem_usage=True
+            )
+        except Exception as e:
+            raise TrainingSetupError(
+                "Failed to load pretrained pipeline",
+                {
+                    "error": str(e),
+                    "model_name": config.model.pretrained_model_name,
+                    "dtype": str(torch_dtype),
+                    "device_map": device_map
+                }
+            )
         
         # Transfer components
         sdxl_model.unet = pipeline.unet
@@ -293,19 +313,44 @@ def main():
             logger.info("Loading models...")
             models = load_models(config, device)
             
-            # Move models to device
+            # Move models to device with enhanced memory management
             for name, model in models.items():
                 if hasattr(model, 'state_dict') and not tensors_match_device(model.state_dict(), device):
                     logger.info(f"Moving {name} to device {device}")
                     try:
-                        stream = torch.cuda.current_stream() if torch.cuda.is_available() else None
+                        # Create dedicated stream for transfers
+                        stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                        
+                        # Track memory before transfer
+                        pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                        
                         with create_stream_context(stream):
-                            tensors_to_device_(model.state_dict(), device)
+                            try:
+                                tensors_to_device_(model.state_dict(), device)
+                            finally:
+                                # Ensure proper stream synchronization
+                                if stream:
+                                    stream.synchronize()
+                            
+                            # Clean up after transfer
                             torch_gc()
+                            
+                        # Track memory impact
+                        if torch.cuda.is_available():
+                            post_transfer_memory = torch.cuda.memory_allocated()
+                            memory_delta = post_transfer_memory - pre_transfer_memory
+                            logger.debug(f"Memory delta for {name}: {memory_delta / 1024**2:.1f}MB")
+                            
                     except Exception as e:
                         raise TrainingSetupError(
                             "Failed to move models to device",
-                            {"error": str(e), "model": name, "device": str(device)}
+                            {
+                                "error": str(e),
+                                "model": name,
+                                "device": str(device),
+                                "cuda_available": torch.cuda.is_available(),
+                                "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                            }
                         )
             
             # Setup memory optimizations
