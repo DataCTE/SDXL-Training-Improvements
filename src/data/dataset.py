@@ -113,16 +113,32 @@ class AspectBucketDataset(Dataset):
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
         self.is_train = is_train
         
-        # Initialize preprocessing pipeline if latent preprocessor is available
+        # Initialize preprocessing components
+        self.latent_preprocessor = latent_preprocessor
         if latent_preprocessor and latent_preprocessor.model:
             self.preprocessing_pipeline = PreprocessingPipeline(
                 config=config,
                 latent_preprocessor=latent_preprocessor,
                 enable_memory_tracking=enable_memory_tracking,
-                use_pinned_memory=True
+                use_pinned_memory=True,
+                num_gpu_workers=1,  # Single GPU worker for better memory management
+                num_cpu_workers=config.data.num_workers,
+                max_memory_usage=max_memory_usage
+            )
+            
+            # Initialize cache manager with same memory settings
+            self.cache_manager = CacheManager(
+                cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
+                num_proc=config.global_config.cache.num_proc,
+                chunk_size=config.global_config.cache.chunk_size,
+                compression=getattr(config.global_config.cache, 'compression', 'zstd'),
+                verify_hashes=config.global_config.cache.verify_hashes,
+                max_memory_usage=max_memory_usage,
+                enable_memory_tracking=enable_memory_tracking
             )
         else:
             self.preprocessing_pipeline = None
+            self.cache_manager = None
         
         # Setup image configuration
         self._setup_image_config()
@@ -571,11 +587,18 @@ class AspectBucketDataset(Dataset):
                 target_h, target_w = self.buckets[bucket_idx]
                 crop_top, crop_left = self._get_crop_coordinates(image, target_h, target_w)
                 
-                # Process image
+                # Process image through pipeline
                 image = crop(image, crop_top, crop_left, target_h, target_w)
-                pixel_values = self._process_image(image, (target_w, target_h))
                 
+                with self.preprocessing_pipeline:
+                    processed = self.preprocessing_pipeline.process_image(
+                        image,
+                        target_size=(target_w, target_h),
+                        device=self.latent_preprocessor.device if self.latent_preprocessor else None
+                    )
+                    
                 original_size = image.size
+                pixel_values = processed
                 
                 # Prepare item data
                 item_data = {
