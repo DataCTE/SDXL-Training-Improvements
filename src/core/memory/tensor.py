@@ -460,13 +460,19 @@ def device_equals(device1: torch.device, device2: torch.device) -> bool:
 @contextmanager
 def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[torch.cuda.StreamContext, nullcontext]:
     """Enhanced stream context with automatic cleanup."""
-    if not isinstance(stream, torch.cuda.Stream):
+    if stream is None:
         yield nullcontext()
         return
 
+    if not isinstance(stream, torch.cuda.Stream):
+        raise StreamError(
+            "Invalid stream type",
+            context={'type': type(stream).__name__}
+        )
+
     try:
         with torch.cuda.stream(stream):
-            yield torch.cuda.StreamContext(stream)
+            yield
     except Exception as e:
         error_context = {
             'stream_id': id(stream) if stream else None,
