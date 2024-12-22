@@ -16,7 +16,6 @@ class LatentPreprocessor:
         config: Config,
         sdxl_model: StableDiffusionXLModel,
         device: Union[str, torch.device] = "cuda",
-        use_cache: bool = True,
         max_retries: int = 3,
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
@@ -26,18 +25,17 @@ class LatentPreprocessor:
         self.model = sdxl_model
         self.model.to(device)
         self.device = torch.device(device)
-        self.use_cache = use_cache
         self.max_retries = max_retries
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
         self.device = device
         
         # Setup cache after initializing attributes
-        self._setup_cache(config, use_cache)
+        self._setup_cache(config)
         
-    def _setup_cache(self, config: Config, use_cache: bool = True) -> None:
+    def _setup_cache(self, config: Config) -> None:
         """Setup caching configuration."""
-        self.use_cache = use_cache
+        self.use_cache = config.global_config.cache.use_cache
         if not self.use_cache:
             return
             
