@@ -45,9 +45,10 @@ class LatentPreprocessor:
         self.model = StableDiffusionXLModel(model_type=ModelType.BASE)
         self.model.tokenizer_1 = tokenizer_one
         self.model.tokenizer_2 = tokenizer_two
-        self.model.text_encoder_1 = text_encoder_one
+        self.model.text_encoder_1 = text_encoder_one 
         self.model.text_encoder_2 = text_encoder_two
         self.model.vae = vae
+        self.model.to(device)
         self.device = torch.device(device)
         self.use_cache = use_cache
         self.max_retries = max_retries
@@ -102,7 +103,9 @@ class LatentPreprocessor:
                         batch_size=len(batch),
                         text=batch,
                         text_encoder_1_layer_skip=0,
-                        text_encoder_2_layer_skip=0
+                        text_encoder_2_layer_skip=0,
+                        text_encoder_1_output=None,
+                        text_encoder_2_output=None
                     )
 
             return {

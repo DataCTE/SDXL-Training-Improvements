@@ -144,11 +144,7 @@ class PreprocessingPipeline:
         # Initialize encoders and pipeline
         try:
             if latent_preprocessor:
-                self.vae_encoder = latent_preprocessor.vae_encoder
-                self.text_encoder_one = latent_preprocessor.text_encoder_one
-                self.text_encoder_two = latent_preprocessor.text_encoder_two
-                self.tokenizer_one = latent_preprocessor.tokenizer_one
-                self.tokenizer_two = latent_preprocessor.tokenizer_two
+                self.model = latent_preprocessor.model
             
             self.dali_pipeline = self._create_optimized_dali_pipeline()
         except Exception as e:
@@ -275,56 +271,31 @@ class PreprocessingPipeline:
             
             # Generate outputs
             with autocast():
-                # Generate VAE latents
-                latents = self.vae_encoder.encode(processed_tensor, return_dict=False)
+                # Generate latents using VAE
+                latents = self.model.vae.encode(processed_tensor).latent_dist.sample()
                 
                 # Generate text embeddings if text provided
-                if text and hasattr(self, 'text_encoder_one'):
-                    # Tokenize and encode text
-                    tokens_1 = self.tokenizer_one(
-                        text,
-                        padding="max_length",
-                        max_length=self.tokenizer_one.model_max_length,
-                        truncation=True,
-                        return_tensors="pt"
-                    ).input_ids.to(device_id)
-                    
-                    tokens_2 = self.tokenizer_two(
-                        text,
-                        padding="max_length",
-                        max_length=self.tokenizer_two.model_max_length,
-                        truncation=True,
-                        return_tensors="pt"
-                    ).input_ids.to(device_id)
-                    
-                    # Encode text
-                    text_embeddings_1, _ = encode_clip(
-                        text_encoder=self.text_encoder_one,
-                        tokens=tokens_1,
-                        default_layer=-2,
-                        layer_skip=0,
-                        use_attention_mask=False,
-                        add_layer_norm=False
-                    )
-                    
-                    text_embeddings_2, pooled_embeddings = encode_clip(
-                        text_encoder=self.text_encoder_two,
-                        tokens=tokens_2,
-                        default_layer=-2,
-                        layer_skip=0,
-                        add_pooled_output=True,
-                        use_attention_mask=False,
-                        add_layer_norm=False
+                if text and hasattr(self, 'model'):
+                    # Use high-level SDXL model interface for text encoding
+                    text_encoder_output, pooled_output = self.model.encode_text(
+                        train_device=torch.device(device_id),
+                        batch_size=processed_tensor.size(0),
+                        text=text,
+                        text_encoder_1_layer_skip=0,
+                        text_encoder_2_layer_skip=0,
+                        text_encoder_1_output=None,
+                        text_encoder_2_output=None
                     )
                     
                     processed = {
                         "latents": latents,
-                        "text_embeddings_1": text_embeddings_1,
-                        "text_embeddings_2": text_embeddings_2,
-                        "pooled_embeddings": pooled_embeddings
+                        "text_encoder_output": text_encoder_output,
+                        "pooled_output": pooled_output
                     }
                 else:
-                    processed = {"latents": latents}
+                    processed = {
+                        "latents": latents
+                    }
                     
             self.stats.successful += 1
             
