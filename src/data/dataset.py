@@ -3,6 +3,7 @@ import os
 import threading
 import traceback
 import time
+import psutil
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
