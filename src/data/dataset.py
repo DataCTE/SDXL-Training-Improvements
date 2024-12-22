@@ -225,10 +225,8 @@ class AspectBucketDataset(Dataset):
             image_paths=image_paths,
             captions=captions,
             latent_preprocessor=latent_preprocessor,
-            cache_manager=self.cache_manager,
             batch_size=config.training.batch_size,
-            proportion_empty_prompts=config.data.proportion_empty_prompts,
-            is_train=self.is_train
+            proportion_empty_prompts=config.data.proportion_empty_prompts
         )
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
