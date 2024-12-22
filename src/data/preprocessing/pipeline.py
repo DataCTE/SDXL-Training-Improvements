@@ -250,131 +250,101 @@ class PreprocessingPipeline:
         device_id: int,
         text: Optional[str] = None
     ) -> Dict[str, torch.Tensor]:
-        """Process tensor batch with optimized memory handling and enhanced error checking."""
+        """Process tensor batch with optimized memory handling."""
+        from .utils import process_tensor_batch, validate_tensor
+        
         try:
-            # Validate tensor before processing
-            self._validate_input_tensor(tensor)
-            
-            # Track memory usage
-            if self.enable_memory_tracking:
-                self._track_memory_usage('pre_process')
-            
-            # Get device streams
-            streams = self.streams[device_id]
-            compute_stream = streams['compute']
-            transfer_stream = streams['transfer']
-            
-            # Pin memory if configured
-            if self.use_pinned_memory:
-                pin_tensor_(tensor)
-            
-            try:
-                # Transfer to device with proper stream handling
-                with create_stream_context() as (transfer_ctx,):
-                    with torch.cuda.stream(transfer_stream):
-                        if not device_equals(tensor.device, torch.device(device_id)):
-                            tensors_to_device_(tensor, device_id, non_blocking=True)
-                        tensors_record_stream(transfer_stream, tensor)
-                        
-                # Process with compute stream
-                with create_stream_context() as (compute_ctx,):
-                    with torch.cuda.stream(compute_stream):
-                        # Wait for transfer
-                        compute_stream.wait_stream(transfer_stream)
-                        
-                        # Process with optimized encoders
-                        with autocast():
-                            # Generate VAE latents
-                            latents = self.vae_encoder.encode(tensor, return_dict=False)
-                            
-                            # Generate text embeddings if text provided
-                            if text and hasattr(self, 'text_encoder_one'):
-                                # Tokenize
-                                tokens_1 = self.tokenizer_one(
-                                    text,
-                                    padding="max_length",
-                                    max_length=self.tokenizer_one.model_max_length,
-                                    truncation=True,
-                                    return_tensors="pt"
-                                ).input_ids.to(device_id)
-                                
-                                tokens_2 = self.tokenizer_two(
-                                    text,
-                                    padding="max_length",
-                                    max_length=self.tokenizer_two.model_max_length,
-                                    truncation=True,
-                                    return_tensors="pt"
-                                ).input_ids.to(device_id)
-                                
-                                # Encode text
-                                text_embeddings_1, _ = encode_clip(
-                                    text_encoder=self.text_encoder_one,
-                                    tokens=tokens_1,
-                                    default_layer=-2,
-                                    layer_skip=0,
-                                    use_attention_mask=False,
-                                    add_layer_norm=False
-                                )
-                                
-                                text_embeddings_2, pooled_embeddings = encode_clip(
-                                    text_encoder=self.text_encoder_two,
-                                    tokens=tokens_2,
-                                    default_layer=-2,
-                                    layer_skip=0,
-                                    add_pooled_output=True,
-                                    use_attention_mask=False,
-                                    add_layer_norm=False
-                                )
-                                
-                                processed = {
-                                    "latents": latents,
-                                    "text_embeddings_1": text_embeddings_1,
-                                    "text_embeddings_2": text_embeddings_2,
-                                    "pooled_embeddings": pooled_embeddings
-                                }
-                            else:
-                                processed = {"latents": latents}
-                            
-                        # Ensure compute is done
-                        compute_stream.synchronize()
-                        
-                # Update statistics
-                self.stats.successful += 1
+            # Validate tensor
+            if not validate_tensor(
+                tensor,
+                expected_dims=4,
+                enable_memory_tracking=self.enable_memory_tracking,
+                memory_stats=self.memory_tracker
+            ):
+                raise PreprocessingError("Invalid tensor")
                 
-                return {
-                    "tensor": processed,
-                    "metadata": {
-                        "device_id": device_id,
-                        "shape": tuple(processed.shape),
-                        "dtype": str(processed.dtype),
-                        "memory_allocated": torch.cuda.memory_allocated(device_id)
-                    }
-                }
+            # Process tensor
+            processed_tensor = process_tensor_batch(
+                tensor,
+                device_id,
+                use_pinned_memory=self.use_pinned_memory,
+                enable_memory_tracking=self.enable_memory_tracking,
+                memory_stats=self.memory_tracker
+            )
+            
+            # Generate outputs
+            with autocast():
+                # Generate VAE latents
+                latents = self.vae_encoder.encode(processed_tensor, return_dict=False)
                 
-            except Exception as e:
-                self.stats.failed += 1
-                raise PreprocessingError(
-                    "Failed to process tensor batch",
-                    context={
-                        "device_id": device_id,
-                        "tensor_shape": tuple(tensor.shape),
-                        "error": str(e)
-                    }
-                )
-                
-            finally:
-                # Cleanup
-                if self.use_pinned_memory:
-                    unpin_tensor_(tensor)
-                if self.enable_memory_tracking:
-                    self._track_memory_usage('post_process')
+                # Generate text embeddings if text provided
+                if text and hasattr(self, 'text_encoder_one'):
+                    # Tokenize and encode text
+                    tokens_1 = self.tokenizer_one(
+                        text,
+                        padding="max_length",
+                        max_length=self.tokenizer_one.model_max_length,
+                        truncation=True,
+                        return_tensors="pt"
+                    ).input_ids.to(device_id)
                     
+                    tokens_2 = self.tokenizer_two(
+                        text,
+                        padding="max_length",
+                        max_length=self.tokenizer_two.model_max_length,
+                        truncation=True,
+                        return_tensors="pt"
+                    ).input_ids.to(device_id)
+                    
+                    # Encode text
+                    text_embeddings_1, _ = encode_clip(
+                        text_encoder=self.text_encoder_one,
+                        tokens=tokens_1,
+                        default_layer=-2,
+                        layer_skip=0,
+                        use_attention_mask=False,
+                        add_layer_norm=False
+                    )
+                    
+                    text_embeddings_2, pooled_embeddings = encode_clip(
+                        text_encoder=self.text_encoder_two,
+                        tokens=tokens_2,
+                        default_layer=-2,
+                        layer_skip=0,
+                        add_pooled_output=True,
+                        use_attention_mask=False,
+                        add_layer_norm=False
+                    )
+                    
+                    processed = {
+                        "latents": latents,
+                        "text_embeddings_1": text_embeddings_1,
+                        "text_embeddings_2": text_embeddings_2,
+                        "pooled_embeddings": pooled_embeddings
+                    }
+                else:
+                    processed = {"latents": latents}
+                    
+            self.stats.successful += 1
+            
+            return {
+                "tensor": processed,
+                "metadata": {
+                    "device_id": device_id,
+                    "shape": tuple(processed.shape),
+                    "dtype": str(processed.dtype),
+                    "memory_allocated": torch.cuda.memory_allocated(device_id)
+                }
+            }
+            
         except Exception as e:
+            self.stats.failed += 1
             raise PreprocessingError(
                 "Tensor batch processing failed",
                 context={
                     "error": str(e),
-                    "device_id": device_id
+                    "device_id": device_id,
+                    "tensor_shape": tuple(tensor.shape) if isinstance(tensor, torch.Tensor) else None
                 }
             )
 
