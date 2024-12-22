@@ -131,12 +131,13 @@ class CacheManager:
 
     def _init_memory_tracking(self):
         """Initialize memory tracking utilities."""
-        self.memory_stats = {
-            'peak_allocated': 0,
-            'total_allocated': 0,
-            'num_allocations': 0,
-            'oom_events': 0
-        }
+        if not hasattr(self, 'memory_stats'):
+            self.memory_stats = {
+                'peak_allocated': 0,
+                'total_allocated': 0,
+                'num_allocations': 0,
+                'oom_events': 0
+            }
 
     def _track_memory(self, context: str):
         """Track memory usage with proper cleanup."""
