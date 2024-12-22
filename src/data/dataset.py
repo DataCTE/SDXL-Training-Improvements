@@ -445,179 +445,22 @@ class AspectBucketDataset(Dataset):
         device: Optional[torch.device] = None
     ) -> torch.Tensor:
         """Process single image using preprocessing pipeline."""
-        with self._track_memory("image_processing"):
-            try:
-                # Validate input image with detailed checks
-                if not isinstance(image, Image.Image):
-                    raise ProcessingError(
-                        f"Expected PIL.Image, got {type(image)}",
-                        {"input_type": str(type(image))}
-                    )
-                
-                # Validate image properties
-                if not hasattr(image, 'size') or not hasattr(image, 'mode'):
-                    raise ProcessingError(
-                        "Invalid image object - missing required attributes",
-                        {"image_attrs": dir(image)}
-                    )
-                
-                # Validate image dimensions with bounds checking
-                w, h = image.size
-                if w <= 0 or h <= 0 or w > 32768 or h > 32768:  # Add reasonable upper bounds
-                    raise ProcessingError(
-                        f"Invalid image dimensions: {image.size}",
-                        {"width": w, "height": h}
-                    )
-                
-                # Validate image mode
-                if image.mode not in ('RGB', 'RGBA'):
-                    raise ProcessingError(
-                        f"Unsupported image mode: {image.mode}",
-                        {"supported_modes": ['RGB', 'RGBA']}
-                    )
-                
-                # Validate target size with detailed context
-                tw, th = target_size
-                if tw <= 0 or th <= 0 or tw > 32768 or th > 32768:
-                    raise ProcessingError(
-                        f"Invalid target size: {target_size}",
-                        {"target_width": tw, "target_height": th}
-                    )
-                
-                # Setup CUDA stream with better error handling
-                compute_stream = None
-                if device and device.type == 'cuda':
-                    try:
-                        compute_stream = torch.cuda.Stream()
-                        if not compute_stream.query():
-                            logger.warning("CUDA stream creation succeeded but stream is not ready")
-                    except RuntimeError as cuda_err:
-                        logger.warning(
-                            f"CUDA stream creation failed: {cuda_err}. Falling back to CPU processing.",
-                            extra={"cuda_device": torch.cuda.current_device()}
-                        )
-                
-                # Process image with enhanced error tracking
-                with create_stream_context(compute_stream) if compute_stream else nullcontext():
-                    try:
-                        # Convert to tensor with validation
-                        tensor = self.transforms(image)
-                        
-                        # Validate tensor properties
-                        if not isinstance(tensor, torch.Tensor):
-                            raise ProcessingError(
-                                f"Transform output is not a tensor: {type(tensor)}",
-                                {"output_type": str(type(tensor))}
-                            )
-                        
-                        if tensor.dim() != 3:  # CHW format
-                            raise ProcessingError(
-                                f"Expected 3D tensor (CHW), got shape {tensor.shape}",
-                                {"tensor_dims": tensor.dim(), "expected_dims": 3}
-                            )
-                        
-                        if tensor.shape[0] not in (1, 3, 4):  # Valid channel counts
-                            raise ProcessingError(
-                                f"Invalid number of channels: {tensor.shape[0]}",
-                                {"channels": tensor.shape[0], "valid_channels": [1, 3, 4]}
-                            )
-                        
-                        # Add batch dimension
-                        tensor = tensor.unsqueeze(0)
-                        
-                        # Move to device with enhanced error handling
-                        if device:
-                            try:
-                                # Check device memory before transfer
-                                if device.type == 'cuda':
-                                    free_mem = torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device)
-                                    required_mem = tensor.element_size() * tensor.nelement()
-                                    if required_mem > free_mem:
-                                        torch_gc()  # Try to free memory
-                                        free_mem = torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device)
-                                        if required_mem > free_mem:
-                                            raise ProcessingError(
-                                                "Insufficient GPU memory for tensor transfer",
-                                                {
-                                                    "required_memory": required_mem,
-                                                    "free_memory": free_mem,
-                                                    "tensor_size": tensor.shape
-                                                }
-                                            )
-                                
-                                # Transfer tensor
-                                tensor = tensor.to(
-                                    device=device,
-                                    memory_format=torch.channels_last,
-                                    non_blocking=True
-                                )
-                                
-                                # Pin memory and record stream
-                                if device.type == 'cuda':
-                                    pin_tensor_(tensor)
-                                    if compute_stream:
-                                        tensors_record_stream(compute_stream, tensor)
-                                        
-                            except RuntimeError as e:
-                                if "out of memory" in str(e):
-                                    torch_gc()
-                                    raise ProcessingError(
-                                        "GPU out of memory during tensor transfer",
-                                        {
-                                            "allocated_memory": torch.cuda.memory_allocated(device),
-                                            "max_memory": torch.cuda.get_device_properties(device).total_memory,
-                                            "tensor_size": tensor.shape
-                                        }
-                                    ) from e
-                                raise ProcessingError(
-                                    f"Device transfer failed: {str(e)}",
-                                    {"device": str(device), "tensor_size": tensor.shape}
-                                ) from e
-                        
-                        # Remove batch dimension and ensure float type
-                        tensor = tensor.squeeze(0)
-                        if not tensor.is_floating_point():
-                            tensor = tensor.float()
-                        
-                        # Validate final tensor
-                        if torch.isnan(tensor).any():
-                            raise ProcessingError(
-                                "Output tensor contains NaN values",
-                                {"tensor_stats": {
-                                    "min": tensor.min().item(),
-                                    "max": tensor.max().item(),
-                                    "mean": tensor.mean().item()
-                                }}
-                            )
-                        
-                        self.stats.processed_images += 1
-                        return tensor
-                        
-                    except Exception as transform_error:
-                        error_context = {
-                            'transform_error': str(transform_error),
-                            'tensor_shape': getattr(tensor, 'shape', None),
-                            'tensor_dtype': getattr(tensor, 'dtype', None),
-                            'transform_pipeline': str(self.transforms),
-                            'device': str(device)
-                        }
-                        raise ProcessingError("Transform pipeline failed", error_context) from transform_error
-                    
-            except ProcessingError:
-                raise  # Re-raise ProcessingError with context
-            except Exception as e:
-                error_context = {
-                    'image_size': getattr(image, 'size', None),
-                    'image_mode': getattr(image, 'mode', None),
-                    'image_format': getattr(image, 'format', None),
-                    'target_size': target_size,
-                    'device': str(device),
-                    'cuda_available': torch.cuda.is_available(),
-                    'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                }
-                raise ProcessingError("Image processing failed", error_context) from e
+        if not self.preprocessing_pipeline:
+            raise ProcessingError("Preprocessing pipeline not initialized")
+            
+        try:
+            # Use preprocessing pipeline for tensor processing
+            processed = self.preprocessing_pipeline._process_tensor_batch(
+                self.transforms(image).unsqueeze(0),
+                device.index if device and device.type == "cuda" else 0
+            )
+            return processed["tensor"].squeeze(0)
+            
+        except Exception as e:
+            raise ProcessingError(
+                "Image processing failed",
+                {"error": str(e), "image_size": image.size}
+            )
 
     def _process_cached_item(
         self,
