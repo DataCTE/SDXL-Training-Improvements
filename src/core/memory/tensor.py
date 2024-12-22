@@ -92,10 +92,10 @@ def tensor_operation_context(operation_name: str):
         # Record initial state
         start_memory = torch.cuda.memory_allocated()
         start_reserved = torch.cuda.memory_reserved()
-        peak_memory = torch.cuda.max_memory_allocated()
+        start_peak = torch.cuda.max_memory_allocated()  # Renamed for clarity
         torch.cuda.reset_peak_memory_stats()
     else:
-        start_memory = start_reserved = peak_memory = 0
+        start_memory = start_reserved = start_peak = 0
         
     try:
         yield
@@ -105,7 +105,8 @@ def tensor_operation_context(operation_name: str):
             'cuda_available': torch.cuda.is_available(),
             'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
             'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
+            'peak_memory': torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0  # Added peak memory
         }
         logger.error(f"Tensor operation failed: {str(e)}", extra=error_context)
         raise TensorError(f"Failed during {operation_name}", error_context) from e
@@ -120,27 +121,37 @@ def tensor_operation_context(operation_name: str):
             # Get final memory state
             end_memory = torch.cuda.memory_allocated()
             end_reserved = torch.cuda.memory_reserved()
-            operation_peak = torch.cuda.max_memory_allocated()
+            end_peak = torch.cuda.max_memory_allocated()
             
             # Update stats
             tensor_stats.memory_allocated = end_memory
-            tensor_stats.peak_memory = max(tensor_stats.peak_memory, operation_peak)
+            tensor_stats.peak_memory = max(tensor_stats.peak_memory, end_peak)
             
-            # Check for memory leaks
-            if end_memory > start_memory:
-                leaked = (end_memory - start_memory) / 1024**2
-                if leaked > 0.01:  # Only warn for leaks > 0.01MB
-                    logger.warning(f"Potential memory leak detected in {operation_name}: {leaked:.2f}MB")
+            # Check for memory leaks and peak usage
+            if end_memory > start_memory or end_reserved > start_reserved:
+                leaked_allocated = (end_memory - start_memory) / 1024**2
+                leaked_reserved = (end_reserved - start_reserved) / 1024**2
+                peak_increase = (end_peak - start_peak) / 1024**2  # Track peak memory increase
+                
+                if leaked_allocated > 0.01 or leaked_reserved > 0.01:
+                    logger.warning(
+                        f"Memory leak detected in {operation_name}:\n"
+                        f"  Allocated: {leaked_allocated:.2f}MB\n"
+                        f"  Reserved: {leaked_reserved:.2f}MB\n"
+                        f"  Peak Usage: {peak_increase:.2f}MB"  # Added peak memory reporting
+                    )
                     
                     # Aggressive cleanup
-                    for _ in range(2):  # Try cleanup multiple times
+                    for _ in range(2):
                         gc.collect()
                         torch.cuda.empty_cache()
                         torch.cuda.synchronize()
                         
                         # Check if cleanup helped
                         current_memory = torch.cuda.memory_allocated()
-                        if current_memory <= start_memory:
+                        current_reserved = torch.cuda.memory_reserved()
+                        if (current_memory <= start_memory and 
+                            current_reserved <= start_reserved):
                             break
                             
             # Reset peak stats for next operation
