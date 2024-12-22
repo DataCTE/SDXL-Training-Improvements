@@ -29,8 +29,10 @@ from src.core.memory.tensor import (
 )
 from .utils.paths import convert_windows_path
 from .config import Config
-from src.data.preprocessing import LatentPreprocessor, TagWeighter, create_tag_weighter
-from src.data.preprocessing import CacheManager
+from src.data.preprocessing import (
+    LatentPreprocessor, TagWeighter, create_tag_weighter,
+    CacheManager, PreprocessingPipeline
+)
 
 logger = setup_logging(__name__)
 
@@ -110,6 +112,16 @@ class AspectBucketDataset(Dataset):
         self.latent_preprocessor = latent_preprocessor
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
         self.is_train = is_train
+        
+        # Initialize preprocessing pipeline if latent preprocessor is available
+        self.preprocessing_pipeline = (
+            PreprocessingPipeline(
+                config=config,
+                latent_preprocessor=latent_preprocessor,
+                enable_memory_tracking=enable_memory_tracking,
+                use_pinned_memory=True
+            ) if latent_preprocessor else None
+        )
         
         # Setup image configuration
         self._setup_image_config()
@@ -895,6 +907,10 @@ class AspectBucketDataset(Dataset):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit with cleanup."""
         try:
+            # Clean up preprocessing pipeline
+            if self.preprocessing_pipeline:
+                self.preprocessing_pipeline.__exit__(exc_type, exc_val, exc_tb)
+                
             # Clean up CUDA resources
             if torch.cuda.is_available():
                 if hasattr(self, 'streams'):
