@@ -461,67 +461,87 @@ def device_equals(device1: torch.device, device2: torch.device) -> bool:
 
 @contextmanager
 def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[torch.cuda.StreamContext, nullcontext]:
-    """Enhanced stream context with automatic cleanup."""
-    if stream is None:
+    """Create a CUDA stream context with proper device management and synchronization.
+    
+    Args:
+        stream: Optional CUDA stream to use. If None, returns nullcontext.
+        
+    Returns:
+        Stream context manager or nullcontext
+        
+    Raises:
+        StreamError: If stream creation or management fails
+    """
+    if stream is None or not torch.cuda.is_available():
         yield nullcontext()
         return
 
+    # Validate stream type
     if not isinstance(stream, torch.cuda.Stream):
         error_context = {
             'type': type(stream).__name__,
-            'expected': 'torch.cuda.Stream',
-            'cuda_available': torch.cuda.is_available(),
-            'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
-            'device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+            'expected': 'torch.cuda.Stream'
         }
-        logger.error(f"Invalid stream type", extra=error_context)
         raise StreamError("Invalid stream type", error_context)
 
-    # Ensure we have a proper device index
-    device_index = None
-    if hasattr(stream, 'device'):
-        if isinstance(stream.device, str):
-            device_index = 0 if stream.device == "cuda" else None
-        elif hasattr(stream.device, 'index'):
-            device_index = stream.device.index
-        else:
-            device_index = 0 if stream.device == torch.device("cuda") else stream.device
-
-    if device_index is not None:
-        # Create new stream with proper device index
-        stream = torch.cuda.Stream(device=device_index)
-
+    # Get current device
+    current_device = torch.cuda.current_device()
+    
     try:
-        with torch.cuda.stream(stream):
-            yield
-    except Exception as e:
-        error_context = {
-            'error_type': type(e).__name__,
-            'error_message': str(e),
-            'stream_id': id(stream),
-            'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
-            'stream_query': stream.query() if hasattr(stream, 'query') else None,
-            'stream_device': stream.device if hasattr(stream, 'device') else None,
-            'stream_priority': stream.priority if hasattr(stream, 'priority') else None,
-            'cuda_error': str(e),
-            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
-            'device_properties': str(torch.cuda.get_device_properties(stream.device.index)) if (
-                torch.cuda.is_available() and
-                hasattr(stream, 'device') and
-                hasattr(stream.device, 'index')
-            ) else None
-        }
-        logger.error(f"Stream context creation failed: {str(e)}", extra=error_context)
-        raise StreamError(f"Stream context creation failed: {str(e)}", error_context) from e
-    finally:
-        try:
-            if stream is not None:
+        # Get target device from stream or default to current
+        if hasattr(stream, 'device'):
+            target_device = (
+                0 if isinstance(stream.device, str) and stream.device == "cuda"
+                else stream.device.index if hasattr(stream.device, 'index')
+                else current_device
+            )
+        else:
+            target_device = current_device
+
+        # Set device context if needed
+        device_context = (
+            torch.cuda.device(target_device) 
+            if target_device != current_device
+            else nullcontext()
+        )
+
+        # Create stream on target device
+        with device_context:
+            stream = torch.cuda.Stream(device=target_device)
+            
+            try:
+                # Ensure stream is ready
+                if not stream.query():
+                    raise StreamError(
+                        "Stream not ready",
+                        {'device': target_device, 'stream_id': id(stream)}
+                    )
+                
+                # Run in stream context
+                with torch.cuda.stream(stream):
+                    yield
+                    
+            except Exception as e:
+                error_context = {
+                    'error': str(e),
+                    'device': target_device,
+                    'stream_id': id(stream)
+                }
+                raise StreamError("Stream operation failed", error_context) from e
+                
+            finally:
+                # Always synchronize on exit
                 stream.synchronize()
-        except Exception as sync_error:
-            logger.error(f"Stream synchronization failed: {str(sync_error)}")
+                torch.cuda.current_stream().synchronize()
+                
+    except Exception as e:
+        if not isinstance(e, StreamError):
+            error_context = {
+                'error': str(e),
+                'current_device': current_device
+            }
+            raise StreamError("Stream context failed", error_context) from e
+        raise
 
 def torch_gc() -> None:
     """Enhanced garbage collection with memory tracking."""
