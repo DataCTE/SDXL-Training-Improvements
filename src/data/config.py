@@ -12,6 +12,20 @@ logger = setup_logging(__name__)
 class GlobalConfig:
     """Global configuration settings."""
     
+    @dataclass 
+    class TransformsConfig:
+        """Image transform configuration."""
+        normalize: bool = True
+        random_flip: bool = True
+        center_crop: bool = True
+        random_rotation: bool = False
+        rotation_degrees: float = 5.0
+        color_jitter: bool = False
+        jitter_brightness: float = 0.1
+        jitter_contrast: float = 0.1
+        jitter_saturation: float = 0.1
+        jitter_hue: float = 0.1
+
     @dataclass
     class ImageConfig:
         """Image processing configuration."""
@@ -32,6 +46,8 @@ class GlobalConfig:
         max_dim: int = 1536 * 1536  # Max total pixels
         bucket_step: int = 64  # Step size for bucketing dimensions
         max_aspect_ratio: float = 2.0  # Maximum allowed aspect ratio for images
+        min_aspect_ratio: float = 0.5  # Minimum allowed aspect ratio
+        resize_mode: str = "area"  # Resize interpolation: area, bilinear, bicubic
         
     @dataclass 
     class CacheConfig:
@@ -43,6 +59,11 @@ class GlobalConfig:
         chunk_size: int = 1000  # Number of items per cache chunk
         compression: str = "zstd"  # Compression algorithm (None, 'zstd', 'gzip')
         verify_hashes: bool = True  # Whether to verify content hashes
+        max_memory_usage: float = 0.8  # Maximum fraction of GPU memory to use
+        enable_memory_tracking: bool = True  # Whether to track memory usage
+        cache_text_embeddings: bool = True  # Whether to cache text embeddings
+        cache_latents: bool = True  # Whether to cache image latents
+        cache_validation: bool = True  # Whether to validate cached items
         
     image: ImageConfig = field(default_factory=ImageConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
@@ -176,6 +197,21 @@ class TagWeightingConfig:
     smoothing_factor: float = 0.1
 
 @dataclass
+class PreprocessingConfig:
+    """Preprocessing pipeline configuration."""
+    num_gpu_workers: int = 1
+    num_cpu_workers: int = 4
+    num_io_workers: int = 2
+    prefetch_factor: int = 2
+    use_pinned_memory: bool = True
+    stream_timeout: float = 10.0
+    enable_dali: bool = True
+    dali_device_id: int = 0
+    dali_prefetch_queue_depth: int = 2
+    dali_output_dtype: str = "float32"
+    enable_async_loading: bool = True
+
+@dataclass
 class Config:
     """Complete training configuration."""
     global_config: GlobalConfig = field(default_factory=GlobalConfig)
@@ -183,6 +219,8 @@ class Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     data: DataConfig = field(default_factory=DataConfig)
     tag_weighting: TagWeightingConfig = field(default_factory=TagWeightingConfig)
+    preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
+    transforms: TransformsConfig = field(default_factory=TransformsConfig)
     
     def __post_init__(self):
         """Validate configuration after initialization."""
