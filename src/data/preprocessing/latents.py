@@ -1,24 +1,13 @@
 import logging
-import traceback
-import time
-import psutil
 from pathlib import Path 
 from typing import Dict, List, Optional, Tuple, Union
 from ..utils.paths import convert_windows_path
 import torch
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.models import StableDiffusionXLModel, ModelType
+from src.models import StableDiffusionXLModel
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import (
-    tensors_to_device_,
-    create_stream_context, 
-    tensors_record_stream,
-    torch_gc,
-    pin_tensor_,
-    unpin_tensor_,
-    device_equals,
-    replace_tensors_
+    device_equals
 )
 
 logger = logging.getLogger(__name__)
@@ -73,8 +62,6 @@ class LatentPreprocessor:
     def encode_prompt(
         self,
         prompt_batch: List[str],
-        proportion_empty_prompts: float = 0,
-        batch_size: int = 64
     ) -> Dict[str, torch.Tensor]:
         """Encode text prompts using SDXL model interface."""
         try:

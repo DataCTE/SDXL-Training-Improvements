@@ -20,25 +20,10 @@ import nvidia.dali as dali
 import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline
 
-from src.core.types import DataType, ModelWeightDtypes
+from src.core.types import ModelWeightDtypes
 from src.core.memory.tensor import (
-    tensors_to_device_,
-    create_stream_context,
-    tensors_record_stream,
-    torch_gc,
-    pin_tensor_,
-    unpin_tensor_,
-    device_equals,
-    replace_tensors_
+    unpin_tensor_
 )
-from src.models.encoders.vae import VAEEncoder
-from src.models.encoders.clip import encode_clip
-from src.core.memory.optimizations import (
-    setup_memory_optimizations,
-    verify_memory_optimizations
-)
-from src.data.utils.paths import convert_windows_path
-
 from .exceptions import (
     PreprocessingError, DataLoadError, PipelineConfigError,
     GPUProcessingError, CacheError, DtypeError, DALIError,
