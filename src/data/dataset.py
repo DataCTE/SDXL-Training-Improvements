@@ -90,15 +90,6 @@ class AspectBucketDataset(Dataset):
         """
         super().__init__()
 
-        # Precompute latents if needed
-        if latent_preprocessor and config.global_config.cache.use_cache:
-            self._precompute_latents(
-                image_paths,
-                captions,
-                latent_preprocessor,
-                config
-            )
-        
         # Initialize statistics tracking
         self.stats = DatasetStats()
         self.enable_memory_tracking = enable_memory_tracking
@@ -124,6 +115,15 @@ class AspectBucketDataset(Dataset):
         
         # Initialize cache manager if enabled
         self.cache_manager = self._setup_cache_manager(config)
+
+        # Precompute latents if needed
+        if latent_preprocessor and config.global_config.cache.use_cache:
+            self._precompute_latents(
+                image_paths,
+                captions,
+                latent_preprocessor,
+                config
+            )
         
         # Create buckets and assign indices
         self.buckets = self._create_buckets()
