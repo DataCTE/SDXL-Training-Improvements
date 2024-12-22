@@ -205,41 +205,45 @@ class PreprocessingPipeline:
                         context={'error': str(e)}
                     )
 
-            # Optimized decode settings
-            try:
-                decoded = fn.decoders.image(
-                    images,
-                    device="mixed",
-                    output_type=dali.types.RGB,
-                    hybrid_huffman_threshold=100000,
-                    host_memory_padding=256,
-                    device_memory_padding=256
-                )
-            except Exception as e:
-                raise DALIError(
-                    "Failed to initialize DALI image decoder",
-                    context={'error': str(e)}
-                )
+                # Optimized decode settings
+                try:
+                    decoded = fn.decoders.image(
+                        images,
+                        device="mixed",
+                        output_type=dali.types.RGB,
+                        hybrid_huffman_threshold=100000,
+                        host_memory_padding=256,
+                        device_memory_padding=256
+                    )
+                except Exception as e:
+                    raise DALIError(
+                        "Failed to initialize DALI image decoder",
+                        context={'error': str(e)}
+                    )
 
-            # Enhanced normalization with better precision
-            try:
-                normalized = fn.crop_mirror_normalize(
-                    decoded,
-                    dtype=dali.types.FLOAT,
-                    mean=[0.5 * 255] * 3,
-                    std=[0.5 * 255] * 3,
-                    output_layout="CHW",
-                    pad_output=False
-                )
-            except Exception as e:
-                raise DALIError(
-                    "Failed to initialize DALI normalization",
-                    context={'error': str(e)}
-                )
+                # Enhanced normalization with better precision
+                try:
+                    normalized = fn.crop_mirror_normalize(
+                        decoded,
+                        dtype=dali.types.FLOAT,
+                        mean=[0.5 * 255] * 3,
+                        std=[0.5 * 255] * 3,
+                        output_layout="CHW",
+                        pad_output=False
+                    )
+                except Exception as e:
+                    raise DALIError(
+                        "Failed to initialize DALI normalization",
+                        context={'error': str(e)}
+                    )
 
-            pipe.set_outputs(normalized)
+                pipe.set_outputs(normalized)
 
-        return pipe
+            return pipe
+            
+        except Exception as e:
+            logger.error(f"Failed to create DALI pipeline: {str(e)}")
+            return None
 
     def _apply_optimized_transforms(
         self,
