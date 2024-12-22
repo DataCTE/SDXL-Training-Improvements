@@ -250,6 +250,17 @@ def setup_training(
             latent_preprocessor.clear_cache()
             
         
+        # Initialize cache manager
+        cache_manager = CacheManager(
+            cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
+            num_proc=config.global_config.cache.num_proc,
+            chunk_size=config.global_config.cache.chunk_size,
+            compression=getattr(config.global_config.cache, 'compression', 'zstd'),
+            verify_hashes=config.global_config.cache.verify_hashes,
+            max_memory_usage=0.8,
+            enable_memory_tracking=True
+        )
+
         # Create and preprocess dataset
         train_dataset = create_dataset(
             config=config,
@@ -257,7 +268,8 @@ def setup_training(
             captions=captions,
             latent_preprocessor=latent_preprocessor,
             enable_memory_tracking=True,
-            max_memory_usage=0.8  # Set memory limit
+            max_memory_usage=0.8,  # Set memory limit
+            cache_manager=cache_manager
         )
         
         # Create data loader
