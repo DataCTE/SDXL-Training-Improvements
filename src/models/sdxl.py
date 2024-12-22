@@ -3,14 +3,14 @@ from contextlib import nullcontext
 from random import Random
 from typing import Dict, List, Optional, Tuple, Union
 
+import gc
 import torch
 from torch import Tensor
 
 import logging
 from diffusers import (
     AutoencoderKL,
-    DDIMScheduler,
-    DiffusionPipeline,
+    DDPMScheduler,
     StableDiffusionXLPipeline as BasePipeline,
     UNet2DConditionModel
 )
@@ -20,8 +20,8 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
     device_equals,
-    torch_gc,
     torch_sync,
+    torch_gc,
     create_stream_context,
     tensors_record_stream
 )
@@ -73,7 +73,7 @@ class StableDiffusionXLPipeline(BasePipeline):
         tokenizer: CLIPTokenizer,
         tokenizer_2: CLIPTokenizer,
         unet: UNet2DConditionModel,
-        scheduler: DDIMScheduler,
+        scheduler: DDPMScheduler
     ):
         """Initialize custom SDXL pipeline.
         
@@ -103,48 +103,98 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         """Initialize SDXL model.
         
         Args:
-            model_type: Type of model (base, inpainting, etc)
+            model_type: Type of SDXL model (BASE, INPAINTING, or REFINER)
         """
         torch.nn.Module.__init__(self)
-        BaseModel.__init__(self, model_type=model_type)
+        BaseModel.__init__(self, model_type)
+        
+        # Initialize model components
+        self.vae = None
+        self.text_encoder_1 = None
+        self.text_encoder_2 = None
+        self.tokenizer_1 = None
+        self.tokenizer_2 = None
+        self.unet = None
+        self.noise_scheduler = None
+        
+        # Initialize LoRA components
+        self.text_encoder_1_lora = None
+        self.text_encoder_2_lora = None
+        self.unet_lora = None
+        
+        # Model configuration
+        self.model_type = model_type
 
-        # Training state
-        self.training = True
-
-        # Base model components
-        self.tokenizer_1: Optional[CLIPTokenizer] = None
-        self.tokenizer_2: Optional[CLIPTokenizer] = None
-        self.noise_scheduler: Optional[DDIMScheduler] = None
-        self.text_encoder_1: Optional[CLIPTextModel] = None
-        self.text_encoder_2: Optional[CLIPTextModelWithProjection] = None
-        self.vae: Optional[AutoencoderKL] = None
-        self.unet: Optional[UNet2DConditionModel] = None
-
-        # Autocast contexts
-        self.autocast_context = nullcontext()
-        self.vae_autocast_context = nullcontext()
-
-        # Data types
-        self.train_dtype = DataType.FLOAT_32
-        self.vae_train_dtype = DataType.FLOAT_32
-
-        # Embedding training data
-        self.embedding: Optional[StableDiffusionXLModelEmbedding] = None
-        self.embedding_state: Optional[Tuple[Tensor, Tensor]] = None
-        self.additional_embeddings: List[StableDiffusionXLModelEmbedding] = []
-        self.additional_embedding_states: List[Optional[Tuple[Tensor, Tensor]]] = []
-        self.embedding_wrapper_1: Optional[AdditionalEmbeddingWrapper] = None
-        self.embedding_wrapper_2: Optional[AdditionalEmbeddingWrapper] = None
-
-        # LoRA training data
-        self.text_encoder_1_lora: Optional[LoRAModuleWrapper] = None
-        self.text_encoder_2_lora: Optional[LoRAModuleWrapper] = None
-        self.unet_lora: Optional[LoRAModuleWrapper] = None
-        self.lora_state_dict: Optional[Dict] = None
-
-        # Configuration
-        self.sd_config: Optional[Dict] = None
-        self.sd_config_filename: Optional[str] = None
+    def from_pretrained(
+        self,
+        pretrained_model_name: str,
+        torch_dtype: torch.dtype = torch.float32,
+        use_safetensors: bool = True,
+        **kwargs
+    ) -> None:
+        """Load pretrained model components.
+        
+        Args:
+            pretrained_model_name: HuggingFace model name or path
+            torch_dtype: Data type for model weights
+            use_safetensors: Whether to use safetensors format
+            **kwargs: Additional arguments for from_pretrained
+        """
+        try:
+            logger.info(f"Loading model components from {pretrained_model_name}")
+            
+            # Load VAE
+            self.vae = AutoencoderKL.from_pretrained(
+                pretrained_model_name,
+                subfolder="vae",
+                torch_dtype=torch_dtype,
+                use_safetensors=use_safetensors
+            )
+            
+            # Load text encoders
+            self.text_encoder_1 = CLIPTextModel.from_pretrained(
+                pretrained_model_name,
+                subfolder="text_encoder",
+                torch_dtype=torch_dtype,
+                use_safetensors=use_safetensors
+            )
+            self.text_encoder_2 = CLIPTextModel.from_pretrained(
+                pretrained_model_name,
+                subfolder="text_encoder_2",
+                torch_dtype=torch_dtype,
+                use_safetensors=use_safetensors
+            )
+            
+            # Load UNet
+            self.unet = UNet2DConditionModel.from_pretrained(
+                pretrained_model_name,
+                subfolder="unet",
+                torch_dtype=torch_dtype,
+                use_safetensors=use_safetensors
+            )
+            
+            # Load tokenizers
+            self.tokenizer_1 = CLIPTokenizer.from_pretrained(
+                pretrained_model_name,
+                subfolder="tokenizer"
+            )
+            self.tokenizer_2 = CLIPTokenizer.from_pretrained(
+                pretrained_model_name,
+                subfolder="tokenizer_2"
+            )
+            
+            # Initialize scheduler
+            self.noise_scheduler = DDPMScheduler.from_pretrained(
+                pretrained_model_name,
+                subfolder="scheduler"
+            )
+            
+            logger.info("Successfully loaded all model components")
+            
+        except Exception as e:
+            error_msg = f"Failed to load pretrained model: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
     def vae_to(self, device: torch.device) -> None:
         """Move VAE to device with optimized CUDA transfer."""
@@ -153,7 +203,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         else:
             if device.type == "cuda":
                 if not torch.cuda.is_available():
-                    raise RuntimeError("CUDA is not available")
+                    raise RuntimeError("cuda is not available")
                 # Ensure CUDA device is properly initialized
                 torch.cuda.set_device(device)
             
@@ -167,7 +217,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         """Move both text encoders to device with explicit CUDA support."""
         if device.type == "cuda":
             if not torch.cuda.is_available():
-                raise RuntimeError("CUDA is not available")
+                raise RuntimeError("cuda is not available")
             # Initialize CUDA device
             torch.cuda.set_device(device)
         
@@ -208,7 +258,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         """Move UNet to device with explicit CUDA/GPU support."""
         if device.type == "cuda":
             if not torch.cuda.is_available():
-                raise RuntimeError("CUDA is not available")
+                raise RuntimeError("cuda is not available")
             # Initialize CUDA device
             torch.cuda.set_device(device)
         
@@ -223,28 +273,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 tensors_to_device_(self.unet_lora.state_dict(), device, non_blocking=True)
                 tensors_record_stream(torch.cuda.current_stream(), self.unet_lora.state_dict())
 
-    def to(self, device: torch.device) -> None:
-        """Move all model components to device with optimized transfer."""
-        logger.info(f"Moving model components to {device}")
-        
-        # Use CUDA streams for pipelined transfers
-        if device.type == "cuda":
-            with create_stream_context(torch.cuda.current_stream()):
-                self.vae_to(device)
-                torch_gc()  # Clean up after VAE transfer
-                
-                self.text_encoder_to(device) 
-                torch_gc()  # Clean up after encoder transfer
-                
-                self.unet_to(device)
-                torch_gc()  # Final cleanup
-                
-            torch_sync()  # Ensure all transfers are complete
-        else:
-            # Sequential transfer for CPU
-            self.vae_to(device)
-            self.text_encoder_to(device)
-            self.unet_to(device)
+    
 
     def eval(self) -> None:
         """Set all model components to evaluation mode."""
@@ -274,17 +303,6 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         """
         return self.unet.parameters()
 
-    def create_pipeline(self) -> DiffusionPipeline:
-        """Create SDXL pipeline from model components."""
-        return StableDiffusionXLPipeline(
-            vae=self.vae,
-            text_encoder=self.text_encoder_1,
-            text_encoder_2=self.text_encoder_2,
-            tokenizer=self.tokenizer_1,
-            tokenizer_2=self.tokenizer_2,
-            unet=self.unet,
-            scheduler=self.noise_scheduler,
-        )
 
     def add_embeddings_to_prompt(self, prompt: str) -> str:
         """Add trained embeddings to prompt text."""
@@ -374,3 +392,72 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         text_encoder_output = torch.cat([text_encoder_1_output, text_encoder_2_output], dim=-1)
 
         return text_encoder_output, pooled_text_encoder_2_output
+    
+    def to(self, device: torch.device) -> None:
+        """Move all model components to device with optimized transfer."""
+        logger.info(f"Moving model components to {device}")
+        
+        try:
+            # Use CUDA streams for pipelined transfers
+            if device.type == "cuda":
+                # Create a new stream for transfers
+                stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                
+                with create_stream_context(stream):
+                    self.vae_to(device)
+                    torch_gc()  # Clean up after VAE transfer
+                    
+                    self.text_encoder_to(device) 
+                    torch_gc()  # Clean up after encoder transfer
+                    
+                    self.unet_to(device)
+                    torch_gc()  # Final cleanup
+                    
+                # Ensure all transfers are complete
+                if torch.cuda.is_available():
+                    torch.cuda.current_stream().synchronize()
+                    
+            else:
+                # Sequential transfer for CPU
+                self.vae_to(device)
+                self.text_encoder_to(device)
+                self.unet_to(device)
+                
+        except Exception as e:
+            error_context = {
+                'device': str(device),
+                'cuda_available': torch.cuda.is_available(),
+                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+            }
+            logger.error("Failed to move model to device", extra=error_context)
+            raise
+    
+    def create_pipeline(self) -> 'StableDiffusionXLPipeline':
+        """Create SDXL pipeline from current model components.
+        
+        Returns:
+            StableDiffusionXLPipeline: Pipeline for inference
+        """
+        if not all([
+            self.vae,
+            self.text_encoder_1,
+            self.text_encoder_2,
+            self.tokenizer_1,
+            self.tokenizer_2,
+            self.unet,
+            self.noise_scheduler
+        ]):
+            raise ValueError("Cannot create pipeline: some model components are not initialized")
+            
+        # Use local import to avoid circular dependencies
+        
+        
+        return StableDiffusionXLPipeline(
+            vae=self.vae,
+            text_encoder_1=self.text_encoder_1,
+            text_encoder_2=self.text_encoder_2,
+            tokenizer_1=self.tokenizer_1,
+            tokenizer_2=self.tokenizer_2,
+            unet=self.unet,
+            scheduler=self.noise_scheduler
+        )

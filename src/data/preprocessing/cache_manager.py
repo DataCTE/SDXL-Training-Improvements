@@ -22,7 +22,7 @@ from src.core.memory.tensor import (
     unpin_tensor_,
     device_equals,
     replace_tensors_,
-    torch_gc
+    torch_sync
 )
 import logging
 from contextlib import nullcontext
@@ -246,7 +246,7 @@ class CacheManager:
                             if isinstance(tensor, torch.Tensor):
                                 unpin_tensor_(tensor)
                                 
-                    torch_gc()
+                    torch_sync()
                     
                 # Track final memory state
                 if self.enable_memory_tracking:
@@ -399,7 +399,7 @@ class CacheManager:
             self._save_cache_index()
             
             # Clear memory
-            torch_gc()
+            torch_sync()
             
             # Reset statistics
             self.stats = CacheStats()
@@ -420,7 +420,7 @@ class CacheManager:
         finally:
             self.image_pool.shutdown()
             self.io_pool.shutdown()
-            torch_gc()
+            torch_sync()
             
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
         """Get aspect ratio buckets from config."""

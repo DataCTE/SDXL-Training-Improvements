@@ -15,7 +15,7 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
-    torch_gc
+    torch_sync
 )
 from src.core.memory.optimizations import (
     setup_memory_optimizations,
@@ -24,11 +24,13 @@ from src.core.memory.optimizations import (
 from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.data.preprocessing import LatentPreprocessor
-from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
-from src.models.base import ModelType
 from src.training.trainer import create_trainer
 from src.data.utils.paths import convert_path_list
 from src.data.dataset import create_dataset
+from diffusers import AutoencoderKL, UNet2DConditionModel
+from transformers import CLIPTextModel, CLIPTokenizer
+from src.models import ModelType, StableDiffusionXLModel
+
 logger = logging.getLogger(__name__)
 
 class TrainingSetupError(Exception):
@@ -64,10 +66,11 @@ def setup_environment(args: argparse.Namespace):
         
     finally:
         cleanup_distributed()
-        torch_gc()
+        torch_sync()
 
 def setup_device_and_logging(config: Config) -> torch.device:
     """Initialize device and setup logging."""
+    # Specify CUDA device index explicitly
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Setup logging directories
@@ -82,83 +85,84 @@ def setup_device_and_logging(config: Config) -> torch.device:
     if is_main_process():
         logger.info(f"Using device: {device}")
         if device.type == "cuda":
-            logger.info(f"CUDA Device: {torch.cuda.get_device_name()}")
-            logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(device).total_memory / 1024**3:.1f} GB")
+            logger.info(f"cuda Device: {torch.cuda.get_device_name(device.index)}")
+            logger.info(f"cuda Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
             
     return device
 
-def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Module]:
-    """Load and configure models with enhanced error handling and memory tracking."""
+def setup_model(config: Config, device: torch.device) -> StableDiffusionXLModel:
+    """Initialize and load SDXL model.
+    
+    Args:
+        config: Training configuration
+        device: Target device
+        
+    Returns:
+        Initialized SDXL model
+    """
+    logger.info("Loading models...")
     try:
-        # Initialize model dictionary
-        models = {}
-
-        # Create CUDA stream with proper error handling
-        stream = None
-        if torch.cuda.is_available():
-            try:
-                stream = torch.cuda.Stream()
-                if not stream.query():
-                    logger.warning("Stream creation failed, falling back to default stream")
-                    stream = None
-            except Exception as e:
-                logger.warning(f"Stream creation failed: {str(e)}, using default stream")
-                stream = None
-
-        # Load base SDXL model with memory optimization
-        with torch.cuda.stream(stream) if stream else nullcontext():
-            try:
-                # Initialize model
-                models["model"] = StableDiffusionXLModel(
-                    model_type=ModelType.SDXL
-                )
-
-                # Move model to device with optimized memory transfer
-                if device.type == "cuda" and not torch.cuda.is_available():
-                    raise RuntimeError("CUDA device requested but not available")
-                    
-                models["model"].to(device)
-
-                # Extract UNet for training
-                models["unet"] = models["model"].unet
-
-                # Configure UNet training mode
-                models["unet"].train()
-                if config.training.gradient_checkpointing:
-                    models["unet"].enable_gradient_checkpointing()
-
-                # Create inference pipeline if needed
-                if config.training.validation_steps > 0:
-                    models["pipeline"] = StableDiffusionXLPipeline(
-                        models["model"],
-                        scheduler_type=config.training.validation_scheduler
-                    )
-
-                # Ensure stream synchronization
-                if stream:
-                    stream.synchronize()
-
-                return models
-
-            except Exception as e:
-                # Clean up on error
-                if stream:
-                    try:
-                        stream.synchronize()
-                    except:
-                        pass
-                torch.cuda.empty_cache()
-                raise
-
+        # Create base model
+        model = StableDiffusionXLModel(ModelType.BASE)
+        
+        # Load VAE
+        logger.info("Loading VAE...")
+        model.vae = AutoencoderKL.from_pretrained(
+            config.model.pretrained_model_name,
+            subfolder="vae",
+            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+            use_safetensors=True
+        )
+        
+        # Load text encoders
+        logger.info("Loading text encoders...")
+        model.text_encoder_1 = CLIPTextModel.from_pretrained(
+            config.model.pretrained_model_name,
+            subfolder="text_encoder",
+            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+            use_safetensors=True
+        )
+        model.text_encoder_2 = CLIPTextModel.from_pretrained(
+            config.model.pretrained_model_name,
+            subfolder="text_encoder_2",
+            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+            use_safetensors=True
+        )
+        
+        # Load UNet
+        logger.info("Loading UNet...")
+        model.unet = UNet2DConditionModel.from_pretrained(
+            config.model.pretrained_model_name,
+            subfolder="unet",
+            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+            use_safetensors=True
+        )
+        
+        # Load tokenizers
+        logger.info("Loading tokenizers...")
+        model.tokenizer_1 = CLIPTokenizer.from_pretrained(
+            config.model.pretrained_model_name,
+            subfolder="tokenizer"
+        )
+        model.tokenizer_2 = CLIPTokenizer.from_pretrained(
+            config.model.pretrained_model_name,
+            subfolder="tokenizer_2"
+        )
+        
+        # Move model to device
+        logger.info(f"Moving model to {device}")
+        model.to(device)
+        
+        return model
+        
     except Exception as e:
         error_context = {
-            "error": str(e),
-            "device": str(device),
-            "cuda_available": torch.cuda.is_available(),
-            "device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+            'model_name': config.model.pretrained_model_name,
+            'device': str(device),
+            'error': str(e)
         }
-        raise TrainingSetupError("Failed to load models", error_context)
+        logger.error("Failed to initialize model", extra=error_context)
+        raise RuntimeError("Failed to load models") from e
 
 def load_training_data(config: Config) -> tuple[List[str], List[str]]:
     """Load and validate training data."""
@@ -310,6 +314,8 @@ def main():
         
         # Load configuration
         config = Config.from_yaml(args.config)
+
+
         
         with setup_environment(args):
             # Setup device and logging
@@ -317,7 +323,7 @@ def main():
             
             # Load models
             logger.info("Loading models...")
-            models = load_models(config, device)
+            models = setup_model(config, device)
             
             # Move models to device with enhanced memory management
             for name, model in models.items():
@@ -339,7 +345,7 @@ def main():
                                     stream.synchronize()
                             
                             # Clean up after transfer
-                            torch_gc()
+                            torch_sync()
                             
                         # Track memory impact
                         if torch.cuda.is_available():

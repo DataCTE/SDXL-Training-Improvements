@@ -13,7 +13,7 @@ from src.core.memory import (
     tensors_to_device_,
     tensors_match_device,
     create_stream_context,
-    torch_gc,
+    torch_sync,
     setup_memory_optimizations,
     verify_memory_optimizations,
     LayerOffloader,
@@ -144,7 +144,7 @@ class SDXLTrainer:
                 if hasattr(self.optimizer, 'state'):
                     tensors_to_device_(self.optimizer.state, device)
             torch.cuda.current_stream().synchronize()
-        torch_gc()
+        torch_sync()
             
         # Training state and monitoring
         self.global_step = 0
@@ -344,12 +344,7 @@ class SDXLTrainer:
         batch_size: Optional[int] = None,
         micro_batch_size: Optional[int] = None
     ) -> None:
-        """Initialize memory optimizations and management.
-        
-        Args:
-            batch_size: Training batch size
-            micro_batch_size: Micro batch size for gradient accumulation
-        """
+        """Initialize memory optimizations and management."""
         # Setup core memory optimizations
         self.memory_optimized = setup_memory_optimizations(
             model=self.model,
@@ -383,7 +378,7 @@ class SDXLTrainer:
                 
         # Set up tensor cleanup hooks
         def cleanup_hook():
-            torch_gc()
+            torch_sync()  # Changed from torch_sync()
         self.cleanup_hook = cleanup_hook
 
     def save_checkpoint(self) -> None:

@@ -7,9 +7,10 @@ from dataclasses import dataclass
 
 from .tensor import (
     tensors_to_device_,
-    device_equals,
+    torch_sync,  
     create_stream_context,
-    torch_gc
+    tensors_record_stream,
+    device_equals
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class LayerOffloader:
                 torch.cuda.current_stream().wait_stream(self.streams["transfer"])
             else:
                 tensors_to_device_(module.state_dict(), target_device)
-            torch_gc()
+            torch_sync()  # Changed from torch_sync()
                 
     def prefetch_layer(self, name: str):
         """Prefetch a layer back to main device."""
@@ -97,4 +98,4 @@ class LayerOffloader:
                 torch.cuda.current_stream().wait_stream(self.streams["transfer"])
             else:
                 tensors_to_device_(module.state_dict(), self.device)
-            torch_gc()
+            torch_sync()

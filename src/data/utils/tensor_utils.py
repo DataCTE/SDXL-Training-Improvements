@@ -8,7 +8,7 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     create_stream_context,
     tensors_record_stream,
-    torch_gc,
+    torch_sync,
     pin_tensor_,
     unpin_tensor_,
     device_equals
@@ -73,7 +73,7 @@ def process_tensor_batch(
             # Cleanup
             if use_pinned_memory:
                 unpin_tensor_(tensor)
-            torch_gc()
+            torch_sync()
 
     except Exception as e:
         logger.error(f"Failed to process tensor batch: {str(e)}")

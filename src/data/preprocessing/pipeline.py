@@ -181,7 +181,7 @@ class PreprocessingPipeline:
     def _create_optimized_dali_pipeline(self) -> Optional[Pipeline]:
         """Create DALI pipeline with optimized settings and proper error handling."""
         if not torch.cuda.is_available():
-            logger.warning("CUDA not available, skipping DALI pipeline creation")
+            logger.warning("cuda not available, skipping DALI pipeline creation")
             return None
 
         try:

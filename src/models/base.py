@@ -1,7 +1,7 @@
 """Base classes and interfaces for SDXL model implementations."""
 from enum import Enum, auto
 from random import Random
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any, Iterator
 from abc import ABC, abstractmethod
 import torch
 from torch import Tensor
@@ -11,7 +11,7 @@ class ModelType(Enum):
     BASE = auto()
     INPAINTING = auto()
     REFINER = auto()
-    SDXL = auto()  # Added for SDXL model type
+    SDXL = auto()
 
 class BaseModelEmbedding:
     """Base class for model embeddings."""
@@ -29,9 +29,17 @@ class BaseModelEmbedding:
             token_count: Number of tokens
             placeholder: Placeholder token
         """
+        if not uuid:
+            raise ValueError("UUID must not be empty")
+        if token_count <= 0:
+            raise ValueError("Token count must be positive")
+
         self.uuid = uuid
         self.token_count = token_count
-        self.placeholder = placeholder
+        self.placeholder = placeholder if placeholder else f"<embedding-{uuid}>"
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(uuid='{self.uuid}', token_count={self.token_count})"
 
 class BaseModel(ABC):
     """Abstract base class defining the interface for SDXL models."""
@@ -42,8 +50,21 @@ class BaseModel(ABC):
         Args:
             model_type: Type of model
         """
+        if not isinstance(model_type, ModelType):
+            raise ValueError(f"Invalid model type: {model_type}")
+            
         self.model_type = model_type
         self.training = True
+        self._device = torch.device("cuda")
+
+    @property
+    def device(self) -> torch.device:
+        """Get current device of model.
+        
+        Returns:
+            Current torch device
+        """
+        return self._device
 
     @abstractmethod
     def to(self, device: torch.device) -> None:
@@ -55,7 +76,7 @@ class BaseModel(ABC):
         Raises:
             RuntimeError: If CUDA is not available when required
         """
-        pass
+        self._device = device
 
     @abstractmethod
     def vae_to(self, device: torch.device) -> None:
@@ -63,10 +84,13 @@ class BaseModel(ABC):
         
         Args:
             device: Target device
+            
+        Raises:
+            RuntimeError: If CUDA is not available when required
         """
         pass
 
-    @abstractmethod 
+    @abstractmethod
     def text_encoder_to(self, device: torch.device) -> None:
         """Move text encoders to device with CUDA optimization.
         
@@ -84,6 +108,9 @@ class BaseModel(ABC):
         
         Args:
             device: Target device
+            
+        Raises:
+            RuntimeError: If CUDA is not available when required
         """
         pass
 
@@ -93,6 +120,9 @@ class BaseModel(ABC):
         
         Args:
             device: Target device
+            
+        Raises:
+            RuntimeError: If CUDA is not available when required
         """
         pass
 
@@ -102,18 +132,21 @@ class BaseModel(ABC):
         
         Args:
             device: Target device
+            
+        Raises:
+            RuntimeError: If CUDA is not available when required
         """
         pass
 
     @abstractmethod
     def eval(self) -> None:
         """Set model components to evaluation mode."""
-        pass
+        self.training = False
 
     @abstractmethod
     def train(self) -> None:
         """Set model components to training mode."""
-        pass
+        self.training = True
 
     @abstractmethod
     def zero_grad(self) -> None:
@@ -121,7 +154,7 @@ class BaseModel(ABC):
         pass
 
     @abstractmethod
-    def parameters(self):
+    def parameters(self) -> Iterator[Tensor]:
         """Get trainable parameters.
         
         Returns:
@@ -136,7 +169,7 @@ class BaseModel(ABC):
         batch_size: int,
         rand: Optional[Random] = None,
         text: Optional[str] = None,
-        tokens_1: Optional[Tensor] = None,
+        tokens_1: Optional[Tensor] = None, 
         tokens_2: Optional[Tensor] = None,
         text_encoder_1_layer_skip: int = 0,
         text_encoder_2_layer_skip: int = 0,
@@ -153,7 +186,7 @@ class BaseModel(ABC):
             batch_size: Size of batch being processed
             rand: Optional random number generator for dropout
             text: Optional text to encode
-            tokens_1: Optional pre-tokenized input for encoder 1
+            tokens_1: Optional pre-tokenized input for encoder 1 
             tokens_2: Optional pre-tokenized input for encoder 2
             text_encoder_1_layer_skip: Number of layers to skip in encoder 1
             text_encoder_2_layer_skip: Number of layers to skip in encoder 2
@@ -165,5 +198,8 @@ class BaseModel(ABC):
             
         Returns:
             Tuple of (combined_encoder_output, pooled_encoder_2_output)
+            
+        Raises:
+            ValueError: If both text and tokens are None
         """
         pass

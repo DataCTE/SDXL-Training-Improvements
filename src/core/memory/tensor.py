@@ -4,9 +4,6 @@ from collections.abc import Callable
 from contextlib import nullcontext, contextmanager
 from typing import Union, List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
-import threading
-import weakref
-from packaging.version import Version
 import packaging
 import torch
 import accelerate
@@ -48,40 +45,96 @@ class MemoryError(TensorError):
     pass
 
 class StreamError(Exception):
+    """Exception for stream-related errors."""
     def __init__(self, message: str, context: dict = None):
-        self.context = context
         super().__init__(message)
-
+        self.context = context or {}
 
 @contextmanager
+def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[torch.cuda.StreamContext, nullcontext]:
+    """Create a CUDA stream context with proper device management and synchronization."""
+    if stream is None or not torch.cuda.is_available():
+        with nullcontext() as nc:
+            yield nc
+        return
+
+    try:
+        # Ensure previous operations are complete
+        if torch.cuda.is_available():
+            torch.cuda.current_stream().synchronize()
+        
+        # Create stream context
+        with torch.cuda.stream(stream) as stream_ctx:
+            try:
+                yield stream_ctx
+            finally:
+                if stream is not None:
+                    stream.synchronize()
+                    
+    except Exception as e:
+        error_context = {
+            'stream_id': id(stream) if stream else None,
+            'device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
+            'cuda_available': torch.cuda.is_available(),
+            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+        }
+        raise StreamError("Stream context creation failed", error_context) from e
+
 def tensor_operation_context(operation_name: str):
-    """Context manager for tensor operations with error handling."""
+    """Context manager for tensor operations with enhanced memory tracking."""
     try:
         if torch.cuda.is_available():
+            # Synchronize and record initial state
             torch.cuda.synchronize()
             start_memory = torch.cuda.memory_allocated()
+            start_reserved = torch.cuda.memory_reserved()
+        
         yield
+        
     except Exception as e:
         error_context = {
             'operation': operation_name,
             'cuda_available': torch.cuda.is_available(),
             'current_device': str(torch.cuda.current_device()) if torch.cuda.is_available() else 'cpu',
-            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+            'memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
         }
         logger.error(f"Tensor operation failed: {str(e)}", extra=error_context)
         raise TensorError(f"Failed during {operation_name}", error_context) from e
+        
     finally:
         if torch.cuda.is_available():
+            # Clean up and check for leaks
             torch.cuda.synchronize()
             end_memory = torch.cuda.memory_allocated()
+            end_reserved = torch.cuda.memory_reserved()
+            
+            # Update stats
             tensor_stats.memory_allocated = end_memory
             tensor_stats.peak_memory = max(tensor_stats.peak_memory, end_memory)
+            
+            # Check for potential memory leaks
+            if end_memory > start_memory:
+                leaked = (end_memory - start_memory) / 1024**2
+                if leaked > 0.01:  # Only warn for leaks > 0.01MB
+                    logger.warning(f"Potential memory leak detected in {operation_name}: {leaked:.2f}MB")
 
 def get_tensors(
     data: Union[torch.Tensor, List, Tuple, Dict],
     include_parameter_indices: Optional[List[int]] = None
 ) -> List[torch.Tensor]:
-    """Enhanced tensor extraction with validation."""
+    """Enhanced tensor extraction with validation.
+    
+    Args:
+        data: Input data structure containing tensors
+        include_parameter_indices: Optional indices to include
+        
+    Returns:
+        List of extracted tensors
+        
+    Raises:
+        TensorError: If tensor extraction fails
+    """
     with tensor_operation_context("get_tensors"):
         tensors = []
         try:
@@ -96,76 +149,48 @@ def get_tensors(
                 if include_parameter_indices is None:
                     for elem in data.values():
                         tensors.extend(get_tensors(elem))
+            elif data is not None:  # Handle unexpected types
+                raise TypeError(f"Unsupported data type: {type(data)}")
             return tensors
         except Exception as e:
             raise TensorError("Failed to extract tensors", {'data_type': type(data)}) from e
 
-def tensors_to_device_(
-    data: Union[torch.Tensor, List, Tuple, Dict],
-    device: torch.device,
-    include_parameter_indices: Optional[List[int]] = None,
-    non_blocking: bool = False,
-    allocator: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
-) -> bool:
-    """Enhanced tensor device transfer with memory optimization."""
-    with tensor_operation_context("tensors_to_device"):
+def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.device, non_blocking: bool = True) -> None:
+    """Move tensors to device with enhanced error handling and memory tracking."""
+    with tensor_operation_context("tensor_transfer"):
         try:
-            tensor_transferred = False
-            
             if isinstance(data, torch.Tensor):
-                if include_parameter_indices is None:
-                    # Create CUDA stream for transfer if applicable
-                    stream = torch.cuda.Stream() if torch.cuda.is_available() and device.type == 'cuda' else None
+                if data.is_pinned() and device.type == "cuda":
+                    # Handle pinned memory transfers
+                    data = data.to(device, non_blocking=non_blocking)
+                    if non_blocking:
+                        with create_stream_context(torch.cuda.current_stream()) as stream:
+                            data.record_stream(stream)
+                else:
+                    # Regular transfer
+                    data = data.to(device, non_blocking=False)
                     
-                    try:
-                        with torch.cuda.stream(stream) if stream else nullcontext():
-                            if allocator is None:
-                                # Optimize memory format for device
-                                if device.type == 'cuda':
-                                    data.data = data.data.to(
-                                        device=device,
-                                        memory_format=torch.channels_last,
-                                        non_blocking=non_blocking
-                                    )
-                                else:
-                                    data.data = data.data.to(device=device, non_blocking=non_blocking)
-                            else:
-                                tensor = allocator(data)
-                                tensor.copy_(data, non_blocking=non_blocking)
-                                data.data = tensor
-                                
-                            if stream:
-                                tensors_record_stream(stream, data)
-                                
-                    finally:
-                        if stream:
-                            stream.synchronize()
-                            
-                    tensor_transferred = True
-                    tensor_stats.device_transfers += 1
-                    
-            elif isinstance(data, (list, tuple)):
-                for i, elem in enumerate(data):
-                    if include_parameter_indices is None or i in include_parameter_indices:
-                        tensor_transferred |= tensors_to_device_(
-                            elem, device, non_blocking=non_blocking, allocator=allocator
-                        )
+                tensor_stats.device_transfers += 1
+                
             elif isinstance(data, dict):
-                if include_parameter_indices is None:
-                    for elem in data.values():
-                        tensor_transferred |= tensors_to_device_(
-                            elem, device, non_blocking=non_blocking, allocator=allocator
-                        )
+                for value in data.values():
+                    if isinstance(value, (torch.Tensor, dict, list)):
+                        tensors_to_device_(value, device, non_blocking)
                         
-            return tensor_transferred
-            
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, (torch.Tensor, dict, list)):
+                        tensors_to_device_(item, device, non_blocking)
+                        
         except Exception as e:
             error_context = {
-                'device': str(device),
                 'data_type': type(data),
-                'non_blocking': non_blocking
+                'device': str(device),
+                'non_blocking': non_blocking,
+                'cuda_available': torch.cuda.is_available(),
+                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
             }
-            raise DeviceError("Failed to transfer tensors to device", error_context) from e
+            raise StreamError("Failed to transfer tensors to device", error_context) from e
 
 def state_dict_has_prefix(state_dict: Optional[Dict[str, Any]], prefix: str) -> bool:
     """Check if state dict has keys with prefix.
@@ -201,7 +226,6 @@ def state_dict_has_prefix(state_dict: Optional[Dict[str, Any]], prefix: str) -> 
             if not isinstance(e, ValueError):
                 raise TensorError("Failed to check state dict prefix", error_context) from e
             raise
-
 
 def optimizer_to_device_(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
     """Move optimizer state to device with optimized memory handling.
@@ -365,12 +389,23 @@ def unpin_module(module: torch.nn.Module) -> torch.nn.Module:
             }
             raise TensorError("Failed to unpin module", error_context) from e
 
+def torch_gc() -> None:
+    """Enhanced garbage collection with memory tracking."""
+    with tensor_operation_context("garbage_collection"):
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                gc.collect()
+        except Exception as e:
+            error_context = {
+                'cuda_available': torch.cuda.is_available(),
+                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+            }
+            raise MemoryError("Garbage collection failed", error_context) from e
+
 def torch_sync() -> None:
-    """Synchronize all PyTorch devices.
-    
-    Raises:
-        TensorError: If synchronization fails
-    """
+    """Synchronize all PyTorch devices."""
     with tensor_operation_context("sync"):
         try:
             if torch.cuda.is_available():
@@ -393,13 +428,15 @@ def tensors_record_stream(
     with tensor_operation_context("record_stream"):
         try:
             if isinstance(data, torch.Tensor):
-                if data.device.type == "cuda":
+                if data.device.type == "cuda":  # Fix the device check
                     data.record_stream(stream)
                     tensor_stats.stream_records += 1
+                    
             elif isinstance(data, (list, tuple)):
                 for i, elem in enumerate(data):
                     if include_parameter_indices is None or i in include_parameter_indices:
                         tensors_record_stream(stream, elem)
+                        
             elif isinstance(data, dict):
                 for elem in data.values():
                     tensors_record_stream(stream, elem)
@@ -407,7 +444,8 @@ def tensors_record_stream(
         except Exception as e:
             error_context = {
                 'stream_id': id(stream),
-                'data_type': type(data)
+                'data_type': type(data),
+                'cuda_available': torch.cuda.is_available()
             }
             raise StreamError("Failed to record stream", error_context) from e
 
@@ -427,20 +465,30 @@ def pin_tensor_(x: torch.Tensor) -> None:
             raise MemoryError("Failed to pin tensor memory", error_context) from e
 
 def unpin_tensor_(x: torch.Tensor) -> None:
-    """Enhanced tensor unpinning with validation."""
+    """Enhanced tensor unpinning with validation and memory management."""
     with tensor_operation_context("unpin_tensor"):
         try:
             if torch.cuda.is_available() and x.is_pinned():
+                # Ensure tensor is not in use
+                torch.cuda.current_stream().synchronize()
+                
                 cudart = torch.cuda.cudart()
                 err = cudart.cudaHostUnregister(x.data_ptr())
+                
                 if err.value != 0:
-                    raise MemoryError(f"CUDA error {err.value}")
+                    error_msg = f"cuda error {err.value}"
+                    if hasattr(cudart, 'cudaGetErrorString'):
+                        error_msg = cudart.cudaGetErrorString(err).decode()
+                    raise MemoryError(error_msg)
+                    
                 tensor_stats.unpin_operations += 1
+                
         except Exception as e:
             error_context = {
                 'tensor_shape': tuple(x.shape),
                 'tensor_dtype': str(x.dtype),
-                'device': str(x.device)
+                'device': str(x.device),
+                'is_pinned': x.is_pinned() if hasattr(x, 'is_pinned') else None
             }
             raise MemoryError("Failed to unpin tensor memory", error_context) from e
 
@@ -459,122 +507,7 @@ def device_equals(device1: torch.device, device2: torch.device) -> bool:
         }
         raise DeviceError("Failed to compare devices", error_context) from e
 
-@contextmanager
-def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[torch.cuda.StreamContext, nullcontext]:
-    """Create a CUDA stream context with proper device management and synchronization.
-    
-    Args:
-        stream: Optional CUDA stream to use. If None, returns nullcontext.
-        
-    Returns:
-        Stream context manager or nullcontext
-        
-    Raises:
-        StreamError: If stream creation or management fails
-    """
-    if stream is None or not torch.cuda.is_available():
-        yield nullcontext()
-        return
 
-    # Validate stream type
-    if not isinstance(stream, torch.cuda.Stream):
-        error_context = {
-            'type': type(stream).__name__,
-            'expected': 'torch.cuda.Stream'
-        }
-        raise StreamError("Invalid stream type", error_context)
-
-    # Get current device
-    current_device = torch.cuda.current_device()
-    
-    try:
-        # Get target device from stream or default to current
-        if hasattr(stream, 'device'):
-            target_device = (
-                0 if isinstance(stream.device, str) and stream.device == "cuda"
-                else stream.device.index if hasattr(stream.device, 'index')
-                else current_device
-            )
-        else:
-            target_device = current_device
-
-        # Set device context if needed
-        device_context = (
-            torch.cuda.device(target_device) 
-            if target_device != current_device
-            else nullcontext()
-        )
-
-        # Create stream on target device
-        with device_context:
-            stream = torch.cuda.Stream(device=target_device)
-            
-            try:
-                # Ensure stream is ready
-                if not stream.query():
-                    raise StreamError(
-                        "Stream not ready",
-                        {'device': target_device, 'stream_id': id(stream)}
-                    )
-                
-                # Run in stream context
-                with torch.cuda.stream(stream):
-                    yield
-                    
-            except Exception as e:
-                error_context = {
-                    'error': str(e),
-                    'device': target_device,
-                    'stream_id': id(stream)
-                }
-                raise StreamError("Stream operation failed", error_context) from e
-                
-            finally:
-                # Always synchronize on exit
-                stream.synchronize()
-                torch.cuda.current_stream().synchronize()
-                
-    except Exception as e:
-        if not isinstance(e, StreamError):
-            error_context = {
-                'error': str(e),
-                'current_device': current_device
-            }
-            raise StreamError("Stream context failed", error_context) from e
-        raise
-
-def torch_gc() -> None:
-    """Enhanced garbage collection with memory tracking."""
-    with tensor_operation_context("garbage_collection"):
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                
-            prev_mem = (torch.cuda.memory_allocated() 
-                       if torch.cuda.is_available() else 0)
-                
-            gc.collect()
-            
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                
-            if torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-                torch.mps.synchronize()
-                
-            curr_mem = (torch.cuda.memory_allocated() 
-                       if torch.cuda.is_available() else 0)
-                       
-            if curr_mem < prev_mem:
-                logger.debug(f"Memory freed: {(prev_mem - curr_mem) / 1024**2:.2f}MB")
-                
-        except Exception as e:
-            error_context = {
-                'cuda_available': torch.cuda.is_available(),
-                'mps_available': torch.backends.mps.is_available()
-            }
-            raise MemoryError("Garbage collection failed", error_context) from e
 
 def get_tensor_stats() -> TensorStats:
     """Get current tensor operation statistics."""

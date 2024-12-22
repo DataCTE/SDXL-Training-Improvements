@@ -3,7 +3,7 @@ from .memory.layer_offload import LayerOffloader, LayerOffloadConfig
 from .memory.tensor import (
     default_device,
     tensors_to_device_,
-    torch_gc,
+    torch_sync,
     create_stream_context,
     tensors_record_stream,
     tensors_match_device,
@@ -26,7 +26,7 @@ __all__ = [
     "LayerOffloadConfig",
     "default_device",
     "tensors_to_device_",
-    "torch_gc",
+    "torch_sync",
     "create_stream_context",
     "tensors_record_stream", 
     "tensors_match_device",

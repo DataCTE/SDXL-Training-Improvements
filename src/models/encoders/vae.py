@@ -10,7 +10,7 @@ from src.core.memory.tensor import (
     tensors_to_device_,
     create_stream_context,
     tensors_record_stream,
-    torch_gc,
+    torch_sync,
     pin_tensor_,
     unpin_tensor_,
     device_equals
@@ -127,7 +127,7 @@ class VAEEncoder:
                 finally:
                     # Cleanup
                     unpin_tensor_(pixel_values)
-                    torch_gc()
+                    torch_sync()
                     
         except Exception as e:
             logger.error(f"VAE encoding failed: {str(e)}")

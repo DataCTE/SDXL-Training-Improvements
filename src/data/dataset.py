@@ -23,7 +23,7 @@ from src.core.memory.tensor import (
     tensors_record_stream,
     pin_tensor_,
     unpin_tensor_,
-    torch_gc,
+    torch_sync,
     tensors_to_device_,
     device_equals
 )
@@ -466,7 +466,7 @@ class AspectBucketDataset(Dataset):
                     'error': str(e)
                 })
             finally:
-                torch_gc()
+                torch_sync()
 
     def _create_collate_buffers(self, batch_size: int, example_shape: torch.Size) -> Dict[str, torch.Tensor]:
         """Create reusable buffers for collate function."""
@@ -514,7 +514,7 @@ class AspectBucketDataset(Dataset):
                 if hasattr(self, 'streams'):
                     for stream in self.streams.values():
                         stream.synchronize()
-                torch_gc()
+                torch_sync()
                 
             # Log final statistics
             if self.enable_memory_tracking:

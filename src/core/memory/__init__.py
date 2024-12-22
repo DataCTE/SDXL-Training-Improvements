@@ -10,8 +10,7 @@ from .tensor import (
     tensors_record_stream,
     unpin_module,
     device_equals,
-    torch_gc,
-    torch_sync,
+    torch_sync,  # Changed from torch_sync
     create_stream_context,
     pin_tensor_,
     unpin_tensor_
@@ -31,7 +30,6 @@ __all__ = [
     "tensors_record_stream",
     "unpin_module",
     "device_equals",
-    "torch_gc",
     "torch_sync",
     "create_stream_context",
     "pin_tensor_",
@@ -40,3 +38,4 @@ __all__ = [
     "verify_memory_optimizations"
     "ThroughputMonitor"
 ]
+

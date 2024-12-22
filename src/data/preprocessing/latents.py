@@ -15,7 +15,7 @@ class LatentPreprocessor:
         self,
         config: Config,
         sdxl_model: StableDiffusionXLModel,
-        device: Union[str, torch.device] = "cuda",
+        device: Union[str, torch.device] = "cuda",  # This is correct
         max_retries: int = 3,
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
@@ -32,8 +32,9 @@ class LatentPreprocessor:
         """
         self.config = config
         self.model = sdxl_model
-        self.model.to(device)
-        self.device = torch.device(device)
+        # Convert string to device object if needed
+        self.device = torch.device(device) if isinstance(device, str) else device
+        self.model.to(self.device)
         self.max_retries = max_retries
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
