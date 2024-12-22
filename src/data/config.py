@@ -70,6 +70,8 @@ class ModelConfig:
     decoder_vqgan_dtype: Optional[str] = None  # Decoder VQGAN dtype
     lora_dtype: Optional[str] = None  # LoRA dtype
     embedding_dtype: Optional[str] = None  # Embedding dtype
+    scheduler_type: str = "ddpm"  # Scheduler type: ddpm, ddim, dpm-solver, euler
+    scheduler_config: Optional[Dict] = None  # Additional scheduler configuration
     
 @dataclass
 class MemoryConfig:
@@ -79,6 +81,9 @@ class MemoryConfig:
     enable_activation_offloading: bool = False
     enable_async_offloading: bool = True
     temp_device: str = "cpu"
+    max_memory_usage: float = 0.8  # Maximum fraction of GPU memory to use
+    enable_memory_tracking: bool = True  # Whether to track memory usage
+    offload_models: List[str] = field(default_factory=lambda: ["vae"])  # Models to offload
 
 @dataclass
 class FlowMatchingConfig:
@@ -128,6 +133,9 @@ class TrainingConfig:
     validation_samples: int = 4
     validation_guidance_scale: float = 7.5
     validation_inference_steps: int = 30
+    validation_batch_size: int = 4
+    validation_scheduler: str = "ddim"  # Scheduler to use for validation
+    validation_cfg_scale: float = 7.5  # Classifier-free guidance scale
     max_train_steps: Optional[int] = None
     lr_scheduler: str = "linear"
     optimizer_betas: Tuple[float, float] = (0.9, 0.999)
@@ -136,7 +144,12 @@ class TrainingConfig:
     use_wandb: bool = True
     random_flip: bool = True
     center_crop: bool = True
-    method: str = "ddpm"  # ddpm or flow_matching
+    method: str = "ddpm"  # Available: ddpm, flow_matching, consistency, dpm
+    enable_gradient_clipping: bool = True  # Whether to clip gradients
+    clip_grad_value: Optional[float] = None  # Value for gradient clipping
+    clip_grad_norm: Optional[float] = 1.0  # Norm for gradient clipping
+    enable_amp: bool = True  # Enable automatic mixed precision
+    amp_dtype: str = "float16"  # AMP dtype: float16 or bfloat16
     prediction_type: str = "v_prediction"  # v_prediction, epsilon, or sample
     zero_terminal_snr: bool = True  # Enable zero terminal SNR for better quality
     ddpm: DDPMConfig = field(default_factory=DDPMConfig)
