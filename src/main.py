@@ -341,24 +341,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-def setup_training(
-    config: Config,
-    models: Dict[str, torch.nn.Module],
-    device: torch.device,
-    image_paths: List[str],
-    captions: List[str]
-) -> tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
-    """Setup training components."""
-    try:
-        # Initialize latent preprocessor
-        latent_preprocessor = LatentPreprocessor(
-            config=config,
-            sdxl_model=models["model"],
-            device=device
-        )
-        
-        if config.global_config.cache.clear_cache_on_start:
-            logger.info("Clearing latent cache...")
-            latent_preprocessor.clear_cache()
-            
-        # ... existing code ...
