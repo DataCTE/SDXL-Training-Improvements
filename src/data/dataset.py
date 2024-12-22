@@ -115,18 +115,20 @@ class AspectBucketDataset(Dataset):
         
         # Initialize preprocessing components
         self.latent_preprocessor = latent_preprocessor
+        
+        # Always initialize preprocessing pipeline
+        self.preprocessing_pipeline = PreprocessingPipeline(
+            config=config,
+            latent_preprocessor=latent_preprocessor,
+            enable_memory_tracking=enable_memory_tracking,
+            use_pinned_memory=True,
+            num_gpu_workers=1,  # Single GPU worker for better memory management
+            num_cpu_workers=config.data.num_workers,
+            max_memory_usage=max_memory_usage
+        )
+        
+        # Initialize cache manager if latent preprocessor is available
         if latent_preprocessor and latent_preprocessor.model:
-            self.preprocessing_pipeline = PreprocessingPipeline(
-                config=config,
-                latent_preprocessor=latent_preprocessor,
-                enable_memory_tracking=enable_memory_tracking,
-                use_pinned_memory=True,
-                num_gpu_workers=1,  # Single GPU worker for better memory management
-                num_cpu_workers=config.data.num_workers,
-                max_memory_usage=max_memory_usage
-            )
-            
-            # Initialize cache manager with same memory settings
             self.cache_manager = CacheManager(
                 cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
                 num_proc=config.global_config.cache.num_proc,
@@ -137,7 +139,6 @@ class AspectBucketDataset(Dataset):
                 enable_memory_tracking=enable_memory_tracking
             )
         else:
-            self.preprocessing_pipeline = None
             self.cache_manager = None
         
         # Setup image configuration
