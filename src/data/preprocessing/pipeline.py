@@ -203,6 +203,39 @@ class PreprocessingPipeline:
                     f"Available devices: 0-{max_devices-1}"
                 )
 
+    def _init_worker_pools(self):
+        """Initialize worker pools for parallel processing."""
+        try:
+            # Initialize GPU worker pool if CUDA available
+            if torch.cuda.is_available() and self.num_gpu_workers > 0:
+                self.gpu_pool = ThreadPoolExecutor(
+                    max_workers=self.num_gpu_workers,
+                    thread_name_prefix="gpu_worker"
+                )
+            else:
+                self.gpu_pool = None
+                
+            # Initialize CPU worker pool
+            self.cpu_pool = ProcessPoolExecutor(
+                max_workers=self.num_cpu_workers,
+                mp_context=torch.multiprocessing.get_context('spawn')
+            )
+            
+            # Initialize I/O worker pool
+            self.io_pool = ThreadPoolExecutor(
+                max_workers=self.num_io_workers,
+                thread_name_prefix="io_worker"
+            )
+            
+            # Initialize stop event
+            self.stop_event = Event()
+            
+        except Exception as e:
+            raise PipelineConfigError(
+                "Failed to initialize worker pools",
+                {"error": str(e)}
+            )
+
     def _create_memory_tracker(self):
         """Create enhanced memory tracking utilities."""
         return {
