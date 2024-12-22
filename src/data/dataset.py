@@ -105,7 +105,7 @@ class AspectBucketDataset(Dataset):
         # Store configuration
         self.config = config
         self.captions = captions
-        self.latent_preprocessor = latent_preprocessor
+        self.latent_preprocessor = preprocessing_pipeline.latent_preprocessor if preprocessing_pipeline else None
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
         self.is_train = is_train
 
@@ -129,7 +129,7 @@ class AspectBucketDataset(Dataset):
         # Initialize preprocessing pipeline after cache manager
         self.preprocessing_pipeline = PreprocessingPipeline(
             config=config,
-            latent_preprocessor=latent_preprocessor,
+            latent_preprocessor=self.latent_preprocessor,
             cache_manager=self.cache_manager,
             is_train=self.is_train
         )
@@ -141,11 +141,11 @@ class AspectBucketDataset(Dataset):
         self.cache_manager = self._setup_cache_manager(config)
 
         # Precompute latents if needed
-        if latent_preprocessor and config.global_config.cache.use_cache:
+        if self.latent_preprocessor and config.global_config.cache.use_cache:
             self._precompute_latents(
                 image_paths,
                 captions,
-                latent_preprocessor,
+                self.latent_preprocessor,
                 config
             )
         
@@ -555,7 +555,7 @@ def create_dataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
-        latent_preprocessor=latent_preprocessor,
+        preprocessing_pipeline=preprocessing_pipeline,
         enable_memory_tracking=enable_memory_tracking,
         max_memory_usage=max_memory_usage
     )
