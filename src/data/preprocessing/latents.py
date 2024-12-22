@@ -102,7 +102,18 @@ class LatentPreprocessor:
     ) -> Dict[str, torch.Tensor]:
         """Encode images using SDXL VAE."""
         try:
-            # Use SDXL model interface for VAE encoding
+            # Validate input
+            if not isinstance(pixel_values, torch.Tensor):
+                raise ValueError(f"Expected tensor input, got {type(pixel_values)}")
+                
+            if pixel_values.dim() != 4:
+                raise ValueError(f"Expected 4D tensor, got {pixel_values.dim()}D")
+                
+            # Move to correct device if needed
+            if not device_equals(pixel_values.device, self.device):
+                pixel_values = pixel_values.to(self.device)
+                
+            # Encode with VAE
             with torch.no_grad():
                 latents = self.model.vae.encode(pixel_values).latent_dist.sample()
                 latents = latents * self.model.vae.config.scaling_factor

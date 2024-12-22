@@ -449,13 +449,11 @@ class AspectBucketDataset(Dataset):
             raise ProcessingError("Preprocessing pipeline not initialized")
             
         try:
-            # Use preprocessing pipeline for tensor processing
-            processed = self.preprocessing_pipeline._process_tensor_batch(
-                self.transforms(image).unsqueeze(0),
-                device.index if device and device.type == "cuda" else 0
+            return self.preprocessing_pipeline.process_image(
+                image,
+                target_size,
+                device
             )
-            return processed["tensor"].squeeze(0)
-            
         except Exception as e:
             raise ProcessingError(
                 "Image processing failed",

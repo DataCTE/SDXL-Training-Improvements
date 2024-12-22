@@ -241,6 +241,36 @@ class PreprocessingPipeline:
         return pipe
 
     @torch.no_grad()
+    def process_image(
+        self,
+        image: Image.Image,
+        target_size: Tuple[int, int],
+        device: Optional[torch.device] = None
+    ) -> torch.Tensor:
+        """Process single image with optimized memory handling."""
+        try:
+            # Convert to tensor and normalize
+            tensor = self.transforms(image)
+            
+            # Move to device if specified
+            if device is not None:
+                tensor = tensor.to(device)
+                
+            # Apply optimized transforms
+            tensor = self._apply_optimized_transforms(tensor)
+            
+            return tensor
+            
+        except Exception as e:
+            raise PreprocessingError(
+                "Image processing failed",
+                context={
+                    "image_size": image.size,
+                    "target_size": target_size,
+                    "error": str(e)
+                }
+            )
+
     def _process_tensor_batch(
         self,
         tensor: torch.Tensor,
@@ -248,7 +278,6 @@ class PreprocessingPipeline:
         text: Optional[str] = None
     ) -> Dict[str, torch.Tensor]:
         """Process tensor batch with optimized memory handling."""
-        from src.data.utils.tensor_utils import process_tensor_batch, validate_tensor
         
         try:
             # Validate tensor
