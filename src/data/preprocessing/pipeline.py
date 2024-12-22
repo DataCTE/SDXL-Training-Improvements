@@ -20,7 +20,6 @@ import nvidia.dali as dali
 import nvidia.dali.fn as fn
 from nvidia.dali.pipeline import Pipeline
 
-from src.core.types import ModelWeightDtypes
 from src.core.memory.tensor import (
     unpin_tensor_
 )
@@ -57,7 +56,6 @@ class PreprocessingPipeline:
         prefetch_factor: int = 2,
         device_ids: Optional[List[int]] = None,
         use_pinned_memory: bool = True,
-        dtypes: Optional[ModelWeightDtypes] = None,
         enable_memory_tracking: bool = True,
         stream_timeout: float = 10.0  # Stream synchronization timeout
     ):
