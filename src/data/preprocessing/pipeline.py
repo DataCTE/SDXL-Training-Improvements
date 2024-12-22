@@ -180,6 +180,7 @@ class PreprocessingPipeline:
     def _create_optimized_dali_pipeline(self) -> Optional[Pipeline]:
         """Create DALI pipeline with optimized settings and proper error handling."""
         try:
+            # Create pipeline
             pipe = Pipeline(
                 batch_size=32,
                 num_threads=self.num_cpu_workers,
@@ -188,20 +189,21 @@ class PreprocessingPipeline:
                 enable_memory_stats=self.enable_memory_tracking
             )
 
-        with pipe:
-            # Enhanced error handling for readers
-            try:
-                images = fn.readers.file(
-                    name="Reader",
-                    pad_last_batch=True,
-                    random_shuffle=True,
-                    prefetch_queue_depth=self.prefetch_factor
-                )
-            except Exception as e:
-                raise DALIError(
-                    "Failed to initialize DALI file reader",
-                    context={'error': str(e)}
-                )
+            # Setup pipeline operations
+            with pipe:
+                try:
+                    # Enhanced error handling for readers
+                    images = fn.readers.file(
+                        name="Reader",
+                        pad_last_batch=True,
+                        random_shuffle=True,
+                        prefetch_queue_depth=self.prefetch_factor
+                    )
+                except Exception as e:
+                    raise DALIError(
+                        "Failed to initialize DALI file reader",
+                        context={'error': str(e)}
+                    )
 
             # Optimized decode settings
             try:
