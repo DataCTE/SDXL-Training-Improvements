@@ -7,8 +7,9 @@ from typing import Dict, List, Optional, Tuple, Union
 from ..utils.paths import convert_windows_path
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import logging
-from src.models import StableDiffusionXLModel
+from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
+from diffusers import AutoencoderKL
+from src.models import StableDiffusionXLModel, ModelType
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import (
