@@ -128,7 +128,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     def from_pretrained(
         self,
         pretrained_model_name: str,
-        torch_dtype: torch.dtype = torch.float32,
+        torch_dtype: torch.dtype = DataType.FLOAT_32.to_torch_dtype(),
         use_safetensors: bool = True,
         **kwargs
     ) -> None:
