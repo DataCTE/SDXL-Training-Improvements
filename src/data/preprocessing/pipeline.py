@@ -232,20 +232,20 @@ class PreprocessingPipeline:
         device_id: int,
         latent_preprocessor: LatentPreprocessor
     ) -> Dict[str, torch.Tensor]:
-        """Process tensor batch with optimized memory handling."""
+        """Process batch with memory optimization."""
         try:
             # Track memory if enabled
             if self.enable_memory_tracking:
                 self._track_memory_usage("batch_processing")
 
-            # Stack tensors and move to device
+            # Stack and move to device efficiently
             batch = torch.stack(tensors).to(
                 device=torch.device(device_id),
                 memory_format=torch.channels_last,
                 non_blocking=self.use_pinned_memory
             )
 
-            # Process through latent preprocessor
+            # Get latents through preprocessor
             with autocast():
                 result = latent_preprocessor.encode_images(batch)
 
