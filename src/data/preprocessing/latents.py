@@ -10,6 +10,7 @@ import logging
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers import AutoencoderKL
 from src.models.encoders.vae import VAEEncoder
+from src.models.encoders.clip import encode_clip
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import (
@@ -149,15 +150,30 @@ class LatentPreprocessor:
 
             # Encode tokens
             with torch.no_grad():
-                # Process encoders in parallel streams  
+                # Process encoders with optimized CLIP encoding
                 with create_stream_context() as (stream_1, stream_2):
                     with stream_1:
-                        text_embeddings_1 = self.text_encoder_one(tokens_1)[0]
+                        text_embeddings_1, _ = encode_clip(
+                            text_encoder=self.text_encoder_one,
+                            tokens=tokens_1,
+                            default_layer=-2,
+                            layer_skip=0,
+                            use_attention_mask=False,
+                            add_layer_norm=False
+                        )
                         pin_tensor_(text_embeddings_1)
                         tensors_record_stream(stream_1, text_embeddings_1)
                         
                     with stream_2:
-                        text_embeddings_2, pooled_embeddings = self.text_encoder_two(tokens_2, output_hidden_states=True)
+                        text_embeddings_2, pooled_embeddings = encode_clip(
+                            text_encoder=self.text_encoder_two,
+                            tokens=tokens_2,
+                            default_layer=-2,
+                            layer_skip=0,
+                            add_pooled_output=True,
+                            use_attention_mask=False,
+                            add_layer_norm=False
+                        )
                         pin_tensor_(text_embeddings_2)
                         pin_tensor_(pooled_embeddings)
                         tensors_record_stream(stream_2, [text_embeddings_2, pooled_embeddings])
