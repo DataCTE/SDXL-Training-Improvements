@@ -1,4 +1,3 @@
-"""Base model classes and types for SDXL."""
 from enum import Enum, auto
 from typing import Optional
 import torch
@@ -43,8 +42,15 @@ class BaseModel:
         self.model_type = model_type
         
     def to(self, device: torch.device) -> None:
-        """Move model to device."""
-        raise NotImplementedError
+        """Move model to device.
+        
+        Args:
+            device: Target device to move the model to
+        """
+        if hasattr(self, 'model'):
+            self.model = self.model.to(device)
+        else:
+            raise AttributeError("Model instance has no 'model' attribute to move to device")
         
     def eval(self) -> None:
         """Set model to evaluation mode."""
