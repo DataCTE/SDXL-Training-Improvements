@@ -105,6 +105,9 @@ class StableDiffusionXLModel(BaseModel):
         """
         super().__init__(model_type=model_type)
 
+        # Training state
+        self.training = True
+
         # Base model components
         self.tokenizer_1: Optional[CLIPTokenizer] = None
         self.tokenizer_2: Optional[CLIPTokenizer] = None
