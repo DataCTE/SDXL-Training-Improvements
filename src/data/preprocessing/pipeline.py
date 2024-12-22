@@ -236,6 +236,35 @@ class PreprocessingPipeline:
                 {"error": str(e)}
             )
 
+    def _setup_memory_optimizations(self):
+        """Setup memory optimizations for preprocessing pipeline."""
+        try:
+            if torch.cuda.is_available():
+                # Enable TF32 for better performance on Ampere GPUs
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                
+                # Enable cudnn benchmarking
+                torch.backends.cudnn.benchmark = True
+                
+                # Setup pinned memory if enabled
+                if self.use_pinned_memory:
+                    torch.cuda.empty_cache()
+                    
+                # Setup stream synchronization
+                self.transfer_stream = torch.cuda.Stream()
+                self.compute_stream = torch.cuda.Stream()
+                
+                # Initialize memory pools
+                if hasattr(torch.cuda, 'memory_pool'):
+                    torch.cuda.memory_pool().empty_cache()
+                    
+        except Exception as e:
+            raise PipelineConfigError(
+                "Failed to setup memory optimizations",
+                {"error": str(e)}
+            )
+
     def _create_memory_tracker(self):
         """Create enhanced memory tracking utilities."""
         return {
