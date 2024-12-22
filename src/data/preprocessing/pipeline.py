@@ -441,8 +441,8 @@ class PreprocessingPipeline:
                             context={'error': str(e)}
                         )
 
-                    # Set pipeline output with proper expansion
-                    pipe.set_outputs(normalized)
+                    # Set pipeline output with proper expansion using *
+                    pipe.set_outputs(*[normalized])
 
             # Build and verify pipeline
             try:
