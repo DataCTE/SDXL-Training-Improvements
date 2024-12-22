@@ -179,67 +179,82 @@ class PreprocessingPipeline:
 
     def _create_optimized_dali_pipeline(self) -> Optional[Pipeline]:
         """Create DALI pipeline with optimized settings and proper error handling."""
+        if not torch.cuda.is_available():
+            logger.warning("CUDA not available, skipping DALI pipeline creation")
+            return None
+
         try:
-            # Create pipeline
+            # Create pipeline with device verification
+            device_id = self.device_ids[0] if self.device_ids else 0
+            if device_id >= torch.cuda.device_count():
+                raise DALIError(f"Invalid device ID {device_id}")
+
             pipe = Pipeline(
                 batch_size=32,
                 num_threads=self.num_cpu_workers,
-                device_id=self.device_ids[0] if self.device_ids else 0,
+                device_id=device_id,
                 prefetch_queue_depth=self.prefetch_factor,
                 enable_memory_stats=self.enable_memory_tracking
             )
 
-            # Setup pipeline operations
+            # Setup pipeline operations within context
             with pipe:
-                try:
-                    # Enhanced error handling for readers
-                    images = fn.readers.file(
-                        name="Reader",
-                        pad_last_batch=True,
-                        random_shuffle=True,
-                        prefetch_queue_depth=self.prefetch_factor
-                    )
-                except Exception as e:
-                    raise DALIError(
-                        "Failed to initialize DALI file reader",
-                        context={'error': str(e)}
-                    )
+                # Enhanced error handling for readers with stream synchronization
+                with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
+                    try:
+                        images = fn.readers.file(
+                            name="Reader",
+                            pad_last_batch=True,
+                            random_shuffle=True,
+                            prefetch_queue_depth=self.prefetch_factor
+                        )
+                    except Exception as e:
+                        raise DALIError(
+                            "Failed to initialize DALI file reader",
+                            context={'error': str(e)}
+                        )
 
-                # Optimized decode settings
-                try:
-                    decoded = fn.decoders.image(
-                        images,
-                        device="mixed",
-                        output_type=dali.types.RGB,
-                        hybrid_huffman_threshold=100000,
-                        host_memory_padding=256,
-                        device_memory_padding=256
-                    )
-                except Exception as e:
-                    raise DALIError(
-                        "Failed to initialize DALI image decoder",
-                        context={'error': str(e)}
-                    )
+                    # Optimized decode settings with memory padding
+                    try:
+                        decoded = fn.decoders.image(
+                            images,
+                            device="mixed",
+                            output_type=dali.types.RGB,
+                            hybrid_huffman_threshold=100000,
+                            host_memory_padding=512,  # Increased padding
+                            device_memory_padding=512
+                        )
+                    except Exception as e:
+                        raise DALIError(
+                            "Failed to initialize DALI image decoder",
+                            context={'error': str(e)}
+                        )
 
-                # Enhanced normalization with better precision
-                try:
-                    normalized = fn.crop_mirror_normalize(
-                        decoded,
-                        dtype=dali.types.FLOAT,
-                        mean=[0.5 * 255] * 3,
-                        std=[0.5 * 255] * 3,
-                        output_layout="CHW",
-                        pad_output=False
-                    )
-                except Exception as e:
-                    raise DALIError(
-                        "Failed to initialize DALI normalization",
-                        context={'error': str(e)}
-                    )
+                    # Enhanced normalization with better precision
+                    try:
+                        normalized = fn.crop_mirror_normalize(
+                            decoded,
+                            dtype=dali.types.FLOAT,
+                            mean=[0.5 * 255] * 3,
+                            std=[0.5 * 255] * 3,
+                            output_layout="CHW",
+                            pad_output=False
+                        )
+                    except Exception as e:
+                        raise DALIError(
+                            "Failed to initialize DALI normalization",
+                            context={'error': str(e)}
+                        )
 
-                pipe.set_outputs(normalized)
+                    pipe.set_outputs(normalized)
 
-            return pipe
+            # Build and verify pipeline
+            try:
+                pipe.build()
+                return pipe
+            except Exception as e:
+                logger.error(f"Failed to build DALI pipeline: {str(e)}")
+                return None
             
         except Exception as e:
             logger.error(f"Failed to create DALI pipeline: {str(e)}")
