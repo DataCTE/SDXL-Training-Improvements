@@ -26,7 +26,7 @@ from src.core.memory.tensor import (
     tensors_record_stream
 )
 from src.models.encoders.vae import VAEEncoder
-from src.core.types import DataType
+from src.core.types import DataType, ModelWeightDtypes
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
 from src.models.encoders.clip import encode_clip
 from src.models.encoders.vae import VAEEncoder

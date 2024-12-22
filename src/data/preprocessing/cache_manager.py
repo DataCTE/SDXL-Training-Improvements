@@ -1,6 +1,7 @@
 """High-performance cache management with optimized tensor and memory handling."""
 import multiprocessing as mp
 import traceback
+from src.core.types import DataType, ModelWeightDtypes
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -192,6 +193,13 @@ class CacheManager:
                 (t.device for t in latent_data.values() if isinstance(t, torch.Tensor)),
                 torch.device('cpu')
             )
+            
+            # Ensure consistent dtype
+            target_dtype = DataType.FLOAT_32.to_torch_dtype()
+            for tensor_dict in [latent_data, text_embeddings]:
+                for k, v in tensor_dict.items():
+                    if isinstance(v, torch.Tensor) and v.dtype != target_dtype:
+                        tensor_dict[k] = v.to(dtype=target_dtype)
 
             # Memory optimization: Stream-based processing
             with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():

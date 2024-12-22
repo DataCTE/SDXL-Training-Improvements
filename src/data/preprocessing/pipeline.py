@@ -2,7 +2,7 @@
 import logging
 import time
 import traceback
-from src.core.types import DataType
+from src.core.types import DataType, ModelWeightDtypes
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from pathlib import Path
 from queue import Queue
