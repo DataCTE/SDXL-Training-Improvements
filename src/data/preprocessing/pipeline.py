@@ -12,6 +12,7 @@ from PIL import Image
 from src.data.config import Config
 from src.data.preprocessing.latents import LatentPreprocessor
 from dataclasses import dataclass
+from contextlib import nullcontext
 
 import torch
 import torch.cuda
