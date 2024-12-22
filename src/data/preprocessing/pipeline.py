@@ -493,11 +493,11 @@ class PreprocessingPipeline:
             # Apply configured transforms with dtype handling
             if getattr(self.config.transforms, 'normalize', True):
                 # Match model dtype and device by checking UNet and VAE
-                target_dtype = (torch.float16 
-                              if self.latent_preprocessor 
-                              and self.latent_preprocessor.model.unet.dtype == torch.float16 
-                              else torch.float32)
-                target_device = (self.latent_preprocessor.model.unet.device 
+                model_dtype = (DataType.from_str(self.latent_preprocessor.model.dtype)
+                             if self.latent_preprocessor
+                             else DataType.FLOAT_32)
+                target_dtype = model_dtype.to_torch_dtype()
+                target_device = (self.latent_preprocessor.model.device
                                if self.latent_preprocessor 
                                else tensor.device)
                 
