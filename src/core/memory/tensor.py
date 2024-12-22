@@ -82,7 +82,7 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
 
 @contextmanager
 def tensor_operation_context(operation_name: str):
-    """Context manager for tensor operations with enhanced memory tracking."""
+    """Context manager for tensor operations with enhanced memory tracking and cleanup."""
     if torch.cuda.is_available():
         # Synchronize and record initial state
         torch.cuda.synchronize()
@@ -107,6 +107,10 @@ def tensor_operation_context(operation_name: str):
         
     finally:
         if torch.cuda.is_available():
+            # Force garbage collection
+            gc.collect()
+            torch.cuda.empty_cache()
+            
             # Clean up and check for leaks
             torch.cuda.synchronize()
             end_memory = torch.cuda.memory_allocated()
@@ -121,6 +125,10 @@ def tensor_operation_context(operation_name: str):
                 leaked = (end_memory - start_memory) / 1024**2
                 if leaked > 0.01:  # Only warn for leaks > 0.01MB
                     logger.warning(f"Potential memory leak detected in {operation_name}: {leaked:.2f}MB")
+                    # Force another cleanup pass
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
 
 def get_tensors(
     data: Union[torch.Tensor, List, Tuple, Dict],
@@ -165,25 +173,37 @@ def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.devi
             if isinstance(data, torch.Tensor):
                 if data.is_pinned() and device.type == "cuda":
                     # Handle pinned memory transfers
-                    data = data.to(device, non_blocking=non_blocking)
+                    new_data = data.to(device, non_blocking=non_blocking)
                     if non_blocking:
                         with create_stream_context(torch.cuda.current_stream()) as stream:
-                            data.record_stream(stream)
+                            new_data.record_stream(stream)
+                    # Clear old reference
+                    del data
+                    data = new_data
                 else:
                     # Regular transfer
-                    data = data.to(device, non_blocking=False)
+                    new_data = data.to(device, non_blocking=False)
+                    # Clear old reference
+                    del data
+                    data = new_data
                     
                 tensor_stats.device_transfers += 1
                 
             elif isinstance(data, dict):
-                for value in data.values():
+                for key, value in data.items():
                     if isinstance(value, (torch.Tensor, dict, list)):
+                        old_value = value
                         tensors_to_device_(value, device, non_blocking)
+                        if id(old_value) != id(value):
+                            del old_value
                         
             elif isinstance(data, list):
-                for item in data:
+                for i, item in enumerate(data):
                     if isinstance(item, (torch.Tensor, dict, list)):
+                        old_item = item
                         tensors_to_device_(item, device, non_blocking)
+                        if id(old_item) != id(item):
+                            del old_item
                         
         except Exception as e:
             error_context = {
