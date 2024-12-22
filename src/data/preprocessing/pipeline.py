@@ -226,43 +226,6 @@ class PreprocessingPipeline:
 
         return pipe
 
-    def process_batch(
-        self,
-        tensors: List[torch.Tensor],
-        device_id: int,
-        latent_preprocessor: LatentPreprocessor
-    ) -> Dict[str, torch.Tensor]:
-        """Process batch with memory optimization."""
-        try:
-            # Track memory if enabled
-            if self.enable_memory_tracking:
-                self._track_memory_usage("batch_processing")
-
-            # Stack and move to device efficiently
-            batch = torch.stack(tensors).to(
-                device=torch.device(device_id),
-                memory_format=torch.channels_last,
-                non_blocking=self.use_pinned_memory
-            )
-
-            # Get latents through preprocessor
-            with autocast():
-                result = latent_preprocessor.encode_images(batch)
-
-            self.stats.successful += 1
-            return result
-
-        except Exception as e:
-            self.stats.failed += 1
-            raise PreprocessingError(
-                "Batch processing failed",
-                context={
-                    "error": str(e),
-                    "device_id": device_id,
-                    "batch_size": len(tensors)
-                }
-            )
-
     def _apply_optimized_transforms(
         self,
         tensor: torch.Tensor
@@ -295,28 +258,68 @@ class PreprocessingPipeline:
 
     def process_batch(
         self,
-        batch: List[Union[torch.Tensor, Dict[str, Any]]],
+        batch: Union[List[torch.Tensor], List[Dict[str, Any]]],
+        device_id: Optional[int] = None,
+        latent_preprocessor: Optional[LatentPreprocessor] = None,
         timeout: Optional[float] = None
-    ) -> List[Dict[str, torch.Tensor]]:
-        """Process batch with timeout and enhanced error handling."""
+    ) -> Union[Dict[str, torch.Tensor], List[Dict[str, torch.Tensor]]]:
+        """Process batch with optimized memory handling and enhanced error tracking.
+        
+        Args:
+            batch: List of tensors or dictionaries to process
+            device_id: Optional device ID for processing
+            latent_preprocessor: Optional latent preprocessor
+            timeout: Optional timeout for queue operations
+            
+        Returns:
+            Processed batch results
+            
+        Raises:
+            PreprocessingError: If batch processing fails
+        """
         try:
-            self.input_queue.put(batch, timeout=timeout)
-            result = self.output_queue.get(timeout=timeout)
-            
-            if isinstance(result, Exception):
-                raise result
+            # Track memory if enabled
+            if self.enable_memory_tracking:
+                self._track_memory_usage("batch_processing")
+
+            # Handle direct tensor processing
+            if isinstance(batch[0], torch.Tensor) and device_id is not None and latent_preprocessor is not None:
+                # Stack and move to device efficiently
+                stacked_batch = torch.stack(batch).to(
+                    device=torch.device(device_id),
+                    memory_format=torch.channels_last,
+                    non_blocking=self.use_pinned_memory
+                )
+
+                # Get latents through preprocessor
+                with autocast():
+                    result = latent_preprocessor.encode_images(stacked_batch)
+
+                self.stats.successful += 1
+                return result
+
+            # Handle queue-based processing
+            else:
+                self.input_queue.put(batch, timeout=timeout)
+                result = self.output_queue.get(timeout=timeout)
                 
-            return result
-            
+                if isinstance(result, Exception):
+                    raise result
+                    
+                return result
+
         except Exception as e:
-            raise PreprocessingError(
-                "Batch processing failed",
-                context={
-                    "batch_size": len(batch),
-                    "timeout": timeout,
-                    "error": str(e)
-                }
-            )
+            self.stats.failed += 1
+            context = {
+                "batch_size": len(batch),
+                "error": str(e)
+            }
+            if device_id is not None:
+                context["device_id"] = device_id
+            if timeout is not None:
+                context["timeout"] = timeout
+                
+            raise PreprocessingError("Batch processing failed", context=context)
 
     def __enter__(self):
         """Context manager entry with initialization verification."""
