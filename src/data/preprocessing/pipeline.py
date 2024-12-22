@@ -51,6 +51,7 @@ class PreprocessingPipeline:
         self,
         config: Config,
         latent_preprocessor: Optional[LatentPreprocessor] = None,
+        cache_manager: Optional['CacheManager'] = None,
         num_gpu_workers: int = 1,
         num_cpu_workers: int = 4,
         num_io_workers: int = 2,
