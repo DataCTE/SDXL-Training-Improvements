@@ -447,26 +447,56 @@ class PreprocessingPipeline:
             logger.error(f"Failed to create CUDA pipeline: {str(e)}")
             return None
 
+    def _process_with_cuda(self, img: Image.Image) -> torch.Tensor:
+        """Process image with CUDA acceleration.
+        
+        Args:
+            img: PIL Image to process
+            
+        Returns:
+            Processed tensor on CUDA device
+        """
+        try:
+            # Convert PIL image to tensor
+            tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+            
+            # Move to CUDA and apply transforms
+            if torch.cuda.is_available():
+                tensor = tensor.cuda(non_blocking=True)
+                tensor = self._apply_optimized_transforms(tensor)
+                
+            return tensor
+            
+        except Exception as e:
+            raise PreprocessingError(
+                "CUDA processing failed",
+                context={"error": str(e)}
+            )
+
     def _apply_optimized_transforms(
         self,
         tensor: torch.Tensor
     ) -> torch.Tensor:
         """Apply optimized transforms with enhanced error handling."""
         try:
-            # Convert to channels last for better performance
+            # Add batch dimension for channels_last format
+            tensor = tensor.unsqueeze(0)
+            
+            # Now convert to channels last
             tensor = tensor.contiguous(memory_format=torch.channels_last)
             
             # Apply configured transforms
             if self.config.transforms.get('normalize', True):
                 mean = torch.tensor([0.5, 0.5, 0.5], device=tensor.device)
                 std = torch.tensor([0.5, 0.5, 0.5], device=tensor.device)
-                tensor = tensor.sub_(mean[:, None, None]).div_(std[:, None, None])
+                tensor = tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
             
             if self.config.transforms.get('random_flip', False):
                 if torch.rand(1) > 0.5:
                     tensor = tensor.flip(-1)
             
-            return tensor
+            # Remove batch dimension before returning
+            return tensor.squeeze(0)
             
         except Exception as e:
             raise PreprocessingError(
