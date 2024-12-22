@@ -270,8 +270,7 @@ def setup_training(
             captions=captions,
             latent_preprocessor=latent_preprocessor,
             enable_memory_tracking=True,
-            max_memory_usage=0.8,  # Set memory limit
-            cache_manager=cache_manager
+            max_memory_usage=0.8  # Set memory limit
         )
         
         # Create data loader
