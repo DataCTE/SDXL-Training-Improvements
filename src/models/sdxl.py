@@ -128,7 +128,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     def from_pretrained(
         self,
         pretrained_model_name: str,
-        torch_dtype: torch.dtype = DataType.FLOAT_32.to_torch_dtype(),
+        dtype: Union[DataType, str] = DataType.FLOAT_32,
         use_safetensors: bool = True,
         **kwargs
     ) -> None:
@@ -142,6 +142,11 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         """
         try:
             logger.info(f"Loading model components from {pretrained_model_name}")
+            
+            # Convert dtype if string
+            if isinstance(dtype, str):
+                dtype = DataType.from_str(dtype)
+            torch_dtype = dtype.to_torch_dtype()
             
             # Load VAE
             self.vae = AutoencoderKL.from_pretrained(
