@@ -463,7 +463,7 @@ class PreprocessingPipeline:
             
             # Move to CUDA and apply transforms
             if torch.cuda.is_available():
-                tensor = tensor.cuda(non_blocking=True)
+                tensor = tensor.cuda(non_blocking=True).to(dtype=self.latent_preprocessor.model.dtype if self.latent_preprocessor else torch.float32)
                 tensor = self._apply_optimized_transforms(tensor)
                 
             return tensor
