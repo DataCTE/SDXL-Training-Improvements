@@ -247,6 +247,19 @@ class StableDiffusionXLModel(BaseModel):
         self.text_encoder_2.eval()
         self.unet.eval()
 
+    def train(self) -> None:
+        """Set model components to training mode.
+        Only UNet should be in training mode since we're only training it.
+        """
+        self.vae.eval()  # Keep VAE in eval mode
+        self.text_encoder_1.eval()  # Keep text encoders in eval mode
+        self.text_encoder_2.eval()
+        self.unet.train()  # Only UNet in training mode
+
+    def zero_grad(self) -> None:
+        """Zero out gradients of trainable parameters."""
+        self.unet.zero_grad(set_to_none=True)
+
     def parameters(self):
         """Get trainable parameters of the model.
         
