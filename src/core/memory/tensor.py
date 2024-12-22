@@ -132,19 +132,19 @@ def tensor_operation_context(operation_name: str):
                 leaked_allocated = (end_memory - start_memory) / 1024**2
                 leaked_reserved = (end_reserved - start_reserved) / 1024**2
                 peak_increase = (end_peak - start_peak) / 1024**2  # Track peak memory increase
+                
+                # Aggressive cleanup
+                for _ in range(2):
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
                     
-                    # Aggressive cleanup
-                    for _ in range(2):
-                        gc.collect()
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                        
-                        # Check if cleanup helped
-                        current_memory = torch.cuda.memory_allocated()
-                        current_reserved = torch.cuda.memory_reserved()
-                        if (current_memory <= start_memory and 
-                            current_reserved <= start_reserved):
-                            break
+                    # Check if cleanup helped
+                    current_memory = torch.cuda.memory_allocated()
+                    current_reserved = torch.cuda.memory_reserved()
+                    if (current_memory <= start_memory and 
+                        current_reserved <= start_reserved):
+                        break
                             
             # Reset peak stats for next operation
             torch.cuda.reset_peak_memory_stats()
