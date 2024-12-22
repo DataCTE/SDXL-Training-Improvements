@@ -1,5 +1,7 @@
+"""Base classes and interfaces for SDXL model implementations."""
 from enum import Enum, auto
-from typing import Optional
+from typing import Dict, List, Optional, Tuple, Union
+from abc import ABC, abstractmethod
 import torch
 from torch import Tensor
 
@@ -30,8 +32,8 @@ class BaseModelEmbedding:
         self.token_count = token_count
         self.placeholder = placeholder
 
-class BaseModel:
-    """Base class for SDXL models."""
+class BaseModel(ABC):
+    """Abstract base class defining the interface for SDXL models."""
     
     def __init__(self, model_type: ModelType):
         """Initialize base model.
@@ -40,18 +42,87 @@ class BaseModel:
             model_type: Type of model
         """
         self.model_type = model_type
-        
+        self.training = True
+
+    @abstractmethod
     def to(self, device: torch.device) -> None:
-        """Move model to device.
+        """Move model components to device.
         
         Args:
-            device: Target device to move the model to
+            device: Target device
         """
-        if hasattr(self, 'model'):
-            self.model = self.model.to(device)
-        else:
-            raise AttributeError("Model instance has no 'model' attribute to move to device")
+        pass
+
+    @abstractmethod
+    def vae_to(self, device: torch.device) -> None:
+        """Move VAE to device.
         
+        Args:
+            device: Target device
+        """
+        pass
+
+    @abstractmethod 
+    def text_encoder_to(self, device: torch.device) -> None:
+        """Move text encoders to device.
+        
+        Args:
+            device: Target device
+        """
+        pass
+
+    @abstractmethod
+    def unet_to(self, device: torch.device) -> None:
+        """Move UNet to device.
+        
+        Args:
+            device: Target device
+        """
+        pass
+
+    @abstractmethod
     def eval(self) -> None:
-        """Set model to evaluation mode."""
-        raise NotImplementedError
+        """Set model components to evaluation mode."""
+        pass
+
+    @abstractmethod
+    def train(self) -> None:
+        """Set model components to training mode."""
+        pass
+
+    @abstractmethod
+    def zero_grad(self) -> None:
+        """Zero out gradients of trainable parameters."""
+        pass
+
+    @abstractmethod
+    def parameters(self):
+        """Get trainable parameters.
+        
+        Returns:
+            Iterator over model parameters
+        """
+        pass
+
+    @abstractmethod
+    def encode_text(
+        self,
+        train_device: torch.device,
+        batch_size: int,
+        text: Optional[str] = None,
+        tokens_1: Optional[Tensor] = None,
+        tokens_2: Optional[Tensor] = None,
+        text_encoder_1_layer_skip: int = 0,
+        text_encoder_2_layer_skip: int = 0,
+        text_encoder_1_output: Optional[Tensor] = None,
+        text_encoder_2_output: Optional[Tensor] = None,
+        text_encoder_1_dropout_probability: Optional[float] = None,
+        text_encoder_2_dropout_probability: Optional[float] = None,
+        pooled_text_encoder_2_output: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor]:
+        """Encode text using model text encoders.
+        
+        Returns:
+            Tuple of (text_encoder_output, pooled_text_encoder_2_output)
+        """
+        pass
