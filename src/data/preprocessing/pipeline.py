@@ -435,7 +435,8 @@ class PreprocessingPipeline:
                             context={'error': str(e)}
                         )
 
-                    pipe.set_outputs(normalized)
+                    # Expand normalized output to avoid nested DataNode
+                    pipe.set_outputs(*(normalized,))
 
             # Build and verify pipeline
             try:
