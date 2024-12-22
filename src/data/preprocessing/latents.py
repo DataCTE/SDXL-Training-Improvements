@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers import AutoencoderKL
+from src.models.encoders.vae import VAEEncoder
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import (
@@ -45,7 +46,16 @@ class LatentPreprocessor:
         self.tokenizer_two = tokenizer_two
         self.text_encoder_one = text_encoder_one 
         self.text_encoder_two = text_encoder_two
-        self.vae = vae
+        # Initialize optimized VAE encoder
+        self.vae_encoder = VAEEncoder(
+            vae=vae,
+            device=device,
+            enable_memory_efficient_attention=True,
+            enable_vae_slicing=True,
+            enable_vae_tiling=False,
+            vae_tile_size=512,
+            enable_gradient_checkpointing=True
+        )
         self.device = torch.device(device)
         self.use_cache = use_cache
         self.max_retries = max_retries
@@ -196,10 +206,9 @@ class LatentPreprocessor:
                         if not device_equals(batch.device, self.device):
                             tensors_to_device_([batch], self.device)
                             
-                        with torch.no_grad():
-                            batch_latents = self.vae.encode(batch).latent_dist.sample()
-                            batch_latents = batch_latents * self.vae.config.scaling_factor
-                            
+                        # Use optimized VAE encoder
+                        batch_latents = self.vae_encoder.encode(batch, return_dict=False)
+                        
                         # Pin and record stream
                         pin_tensor_(batch_latents)
                         tensors_record_stream(compute_stream, batch_latents)
@@ -209,6 +218,11 @@ class LatentPreprocessor:
                         
                         # Clean up
                         unpin_tensor_(batch_latents)
+                        
+                        # Log memory stats
+                        if self.enable_memory_tracking:
+                            stats = self.vae_encoder.get_memory_stats()
+                            logger.debug(f"VAE encoder memory stats: {stats}")
                         
                         # Replace tensors to reuse memory
                         if latents:
