@@ -215,18 +215,60 @@ class AspectBucketDataset(Dataset):
             batch_captions = uncached_captions[i:i + batch_size]
             
             try:
-                # Load and process images
+                # Load and process images with detailed error handling
                 images = []
                 for img_path in batch_paths:
                     try:
-                        image = Image.open(img_path).convert('RGB')
-                        images.append(self._process_image(
-                            image,
-                            self.target_size,
-                            latent_preprocessor.vae.device
-                        ))
+                        # Validate path
+                        if not Path(img_path).exists():
+                            logger.error(f"Image not found: {img_path}")
+                            continue
+                            
+                        # Check file size
+                        file_size = Path(img_path).stat().st_size
+                        if file_size == 0:
+                            logger.error(f"Empty image file: {img_path}")
+                            continue
+                            
+                        # Load image
+                        try:
+                            image = Image.open(img_path)
+                        except Exception as e:
+                            logger.error(f"Failed to open {img_path}: {str(e)}")
+                            continue
+                            
+                        # Validate format
+                        if image.format not in ('JPEG', 'PNG', 'WEBP'):
+                            logger.error(f"Unsupported format {image.format} for {img_path}")
+                            continue
+                            
+                        # Convert to RGB
+                        try:
+                            image = image.convert('RGB')
+                        except Exception as e:
+                            logger.error(f"RGB conversion failed for {img_path}: {str(e)}")
+                            continue
+                            
+                        # Process image
+                        try:
+                            processed = self._process_image(
+                                image,
+                                self.target_size,
+                                latent_preprocessor.vae.device
+                            )
+                            images.append(processed)
+                        except Exception as e:
+                            logger.error(
+                                f"Processing failed for {img_path}: {str(e)}\n"
+                                f"Image size: {image.size}, Mode: {image.mode}"
+                            )
+                            continue
+                            
                     except Exception as e:
-                        logger.error(f"Error processing {img_path}: {str(e)}")
+                        logger.error(
+                            f"Unexpected error with {img_path}: {str(e)}\n"
+                            f"Stack trace: {traceback.format_exc()}"
+                        )
                         continue
 
                 if not images:
