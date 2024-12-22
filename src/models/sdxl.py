@@ -94,10 +94,11 @@ class StableDiffusionXLPipeline(BasePipeline):
             scheduler=scheduler,
         )
 
-class StableDiffusionXLModel(BaseModel):
+class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     """StableDiffusionXL model with training optimizations."""
 
     def __init__(self, model_type: ModelType):
+        torch.nn.Module.__init__(self)
         """Initialize SDXL model.
         
         Args:
