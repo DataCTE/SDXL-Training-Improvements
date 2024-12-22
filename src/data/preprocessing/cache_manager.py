@@ -121,9 +121,13 @@ class CacheManager:
             thread_name_prefix="cache_io"
         )
         
-        # Initialize memory tracking if enabled
-        if self.enable_memory_tracking and torch.cuda.is_available():
-            self._init_memory_tracking()
+        # Initialize memory tracking
+        self.memory_stats = {
+            'peak_allocated': 0,
+            'total_allocated': 0,
+            'num_allocations': 0,
+            'oom_events': 0
+        }
 
     def _init_memory_tracking(self):
         """Initialize memory tracking utilities."""

@@ -268,11 +268,15 @@ class AspectBucketDataset(Dataset):
                 if not isinstance(image, Image.Image):
                     raise ProcessingError(f"Expected PIL.Image, got {type(image)}")
                     
-                # Create processing stream
-                compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                
-                # Apply transforms with CUDA stream optimization
-                with create_stream_context(compute_stream):
+                # Create processing stream with error handling
+                try:
+                    compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                except RuntimeError as cuda_err:
+                    logger.warning(f"CUDA stream creation failed: {cuda_err}. Falling back to CPU processing.")
+                    compute_stream = None
+                    
+                # Apply transforms with optional CUDA stream optimization
+                with create_stream_context(compute_stream) if compute_stream else nullcontext():
                     # Convert to tensor with batch dimension
                     tensor = self.transforms(image).unsqueeze(0)
                     
