@@ -14,6 +14,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import crop
+from tqdm.auto import tqdm
 
 from src.core.logging.logging import setup_logging
 from src.core.memory.tensor import (
