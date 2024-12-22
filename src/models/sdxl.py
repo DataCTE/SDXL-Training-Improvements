@@ -19,12 +19,11 @@ from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokeniz
 from src.core.memory.tensor import (
     tensors_to_device_,
     tensors_match_device,
-    tensors_record_stream,
-    create_stream_context,
     device_equals,
     torch_gc,
     torch_sync
 )
+from src.models.encoders.vae import VAEEncoder
 from src.core.types import DataType
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
 from src.models.encoders.clip import encode_clip
@@ -305,48 +304,27 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         text_encoder_2_dropout_probability: Optional[float] = None,
         pooled_text_encoder_2_output: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
-        """Encode text using both SDXL text encoders.
-        
-        Args:
-            train_device: Target device for training
-            batch_size: Batch size
-            rand: Random number generator
-            text: Input text to encode
-            tokens_1: Pre-tokenized input for encoder 1
-            tokens_2: Pre-tokenized input for encoder 2
-            text_encoder_1_layer_skip: Layers to skip in encoder 1
-            text_encoder_2_layer_skip: Layers to skip in encoder 2
-            text_encoder_1_output: Cached encoder 1 output
-            text_encoder_2_output: Cached encoder 2 output
-            text_encoder_1_dropout_probability: Dropout prob for encoder 1
-            text_encoder_2_dropout_probability: Dropout prob for encoder 2
-            pooled_text_encoder_2_output: Cached pooled output
-            
-        Returns:
-            Tuple of (combined encoder output, pooled output)
-        """
+        """Encode text using both SDXL text encoders."""
         # Tokenize if needed
         if tokens_1 is None and text is not None:
-            tokens_1 = self.tokenizer_1.encode(
+            tokens_1 = self.tokenizer_1(
                 text,
                 padding='max_length',
                 truncation=True,
-                max_length=77,
-                return_tensors="pt",
-            )
-            tokens_1 = tokens_1.to(self.text_encoder_1.device)
+                max_length=self.tokenizer_1.model_max_length,
+                return_tensors="pt"
+            ).input_ids.to(self.text_encoder_1.device)
 
         if tokens_2 is None and text is not None:
-            tokens_2 = self.tokenizer_2.encode(
+            tokens_2 = self.tokenizer_2(
                 text,
-                padding='max_length', 
+                padding='max_length',
                 truncation=True,
-                max_length=77,
-                return_tensors="pt",
-            )
-            tokens_2 = tokens_2.to(self.text_encoder_2.device)
+                max_length=self.tokenizer_2.model_max_length,
+                return_tensors="pt"
+            ).input_ids.to(self.text_encoder_2.device)
 
-        # Encode with both encoders
+        # Use optimized CLIP encoding from encoders.clip
         text_encoder_1_output, _ = encode_clip(
             text_encoder=self.text_encoder_1,
             tokens=tokens_1,
@@ -355,7 +333,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             text_encoder_output=text_encoder_1_output,
             add_pooled_output=False,
             use_attention_mask=False,
-            add_layer_norm=False,
+            add_layer_norm=False
         )
 
         text_encoder_2_output, pooled_text_encoder_2_output = encode_clip(
@@ -367,7 +345,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             add_pooled_output=True,
             pooled_text_encoder_output=pooled_text_encoder_2_output,
             use_attention_mask=False,
-            add_layer_norm=False,
+            add_layer_norm=False
         )
 
         # Apply dropout if configured
@@ -376,9 +354,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 [rand.random() > text_encoder_1_dropout_probability for _ in range(batch_size)],
                 device=train_device
             ).float()
-            with create_stream_context(torch.cuda.current_stream()):
-                text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
-                tensors_record_stream(torch.cuda.current_stream(), text_encoder_1_output)
+            text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
 
         if text_encoder_2_dropout_probability is not None:
             dropout_text_encoder_2_mask = torch.tensor(
@@ -389,6 +365,6 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             text_encoder_2_output = text_encoder_2_output * dropout_text_encoder_2_mask[:, None, None]
 
         # Combine encoder outputs
-        text_encoder_output = torch.concat([text_encoder_1_output, text_encoder_2_output], dim=-1)
+        text_encoder_output = torch.cat([text_encoder_1_output, text_encoder_2_output], dim=-1)
 
         return text_encoder_output, pooled_text_encoder_2_output
