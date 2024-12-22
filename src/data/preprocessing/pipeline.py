@@ -240,6 +240,67 @@ class PreprocessingPipeline:
             f"- Cache misses: {self.stats.cache_misses}"
         )
 
+    def _process_image(self, img_path: Path) -> Dict[str, Any]:
+        """Process single image with optimized memory handling.
+        
+        Args:
+            img_path: Path to image file
+            
+        Returns:
+            Dict containing processed tensors and metadata
+            
+        Raises:
+            PreprocessingError: If processing fails
+        """
+        try:
+            # Load and validate image
+            img = Image.open(img_path).convert('RGB')
+            
+            # Get image metadata
+            metadata = {
+                "original_size": img.size,
+                "path": str(img_path),
+                "timestamp": time.time()
+            }
+            
+            # Convert to tensor with memory optimization
+            with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
+                # Process through DALI if available
+                if self.dali_pipeline:
+                    try:
+                        tensor = self._process_with_dali(img)
+                    except Exception as e:
+                        logger.warning(f"DALI processing failed, falling back to CPU: {e}")
+                        tensor = None
+                        
+                # CPU fallback
+                if not self.dali_pipeline or tensor is None:
+                    tensor = self._apply_optimized_transforms(
+                        torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                    )
+                
+                # Generate latents if preprocessor available
+                if self.latent_preprocessor:
+                    with torch.no_grad():
+                        latent = self.latent_preprocessor.encode_images(tensor.unsqueeze(0))
+                else:
+                    latent = tensor
+                    
+                # Record stream for async operations
+                if torch.cuda.is_available():
+                    tensors_record_stream(torch.cuda.current_stream(), latent)
+                    
+            return {
+                "latent": latent,
+                "metadata": metadata
+            }
+            
+        except Exception as e:
+            raise PreprocessingError(
+                f"Failed to process image {img_path}",
+                context={"error": str(e)}
+            )
+
     def _validate_init_params(
         self,
         num_gpu_workers: int,
