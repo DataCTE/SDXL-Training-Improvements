@@ -268,6 +268,7 @@ def setup_training(
             config=config,
             latent_preprocessor=latent_preprocessor,
             cache_manager=cache_manager,
+            is_train=True,
             num_gpu_workers=config.preprocessing.num_gpu_workers,
             num_cpu_workers=config.preprocessing.num_cpu_workers,
             num_io_workers=config.preprocessing.num_io_workers,
