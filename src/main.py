@@ -230,7 +230,7 @@ def process_image_caption_pairs(image_files: List[Path]) -> tuple[List[str], Lis
 
 def setup_training(
     config: Config,
-    models: Dict[str, torch.nn.Module],
+    model: StableDiffusionXLModel,
     device: torch.device,
     image_paths: List[str],
     captions: List[str]
@@ -240,7 +240,7 @@ def setup_training(
         # Initialize latent preprocessor
         latent_preprocessor = LatentPreprocessor(
             config=config,
-            sdxl_model=models["model"],
+            sdxl_model=model,
             device=device
         )
         
@@ -273,7 +273,7 @@ def setup_training(
         
         # Create optimizer
         optimizer = torch.optim.AdamW(
-            models["unet"].parameters(),
+            model.unet.parameters(),
             lr=config.training.learning_rate,
             betas=config.training.optimizer_betas,
             weight_decay=config.training.weight_decay,
@@ -282,8 +282,8 @@ def setup_training(
         
         # Setup distributed model if needed
         if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-            models["unet"] = torch.nn.parallel.DistributedDataParallel(
-                models["unet"],
+            model.unet = torch.nn.parallel.DistributedDataParallel(
+                model.unet,
                 device_ids=[device] if device.type == "cuda" else None
             )
         
@@ -297,7 +297,7 @@ def setup_training(
                 dir=config.global_config.output_dir,
                 tags=["sdxl", "fine-tuning"]
             )
-            wandb_logger.log_model(models["unet"])
+            wandb_logger.log_model(model.unet)
             
         return train_dataloader, optimizer, wandb_logger
         
@@ -375,7 +375,11 @@ def main():
             # Setup training components
             logger.info("Setting up training...")
             train_dataloader, optimizer, wandb_logger = setup_training(
-                config, models, device, image_paths, captions
+                config=config,
+                model=models,  # Pass the model directly
+                device=device,
+                image_paths=image_paths,
+                captions=captions
             )
             
             # Create and execute trainer
