@@ -486,10 +486,14 @@ class PreprocessingPipeline:
             # Now convert to channels last
             tensor = tensor.contiguous(memory_format=torch.channels_last)
             
-            # Apply configured transforms
+            # Apply configured transforms with dtype handling
             if getattr(self.config.transforms, 'normalize', True):
-                mean = torch.tensor([0.5, 0.5, 0.5], device=tensor.device)
-                std = torch.tensor([0.5, 0.5, 0.5], device=tensor.device)
+                # Match model dtype
+                target_dtype = torch.float16 if self.latent_preprocessor and self.latent_preprocessor.model.dtype == torch.float16 else torch.float32
+                tensor = tensor.to(dtype=target_dtype)
+                
+                mean = torch.tensor([0.5, 0.5, 0.5], device=tensor.device, dtype=target_dtype)
+                std = torch.tensor([0.5, 0.5, 0.5], device=tensor.device, dtype=target_dtype)
                 tensor = tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
             
             if getattr(self.config.transforms, 'random_flip', False):
