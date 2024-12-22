@@ -2,6 +2,7 @@
 import logging
 import time
 import traceback
+from src.core.types import DataType
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from pathlib import Path
 from queue import Queue
@@ -463,7 +464,10 @@ class PreprocessingPipeline:
             
             # Move to CUDA and apply transforms
             if torch.cuda.is_available():
-                tensor = tensor.cuda(non_blocking=True).to(dtype=self.latent_preprocessor.model.dtype if self.latent_preprocessor else torch.float32)
+                model_dtype = (DataType.from_str(self.latent_preprocessor.model.dtype) 
+                             if self.latent_preprocessor 
+                             else DataType.FLOAT_32)
+                tensor = tensor.cuda(non_blocking=True).to(dtype=model_dtype.to_torch_dtype())
                 tensor = self._apply_optimized_transforms(tensor)
                 
             return tensor
@@ -505,6 +509,11 @@ class PreprocessingPipeline:
                 
                 mean = torch.tensor([0.5, 0.5, 0.5], device=tensor.device, dtype=target_dtype)
                 std = torch.tensor([0.5, 0.5, 0.5], device=tensor.device, dtype=target_dtype)
+                
+                # Validate dtype consistency
+                if not tensor.dtype == target_dtype:
+                    logger.warning(f"Tensor dtype mismatch: {tensor.dtype} vs {target_dtype}")
+                    tensor = tensor.to(dtype=target_dtype)
                 tensor = tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
             
             if getattr(self.config.transforms, 'random_flip', False):
