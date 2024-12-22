@@ -251,7 +251,7 @@ class PreprocessingPipeline:
         text: Optional[str] = None
     ) -> Dict[str, torch.Tensor]:
         """Process tensor batch with optimized memory handling."""
-        from .utils import process_tensor_batch, validate_tensor
+        from ..utils.tensor_utils import process_tensor_batch, validate_tensor
         
         try:
             # Validate tensor

@@ -307,7 +307,7 @@ class CacheManager:
 
     def _validate_tensor(self, tensor: torch.Tensor) -> bool:
         """Validate tensor properties."""
-        from .utils import validate_tensor
+        from ..utils.tensor_utils import validate_tensor
         return validate_tensor(
             tensor,
             expected_dims=4,
