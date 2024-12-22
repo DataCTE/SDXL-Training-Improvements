@@ -84,13 +84,18 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
 def tensor_operation_context(operation_name: str):
     """Context manager for tensor operations with enhanced memory tracking and cleanup."""
     if torch.cuda.is_available():
-        # Synchronize and record initial state
+        # Initial cleanup
+        gc.collect()
+        torch.cuda.empty_cache()
         torch.cuda.synchronize()
+        
+        # Record initial state
         start_memory = torch.cuda.memory_allocated()
         start_reserved = torch.cuda.memory_reserved()
+        peak_memory = torch.cuda.max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
     else:
-        start_memory = 0
-        start_reserved = 0
+        start_memory = start_reserved = peak_memory = 0
         
     try:
         yield
@@ -107,28 +112,39 @@ def tensor_operation_context(operation_name: str):
         
     finally:
         if torch.cuda.is_available():
-            # Force garbage collection
+            # Synchronize and initial cleanup
+            torch.cuda.synchronize()
             gc.collect()
             torch.cuda.empty_cache()
             
-            # Clean up and check for leaks
-            torch.cuda.synchronize()
+            # Get final memory state
             end_memory = torch.cuda.memory_allocated()
             end_reserved = torch.cuda.memory_reserved()
+            operation_peak = torch.cuda.max_memory_allocated()
             
             # Update stats
             tensor_stats.memory_allocated = end_memory
-            tensor_stats.peak_memory = max(tensor_stats.peak_memory, end_memory)
+            tensor_stats.peak_memory = max(tensor_stats.peak_memory, operation_peak)
             
-            # Check for potential memory leaks
+            # Check for memory leaks
             if end_memory > start_memory:
                 leaked = (end_memory - start_memory) / 1024**2
                 if leaked > 0.01:  # Only warn for leaks > 0.01MB
                     logger.warning(f"Potential memory leak detected in {operation_name}: {leaked:.2f}MB")
-                    # Force another cleanup pass
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
+                    
+                    # Aggressive cleanup
+                    for _ in range(2):  # Try cleanup multiple times
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        
+                        # Check if cleanup helped
+                        current_memory = torch.cuda.memory_allocated()
+                        if current_memory <= start_memory:
+                            break
+                            
+            # Reset peak stats for next operation
+            torch.cuda.reset_peak_memory_stats()
 
 def get_tensors(
     data: Union[torch.Tensor, List, Tuple, Dict],
@@ -171,22 +187,39 @@ def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.devi
     with tensor_operation_context("tensor_transfer"):
         try:
             if isinstance(data, torch.Tensor):
+                # Track original memory state
+                start_mem = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                
                 if data.is_pinned() and device.type == "cuda":
-                    # Handle pinned memory transfers
-                    new_data = data.to(device, non_blocking=non_blocking)
-                    if non_blocking:
-                        with create_stream_context(torch.cuda.current_stream()) as stream:
+                    # Handle pinned memory transfers with explicit stream
+                    stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                    with create_stream_context(stream):
+                        new_data = data.to(device, non_blocking=True)
+                        if stream:
                             new_data.record_stream(stream)
-                    # Clear old reference
-                    del data
-                    data = new_data
+                            stream.synchronize()
                 else:
-                    # Regular transfer
+                    # Regular transfer with synchronization
                     new_data = data.to(device, non_blocking=False)
-                    # Clear old reference
-                    del data
-                    data = new_data
-                    
+                    if device.type == "cuda":
+                        torch.cuda.current_stream().synchronize()
+                
+                # Explicitly clear old reference and cache
+                if hasattr(data, 'data_ptr'):
+                    data.storage().resize_(0)
+                del data
+                torch.cuda.empty_cache()
+                data = new_data
+                
+                # Check for memory leaks
+                if torch.cuda.is_available():
+                    end_mem = torch.cuda.memory_allocated()
+                    if end_mem > start_mem:
+                        # Force another cleanup
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                
                 tensor_stats.device_transfers += 1
                 
             elif isinstance(data, dict):
