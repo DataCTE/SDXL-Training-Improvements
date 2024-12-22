@@ -114,14 +114,15 @@ class AspectBucketDataset(Dataset):
         self.is_train = is_train
         
         # Initialize preprocessing pipeline if latent preprocessor is available
-        self.preprocessing_pipeline = (
-            PreprocessingPipeline(
+        if latent_preprocessor and latent_preprocessor.model:
+            self.preprocessing_pipeline = PreprocessingPipeline(
                 config=config,
                 latent_preprocessor=latent_preprocessor,
                 enable_memory_tracking=enable_memory_tracking,
                 use_pinned_memory=True
-            ) if latent_preprocessor else None
-        )
+            )
+        else:
+            self.preprocessing_pipeline = None
         
         # Setup image configuration
         self._setup_image_config()
