@@ -81,12 +81,28 @@ class CacheManager:
         
         # Initialize statistics
         self.stats = CacheStats()
+        self.memory_stats = {
+            'peak_allocated': 0,
+            'total_allocated': 0,
+            'num_allocations': 0,
+            'oom_events': 0
+        }
         
         # Setup cache paths
         self.latents_dir = self.cache_dir / "latents"
         self.text_dir = self.cache_dir / "text"
         self.latents_dir.mkdir(exist_ok=True)
         self.text_dir.mkdir(exist_ok=True)
+        
+        # Setup worker pools with proper resource limits
+        self.image_pool = ProcessPoolExecutor(
+            max_workers=self.num_proc,
+            mp_context=mp.get_context('spawn')
+        )
+        self.io_pool = ThreadPoolExecutor(
+            max_workers=self.num_proc * 2,
+            thread_name_prefix="cache_io"
+        )
         
         # Load cache index
         self.index_path = self.cache_dir / "cache_index.json"
@@ -110,24 +126,6 @@ class CacheManager:
                 json.dump(self.cache_index, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save cache index: {str(e)}")
-            
-        # Setup worker pools with proper resource limits
-        self.image_pool = ProcessPoolExecutor(
-            max_workers=self.num_proc,
-            mp_context=mp.get_context('spawn')
-        )
-        self.io_pool = ThreadPoolExecutor(
-            max_workers=self.num_proc * 2,
-            thread_name_prefix="cache_io"
-        )
-        
-        # Initialize memory tracking
-        self.memory_stats = {
-            'peak_allocated': 0,
-            'total_allocated': 0,
-            'num_allocations': 0,
-            'oom_events': 0
-        }
 
     def _init_memory_tracking(self):
         """Initialize memory tracking utilities."""
