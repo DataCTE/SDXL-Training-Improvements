@@ -58,6 +58,7 @@ class ModelConfig:
     sigma_max: float = 80.0
     rho: float = 7.0
     dtype: str = "float32"  # Model precision: float32, float16, or bfloat16
+    fallback_dtype: str = "float32"  # Fallback precision when main dtype not supported
     
 @dataclass
 class MemoryConfig:
