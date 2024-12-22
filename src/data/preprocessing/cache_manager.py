@@ -419,3 +419,74 @@ class CacheManager:
             self.image_pool.shutdown()
             self.io_pool.shutdown()
             torch_gc()
+            
+    def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
+        """Get aspect ratio buckets from config."""
+        return config.global_config.image.supported_dims
+        
+    def assign_aspect_buckets(
+        self,
+        image_paths: List[str],
+        buckets: List[Tuple[int, int]],
+        max_aspect_ratio: float
+    ) -> List[int]:
+        """Assign images to aspect ratio buckets."""
+        bucket_indices = []
+        
+        # Process images in parallel using worker pool
+        with ThreadPoolExecutor(max_workers=self.num_cpu_workers) as pool:
+            futures = []
+            
+            for img_path in image_paths:
+                futures.append(pool.submit(
+                    self._assign_single_bucket,
+                    img_path,
+                    buckets,
+                    max_aspect_ratio
+                ))
+                
+            for future in futures:
+                try:
+                    bucket_idx = future.result()
+                    bucket_indices.append(bucket_idx)
+                except Exception as e:
+                    logger.error(f"Error in bucket assignment: {str(e)}")
+                    bucket_indices.append(0)
+                    
+        return bucket_indices
+        
+    def _assign_single_bucket(
+        self,
+        img_path: str,
+        buckets: List[Tuple[int, int]],
+        max_aspect_ratio: float
+    ) -> int:
+        """Assign single image to best matching bucket."""
+        try:
+            img = Image.open(img_path)
+            w, h = img.size
+            aspect_ratio = w / h
+            img_area = w * h
+            
+            # Find best bucket match
+            min_diff = float('inf')
+            best_idx = 0
+            
+            for idx, (bucket_h, bucket_w) in enumerate(buckets):
+                bucket_ratio = bucket_w / bucket_h
+                if bucket_ratio > max_aspect_ratio:
+                    continue
+                    
+                ratio_diff = abs(aspect_ratio - bucket_ratio)
+                area_diff = abs(img_area - (bucket_w * bucket_h))
+                total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
+                
+                if total_diff < min_diff:
+                    min_diff = total_diff
+                    best_idx = idx
+                    
+            return best_idx
+            
+        except Exception as e:
+            logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
+            return 0

@@ -192,9 +192,9 @@ class AspectBucketDataset(Dataset):
 
     def _validate_paths(self, paths: List[str]) -> List[str]:
         """Validate paths using preprocessing pipeline."""
-        if self.preprocessing_pipeline:
-            return self.preprocessing_pipeline.validate_paths(paths)
-        return [str(convert_windows_path(p, make_absolute=True)) for p in paths]
+        if not self.preprocessing_pipeline:
+            raise ValueError("Preprocessing pipeline not initialized")
+        return self.preprocessing_pipeline.validate_paths(paths)
 
     def _precompute_latents(
         self,
@@ -204,56 +204,35 @@ class AspectBucketDataset(Dataset):
         config: Config
     ) -> None:
         """Delegate latent precomputation to preprocessing pipeline."""
-        if self.preprocessing_pipeline:
-            self.preprocessing_pipeline.precompute_latents(
-                image_paths=image_paths,
-                captions=captions,
-                latent_preprocessor=latent_preprocessor,
-                cache_manager=self.cache_manager,
-                batch_size=config.training.batch_size,
-                proportion_empty_prompts=config.data.proportion_empty_prompts,
-                is_train=self.is_train
-            )
+        if not self.preprocessing_pipeline:
+            raise ValueError("Preprocessing pipeline not initialized")
+            
+        self.preprocessing_pipeline.precompute_latents(
+            image_paths=image_paths,
+            captions=captions,
+            latent_preprocessor=latent_preprocessor,
+            cache_manager=self.cache_manager,
+            batch_size=config.training.batch_size,
+            proportion_empty_prompts=config.data.proportion_empty_prompts,
+            is_train=self.is_train
+        )
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
-        """Create aspect ratio buckets from config."""
-        return self.config.global_config.image.supported_dims
+        """Get aspect ratio buckets from preprocessing pipeline."""
+        if not self.preprocessing_pipeline:
+            raise ValueError("Preprocessing pipeline not initialized")
+        return self.preprocessing_pipeline.get_aspect_buckets(self.config)
 
     def _assign_buckets(self) -> List[int]:
-        """Assign images to buckets based on aspect ratio."""
-        bucket_indices = []
-        
-        for img_path in self.image_paths:
-            try:
-                img = Image.open(img_path)
-                w, h = img.size
-                aspect_ratio = w / h
-                img_area = w * h
-                
-                # Find best bucket match
-                min_diff = float('inf')
-                best_idx = 0
-                
-                for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
-                    bucket_ratio = bucket_w / bucket_h
-                    if bucket_ratio > self.max_aspect_ratio:
-                        continue
-                        
-                    ratio_diff = abs(aspect_ratio - bucket_ratio)
-                    area_diff = abs(img_area - (bucket_w * bucket_h))
-                    total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
-                    
-                    if total_diff < min_diff:
-                        min_diff = total_diff
-                        best_idx = idx
-                        
-                bucket_indices.append(best_idx)
-                
-            except Exception as e:
-                logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
-                bucket_indices.append(0)
-                
-        return bucket_indices
+        """Assign images to buckets using preprocessing pipeline."""
+        if not self.preprocessing_pipeline:
+            raise ValueError("Preprocessing pipeline not initialized")
+            
+        return self.preprocessing_pipeline.assign_aspect_buckets(
+            self.image_paths,
+            self.buckets,
+            self.max_aspect_ratio
+        )
 
     def _setup_cache_manager(self, config: Config) -> Optional[CacheManager]:
         """Initialize cache manager with configuration."""
