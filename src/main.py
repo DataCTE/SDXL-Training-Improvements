@@ -96,10 +96,7 @@ def load_models(config: Config, device: torch.device) -> Dict[str, torch.nn.Modu
         # Load base SDXL model with memory optimization
         with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
             models["model"] = StableDiffusionXLModel(
-                model_type=ModelType.SDXL,
-                pretrained_model_name=config.model.pretrained_model_name,
-                dtype=config.model.dtype,
-                fallback_dtype=config.model.fallback_dtype
+                model_type=ModelType.SDXL
             )
 
             # Move model to device with optimized memory transfer
