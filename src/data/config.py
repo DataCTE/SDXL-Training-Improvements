@@ -112,6 +112,7 @@ class DDPMConfig:
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
+    micro_batch_size: Optional[int] = None  # Size of micro-batches for gradient accumulation
     gradient_accumulation_steps: int = 1
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
