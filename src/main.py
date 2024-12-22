@@ -263,6 +263,17 @@ def setup_training(
             enable_memory_tracking=True
         )
 
+        # Initialize preprocessing pipeline
+        preprocessing_pipeline = PreprocessingPipeline(
+            config=config,
+            latent_preprocessor=latent_preprocessor,
+            num_gpu_workers=config.preprocessing.num_gpu_workers,
+            num_cpu_workers=config.preprocessing.num_cpu_workers,
+            num_io_workers=config.preprocessing.num_io_workers,
+            prefetch_factor=config.preprocessing.prefetch_factor,
+            use_pinned_memory=config.preprocessing.use_pinned_memory
+        )
+
         # Create and preprocess dataset
         train_dataset = create_dataset(
             config=config,
