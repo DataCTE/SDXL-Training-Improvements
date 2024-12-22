@@ -8,10 +8,7 @@ from ..utils.paths import convert_windows_path
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
-from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
-from diffusers import AutoencoderKL
-from src.models.encoders.vae import VAEEncoder
-from src.models.encoders.clip import encode_clip
+from src.models import StableDiffusionXLModel
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import (
@@ -44,20 +41,12 @@ class LatentPreprocessor:
     ):
         super().__init__()
         self.config = config
-        self.tokenizer_one = tokenizer_one
-        self.tokenizer_two = tokenizer_two
-        self.text_encoder_one = text_encoder_one 
-        self.text_encoder_two = text_encoder_two
-        # Initialize optimized VAE encoder
-        self.vae_encoder = VAEEncoder(
-            vae=vae,
-            device=device,
-            enable_memory_efficient_attention=True,
-            enable_vae_slicing=True,
-            enable_vae_tiling=False,
-            vae_tile_size=512,
-            enable_gradient_checkpointing=True
-        )
+        self.model = StableDiffusionXLModel(model_type=ModelType.BASE)
+        self.model.tokenizer_1 = tokenizer_one
+        self.model.tokenizer_2 = tokenizer_two
+        self.model.text_encoder_1 = text_encoder_one
+        self.model.text_encoder_2 = text_encoder_two
+        self.model.vae = vae
         self.device = torch.device(device)
         self.use_cache = use_cache
         self.max_retries = max_retries
@@ -105,91 +94,19 @@ class LatentPreprocessor:
             for i in range(0, len(prompt_batch), batch_size):
                 batch = prompt_batch[i:i + batch_size]
                 
-                # Process tokenization in parallel streams
-                with create_stream_context() as (stream_1, stream_2):
-                    # Tokenize first encoder
-                    with stream_1:
-                        batch_tokens_1 = self.tokenizer_one(
-                            batch,
-                            padding="max_length",
-                            max_length=self.tokenizer_one.model_max_length,
-                            truncation=True,
-                            return_tensors="pt"
-                        ).input_ids
-                        
-                        # Pin memory and record stream
-                        pin_tensor_(batch_tokens_1)
-                        tensors_record_stream(stream_1, batch_tokens_1)
-                        
-                    # Tokenize second encoder  
-                    with stream_2:
-                        batch_tokens_2 = self.tokenizer_two(
-                            batch,
-                            padding="max_length",
-                            max_length=self.tokenizer_two.model_max_length,
-                            truncation=True, 
-                            return_tensors="pt"
-                        ).input_ids
-                        
-                        pin_tensor_(batch_tokens_2)
-                        tensors_record_stream(stream_2, batch_tokens_2)
-                        
-                    # Move to device if needed
-                    if not device_equals(batch_tokens_1.device, self.device):
-                        tensors_to_device_([batch_tokens_1, batch_tokens_2], self.device)
-                        
-                    tokens_1.append(batch_tokens_1)
-                    tokens_2.append(batch_tokens_2)
-                    
-                    # Clean up pinned memory
-                    unpin_tensor_(batch_tokens_1)
-                    unpin_tensor_(batch_tokens_2)
-                    
-            # Combine tokens
-            tokens_1 = torch.cat(tokens_1)
-            tokens_2 = torch.cat(tokens_2)
-
-            # Encode tokens
-            with torch.no_grad():
-                # Process encoders with optimized CLIP encoding
-                with create_stream_context() as (stream_1, stream_2):
-                    with stream_1:
-                        text_embeddings_1, _ = encode_clip(
-                            text_encoder=self.text_encoder_one,
-                            tokens=tokens_1,
-                            default_layer=-2,
-                            layer_skip=0,
-                            use_attention_mask=False,
-                            add_layer_norm=False
-                        )
-                        pin_tensor_(text_embeddings_1)
-                        tensors_record_stream(stream_1, text_embeddings_1)
-                        
-                    with stream_2:
-                        text_embeddings_2, pooled_embeddings = encode_clip(
-                            text_encoder=self.text_encoder_two,
-                            tokens=tokens_2,
-                            default_layer=-2,
-                            layer_skip=0,
-                            add_pooled_output=True,
-                            use_attention_mask=False,
-                            add_layer_norm=False
-                        )
-                        pin_tensor_(text_embeddings_2)
-                        pin_tensor_(pooled_embeddings)
-                        tensors_record_stream(stream_2, [text_embeddings_2, pooled_embeddings])
-                        
-                    # Combine embeddings
-                    prompt_embeds = torch.cat([text_embeddings_1, text_embeddings_2], dim=-1)
-                    
-                    # Clean up
-                    unpin_tensor_(text_embeddings_1)
-                    unpin_tensor_(text_embeddings_2)
-                    unpin_tensor_(pooled_embeddings)
+                # Use high-level SDXL model interface
+                with torch.no_grad():
+                    text_encoder_output, pooled_output = self.model.encode_text(
+                        train_device=self.device,
+                        batch_size=len(batch),
+                        text=batch,
+                        text_encoder_1_layer_skip=0,
+                        text_encoder_2_layer_skip=0
+                    )
 
             return {
-                "prompt_embeds": prompt_embeds,
-                "pooled_prompt_embeds": pooled_embeddings
+                "prompt_embeds": text_encoder_output,
+                "pooled_prompt_embeds": pooled_output
             }
 
         except Exception as e:
