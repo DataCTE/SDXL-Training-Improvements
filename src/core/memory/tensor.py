@@ -206,7 +206,7 @@ def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.devi
                 
                 # Explicitly clear old reference and cache
                 if hasattr(data, 'data_ptr'):
-                    data.storage().resize_(0)
+                    data.untyped_storage().resize_(0)
                 del data
                 torch.cuda.empty_cache()
                 data = new_data
