@@ -184,20 +184,31 @@ def get_tensors(
 
 def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.device, non_blocking: bool = True) -> None:
     """Move tensors to device with enhanced error handling and memory tracking."""
-    with tensor_operation_context("tensor_transfer"):
+    with tensor_operation_context("tensor_transfer") as ctx:
+        # Track initial memory state
+        initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
         try:
             if isinstance(data, torch.Tensor):
-                # Track original memory state
-                start_mem = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                # Profile memory for this transfer
+                transfer_size = data.element_size() * data.nelement()
+                logger.debug(f"Transferring tensor of size {transfer_size/1024**2:.2f}MB to {device}")
                 
                 if data.is_pinned() and device.type == "cuda":
-                    # Handle pinned memory transfers with explicit stream
+                    # Use event-based synchronization
+                    start_event = torch.cuda.Event(enable_timing=True)
+                    end_event = torch.cuda.Event(enable_timing=True)
+                    start_event.record()
+                    # Handle pinned memory transfers with explicit stream and events
                     stream = torch.cuda.Stream() if torch.cuda.is_available() else None
                     with create_stream_context(stream):
                         new_data = data.to(device, non_blocking=True)
                         if stream:
                             new_data.record_stream(stream)
-                            stream.synchronize()
+                            end_event.record()
+                            end_event.synchronize()
+                            # Calculate transfer time
+                            transfer_time = start_event.elapsed_time(end_event)
+                            logger.debug(f"Transfer completed in {transfer_time:.2f}ms")
                 else:
                     # Regular transfer with synchronization
                     new_data = data.to(device, non_blocking=False)
@@ -211,14 +222,26 @@ def tensors_to_device_(data: Union[torch.Tensor, Dict, List], device: torch.devi
                 torch.cuda.empty_cache()
                 data = new_data
                 
-                # Check for memory leaks
+                # Check for memory leaks with detailed reporting
                 if torch.cuda.is_available():
                     end_mem = torch.cuda.memory_allocated()
-                    if end_mem > start_mem:
-                        # Force another cleanup
-                        gc.collect()
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
+                    if end_mem > initial_memory:
+                        leaked = (end_mem - initial_memory) / 1024**2
+                        logger.warning(
+                            f"Memory leak detected: {leaked:.2f}MB\n"
+                            f"Transfer size: {transfer_size/1024**2:.2f}MB\n"
+                            f"Current memory: {end_mem/1024**2:.2f}MB"
+                        )
+                        # Aggressive cleanup
+                        for _ in range(3):
+                            gc.collect()
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                            current_mem = torch.cuda.memory_allocated()
+                            if current_mem <= initial_memory:
+                                logger.info("Memory leak resolved after cleanup")
+                                break
+                            logger.debug(f"Cleanup iteration, memory: {current_mem/1024**2:.2f}MB")
                 
                 tensor_stats.device_transfers += 1
                 
