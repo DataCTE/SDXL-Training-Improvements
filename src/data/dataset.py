@@ -369,42 +369,80 @@ class AspectBucketDataset(Dataset):
         """Process single image with memory optimization."""
         with self._track_memory("image_processing"):
             try:
+                # Validate input image
                 if not isinstance(image, Image.Image):
                     raise ProcessingError(f"Expected PIL.Image, got {type(image)}")
-                    
+                
+                # Validate image dimensions
+                if image.size[0] <= 0 or image.size[1] <= 0:
+                    raise ProcessingError(f"Invalid image dimensions: {image.size}")
+                
+                # Validate target size
+                if any(x <= 0 for x in target_size):
+                    raise ProcessingError(f"Invalid target size: {target_size}")
+                
                 # Create processing stream with error handling
-                try:
-                    compute_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                except RuntimeError as cuda_err:
-                    logger.warning(f"CUDA stream creation failed: {cuda_err}. Falling back to CPU processing.")
-                    compute_stream = None
-                    
+                compute_stream = None
+                if torch.cuda.is_available():
+                    try:
+                        compute_stream = torch.cuda.Stream()
+                    except RuntimeError as cuda_err:
+                        logger.warning(f"CUDA stream creation failed: {cuda_err}. Falling back to CPU processing.")
+                
                 # Apply transforms with optional CUDA stream optimization
                 with create_stream_context(compute_stream) if compute_stream else nullcontext():
-                    # Convert to tensor with batch dimension
-                    tensor = self.transforms(image).unsqueeze(0)
+                    try:
+                        # Convert to tensor with batch dimension
+                        tensor = self.transforms(image)
+                        if tensor.dim() != 3:  # CHW format
+                            raise ProcessingError(f"Expected 3D tensor (CHW), got shape {tensor.shape}")
+                            
+                        tensor = tensor.unsqueeze(0)  # Add batch dimension
+                        
+                        # Optimize memory format and move to device
+                        if device and device.type == 'cuda':
+                            try:
+                                tensor = tensor.to(
+                                    memory_format=torch.channels_last,
+                                    device=device,
+                                    non_blocking=True
+                                )
+                                pin_tensor_(tensor)
+                                if compute_stream:
+                                    tensors_record_stream(compute_stream, tensor)
+                            except RuntimeError as e:
+                                if "out of memory" in str(e):
+                                    torch_gc()  # Try to free memory
+                                    raise ProcessingError("GPU out of memory during tensor transfer") from e
+                                raise
+                        
+                        # Remove batch dimension
+                        tensor = tensor.squeeze(0)
+                        
+                        if not tensor.is_floating_point():
+                            tensor = tensor.float()
+                        
+                        self.stats.processed_images += 1
+                        return tensor
+                        
+                    except Exception as transform_error:
+                        error_context = {
+                            'transform_error': str(transform_error),
+                            'tensor_shape': getattr(tensor, 'shape', None),
+                            'tensor_dtype': getattr(tensor, 'dtype', None)
+                        }
+                        raise ProcessingError("Transform pipeline failed", error_context) from transform_error
                     
-                    # Optimize memory format and move to device
-                    if device and device.type == 'cuda':
-                        tensor = tensor.to(
-                            memory_format=torch.channels_last,
-                            device=device,
-                            non_blocking=True
-                        )
-                        pin_tensor_(tensor)
-                        tensors_record_stream(compute_stream, tensor)
-                    
-                    # Remove batch dimension
-                    tensor = tensor.squeeze(0)
-                    
-                    self.stats.processed_images += 1
-                    return tensor
-                    
+            except ProcessingError:
+                raise  # Re-raise ProcessingError with context
             except Exception as e:
                 error_context = {
+                    'image_size': getattr(image, 'size', None),
+                    'image_mode': getattr(image, 'mode', None),
                     'target_size': target_size,
                     'device': str(device),
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 }
                 raise ProcessingError("Image processing failed", error_context) from e
 
