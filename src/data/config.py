@@ -61,6 +61,15 @@ class ModelConfig:
     fallback_dtype: str = "float32"  # Fallback precision when main dtype not supported
     unet_dtype: Optional[str] = None  # UNet specific dtype, falls back to main dtype if None
     prior_dtype: Optional[str] = None  # Prior model dtype, falls back to main dtype if None
+    text_encoder_dtype: Optional[str] = None  # Text encoder dtype
+    text_encoder_2_dtype: Optional[str] = None  # Second text encoder dtype
+    vae_dtype: Optional[str] = None  # VAE dtype
+    effnet_dtype: Optional[str] = None  # EfficientNet dtype
+    decoder_dtype: Optional[str] = None  # Decoder dtype
+    decoder_text_encoder_dtype: Optional[str] = None  # Decoder text encoder dtype
+    decoder_vqgan_dtype: Optional[str] = None  # Decoder VQGAN dtype
+    lora_dtype: Optional[str] = None  # LoRA dtype
+    embedding_dtype: Optional[str] = None  # Embedding dtype
     
 @dataclass
 class MemoryConfig:
