@@ -162,6 +162,78 @@ class PreprocessingPipeline:
             self.dali_pipeline = None
             # Don't raise here - allow fallback to CPU processing
 
+    def precompute_latents(
+        self,
+        image_paths: List[str],
+        captions: List[str],
+        latent_preprocessor: Optional[LatentPreprocessor],
+        cache_manager: Optional[CacheManager],
+        batch_size: int = 1,
+        proportion_empty_prompts: float = 0.0,
+        is_train: bool = True
+    ) -> None:
+        """Precompute and cache latents for a dataset.
+        
+        Args:
+            image_paths: List of image paths to process
+            captions: List of captions
+            latent_preprocessor: Preprocessor for generating latents
+            cache_manager: Optional cache manager
+            batch_size: Batch size for processing
+            proportion_empty_prompts: Proportion of prompts to leave empty
+            is_train: Whether this is for training data
+        """
+        if not latent_preprocessor or not cache_manager:
+            logger.info("Skipping latent precomputation - missing preprocessor or cache manager")
+            return
+            
+        logger.info(f"Precomputing latents for {len(image_paths)} images")
+        
+        try:
+            for i in range(0, len(image_paths), batch_size):
+                batch_paths = image_paths[i:i + batch_size]
+                batch_captions = captions[i:i + batch_size]
+                
+                # Process each image in batch
+                for img_path, caption in zip(batch_paths, batch_captions):
+                    try:
+                        # Skip if already cached
+                        if cache_manager.has_cached_item(img_path):
+                            self.stats.cache_hits += 1
+                            continue
+                            
+                        # Process image and cache results
+                        processed = self._process_image(img_path)
+                        if processed:
+                            cache_manager.save_preprocessed_data(
+                                latent_data=processed["latent"],
+                                text_embeddings=processed.get("text_embeddings"),
+                                metadata=processed.get("metadata", {}),
+                                file_path=img_path
+                            )
+                            self.stats.cache_misses += 1
+                            self.stats.successful += 1
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to precompute latents for {img_path}: {str(e)}")
+                        self.stats.failed_images += 1
+                        continue
+                        
+                if (i + 1) % 100 == 0:
+                    logger.info(f"Processed {i + 1}/{len(image_paths)} images")
+                    
+        except Exception as e:
+            logger.error(f"Latent precomputation failed: {str(e)}")
+            raise
+            
+        logger.info(
+            f"Completed latent precomputation:\n"
+            f"- Processed: {self.stats.successful}/{len(image_paths)}\n"
+            f"- Failed: {self.stats.failed_images}\n"
+            f"- Cache hits: {self.stats.cache_hits}\n"
+            f"- Cache misses: {self.stats.cache_misses}"
+        )
+
     def _validate_init_params(
         self,
         num_gpu_workers: int,
