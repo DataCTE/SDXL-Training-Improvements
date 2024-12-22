@@ -130,7 +130,6 @@ class AspectBucketDataset(Dataset):
         self.preprocessing_pipeline = PreprocessingPipeline(
             config=config,
             latent_preprocessor=latent_preprocessor,
-            tag_weighter=self.tag_weighter,
             cache_manager=self.cache_manager,
             is_train=self.is_train
         )
