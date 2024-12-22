@@ -2,7 +2,7 @@
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 import yaml
 from src.core.logging.logging import setup_logging
 
