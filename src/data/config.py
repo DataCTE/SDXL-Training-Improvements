@@ -9,23 +9,23 @@ from src.core.logging.logging import setup_logging
 logger = setup_logging(__name__)
 
 @dataclass
+class TransformsConfig:
+    """Image transform configuration."""
+    normalize: bool = True
+    random_flip: bool = True
+    center_crop: bool = True
+    random_rotation: bool = False
+    rotation_degrees: float = 5.0
+    color_jitter: bool = False
+    jitter_brightness: float = 0.1
+    jitter_contrast: float = 0.1
+    jitter_saturation: float = 0.1
+    jitter_hue: float = 0.1
+
+@dataclass
 class GlobalConfig:
     """Global configuration settings."""
     
-    @dataclass 
-    class TransformsConfig:
-        """Image transform configuration."""
-        normalize: bool = True
-        random_flip: bool = True
-        center_crop: bool = True
-        random_rotation: bool = False
-        rotation_degrees: float = 5.0
-        color_jitter: bool = False
-        jitter_brightness: float = 0.1
-        jitter_contrast: float = 0.1
-        jitter_saturation: float = 0.1
-        jitter_hue: float = 0.1
-
     @dataclass
     class ImageConfig:
         """Image processing configuration."""
