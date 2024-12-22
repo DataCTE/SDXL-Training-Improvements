@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Union, Any, Tuple, TYPE_CHECKING
 from PIL import Image
 from src.data.config import Config
 from src.data.preprocessing.latents import LatentPreprocessor
-from src.data.preprocessing.cache import CacheManager
+from src.data.preprocessing.cache_manager import CacheManager
 from dataclasses import dataclass
 from contextlib import nullcontext
 
