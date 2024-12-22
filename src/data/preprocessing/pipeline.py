@@ -93,24 +93,35 @@ class PreprocessingPipeline:
         self.input_queue = Queue(maxsize=queue_size)
         self.output_queue = Queue(maxsize=queue_size) 
         
-        # Setup CUDA streams with error checking
+        # Setup CUDA streams with enhanced error handling and fallback
+        self.streams = {}
         if torch.cuda.is_available():
             try:
-                self.streams = {
-                    dev_id: {
-                        'compute': torch.cuda.Stream(device=dev_id),
-                        'transfer': torch.cuda.Stream(device=dev_id)
-                    }
-                    for dev_id in self.device_ids
-                }
+                for dev_id in self.device_ids:
+                    try:
+                        # Create streams individually for better error handling
+                        compute_stream = torch.cuda.Stream(device=dev_id)
+                        transfer_stream = torch.cuda.Stream(device=dev_id)
+                        
+                        # Verify streams are valid
+                        if not compute_stream.query() or not transfer_stream.query():
+                            raise StreamError(f"Stream validation failed for device {dev_id}")
+                            
+                        self.streams[dev_id] = {
+                            'compute': compute_stream,
+                            'transfer': transfer_stream
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to create streams for device {dev_id}: {str(e)}")
+                        # Skip this device but continue with others
+                        continue
+                        
+                if not self.streams:
+                    logger.warning("No CUDA streams could be created, falling back to synchronous processing")
+                    
             except Exception as e:
-                raise StreamError(
-                    "Failed to initialize CUDA streams",
-                    context={
-                        'device_ids': self.device_ids,
-                        'error': str(e)
-                    }
-                )
+                logger.warning(f"Stream initialization warning: {str(e)}")
+                # Don't raise - allow fallback to synchronous processing
                 
         # Initialize component pools
         self._init_worker_pools()
@@ -125,17 +136,20 @@ class PreprocessingPipeline:
                     context={'error': str(e)}
                 )
                 
-        # Initialize encoders and pipeline
+        # Initialize encoders and pipeline with enhanced error handling
         try:
             if latent_preprocessor:
                 self.model = latent_preprocessor.model
-            
+                    
+            # Create DALI pipeline with fallback
             self.dali_pipeline = self._create_optimized_dali_pipeline()
+            if self.dali_pipeline is None:
+                logger.warning("DALI pipeline creation failed, falling back to CPU processing")
+                    
         except Exception as e:
-            raise DALIError(
-                "Failed to create pipeline",
-                context={'error': str(e)}
-            )
+            logger.warning(f"Pipeline initialization warning: {str(e)}")
+            self.dali_pipeline = None
+            # Don't raise here - allow fallback to CPU processing
 
     def _create_memory_tracker(self):
         """Create enhanced memory tracking utilities."""
@@ -163,15 +177,16 @@ class PreprocessingPipeline:
                 'peak': self.memory_tracker['peak_allocated']
             })
 
-    def _create_optimized_dali_pipeline(self) -> Pipeline:
-        """Create DALI pipeline with optimized settings."""
-        pipe = Pipeline(
-            batch_size=32,
-            num_threads=self.num_cpu_workers,
-            device_id=self.device_ids[0],
-            prefetch_queue_depth=self.prefetch_factor,
-            enable_memory_stats=self.enable_memory_tracking
-        )
+    def _create_optimized_dali_pipeline(self) -> Optional[Pipeline]:
+        """Create DALI pipeline with optimized settings and proper error handling."""
+        try:
+            pipe = Pipeline(
+                batch_size=32,
+                num_threads=self.num_cpu_workers,
+                device_id=self.device_ids[0] if self.device_ids else 0,
+                prefetch_queue_depth=self.prefetch_factor,
+                enable_memory_stats=self.enable_memory_tracking
+            )
 
         with pipe:
             # Enhanced error handling for readers
