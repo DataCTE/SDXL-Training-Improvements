@@ -325,33 +325,32 @@ def main():
             logger.info("Loading models...")
             models = setup_model(config, device)
             
-            # Move models to device with enhanced memory management
-            for name, model in models.items():
-                if hasattr(model, 'state_dict') and not tensors_match_device(model.state_dict(), device):
-                    logger.info(f"Moving {name} to device {device}")
-                    try:
-                        # Create dedicated stream for transfers
-                        stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            # Move model to device with enhanced memory management
+            if hasattr(models, 'state_dict') and not tensors_match_device(models.state_dict(), device):
+                logger.info(f"Moving model to device {device}")
+                try:
+                    # Create dedicated stream for transfers
+                    stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                    
+                    # Track memory before transfer
+                    pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                    
+                    with create_stream_context(stream):
+                        try:
+                            tensors_to_device_(models.state_dict(), device)
+                        finally:
+                            # Ensure proper stream synchronization
+                            if stream:
+                                stream.synchronize()
                         
-                        # Track memory before transfer
-                        pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                        # Clean up after transfer
+                        torch_sync()
                         
-                        with create_stream_context(stream):
-                            try:
-                                tensors_to_device_(model.state_dict(), device)
-                            finally:
-                                # Ensure proper stream synchronization
-                                if stream:
-                                    stream.synchronize()
-                            
-                            # Clean up after transfer
-                            torch_sync()
-                            
-                        # Track memory impact
-                        if torch.cuda.is_available():
-                            post_transfer_memory = torch.cuda.memory_allocated()
-                            memory_delta = post_transfer_memory - pre_transfer_memory
-                            logger.debug(f"Memory delta for {name}: {memory_delta / 1024**2:.1f}MB")
+                    # Track memory impact
+                    if torch.cuda.is_available():
+                        post_transfer_memory = torch.cuda.memory_allocated()
+                        memory_delta = post_transfer_memory - pre_transfer_memory
+                        logger.debug(f"Memory delta: {memory_delta / 1024**2:.1f}MB")
                             
                     except Exception as e:
                         raise TrainingSetupError(
@@ -383,7 +382,7 @@ def main():
             # Create and execute trainer
             trainer = create_trainer(
                 config=config,
-                model=models["model"],
+                model=models,
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,
                 device=device,
