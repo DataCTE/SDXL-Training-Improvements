@@ -29,6 +29,7 @@ from src.models.encoders.vae import VAEEncoder
 from src.core.types import DataType
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
 from src.models.encoders.clip import encode_clip
+from src.models.encoders.vae import VAEEncoder
 from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 
 logger = logging.getLogger(__name__)
@@ -147,17 +148,20 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
     def vae_to(self, device: torch.device) -> None:
         """Move VAE to device with optimized CUDA transfer."""
-        if device.type == "cuda":
-            if not torch.cuda.is_available():
-                raise RuntimeError("CUDA is not available")
-            # Ensure CUDA device is properly initialized
-            torch.cuda.set_device(device)
-        
-        if not tensors_match_device(self.vae.state_dict(), device):
-            with create_stream_context(torch.cuda.current_stream()):
-                # Use CUDA streams for efficient transfer
-                tensors_to_device_(self.vae.state_dict(), device, non_blocking=True)
-                tensors_record_stream(torch.cuda.current_stream(), self.vae.state_dict())
+        if isinstance(self.vae, VAEEncoder):
+            self.vae.to(device=device)
+        else:
+            if device.type == "cuda":
+                if not torch.cuda.is_available():
+                    raise RuntimeError("CUDA is not available")
+                # Ensure CUDA device is properly initialized
+                torch.cuda.set_device(device)
+            
+            if not tensors_match_device(self.vae.state_dict(), device):
+                with create_stream_context(torch.cuda.current_stream()):
+                    # Use CUDA streams for efficient transfer
+                    tensors_to_device_(self.vae.state_dict(), device, non_blocking=True)
+                    tensors_record_stream(torch.cuda.current_stream(), self.vae.state_dict())
 
     def text_encoder_to(self, device: torch.device) -> None:
         """Move both text encoders to device with explicit CUDA support."""
