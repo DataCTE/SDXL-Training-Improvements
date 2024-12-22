@@ -68,6 +68,13 @@ class PreprocessingPipeline:
             prefetch_factor=prefetch_factor,
             device_ids=device_ids
         )
+        self._validate_init_params(
+            num_gpu_workers=num_gpu_workers,
+            num_cpu_workers=num_cpu_workers,
+            num_io_workers=num_io_workers,
+            prefetch_factor=prefetch_factor,
+            device_ids=device_ids
+        )
         
         self.config = config
         self.num_gpu_workers = num_gpu_workers
@@ -151,6 +158,50 @@ class PreprocessingPipeline:
             logger.warning(f"Pipeline initialization warning: {str(e)}")
             self.dali_pipeline = None
             # Don't raise here - allow fallback to CPU processing
+
+    def _validate_init_params(
+        self,
+        num_gpu_workers: int,
+        num_cpu_workers: int,
+        num_io_workers: int,
+        prefetch_factor: int,
+        device_ids: Optional[List[int]]
+    ) -> None:
+        """Validate initialization parameters.
+        
+        Args:
+            num_gpu_workers: Number of GPU workers
+            num_cpu_workers: Number of CPU workers
+            num_io_workers: Number of I/O workers
+            prefetch_factor: Prefetch queue depth
+            device_ids: List of GPU device IDs
+            
+        Raises:
+            PipelineConfigError: If parameters are invalid
+        """
+        # Validate worker counts
+        if num_gpu_workers < 0:
+            raise PipelineConfigError("num_gpu_workers must be non-negative")
+        if num_cpu_workers < 0:
+            raise PipelineConfigError("num_cpu_workers must be non-negative")
+        if num_io_workers < 0:
+            raise PipelineConfigError("num_io_workers must be non-negative")
+            
+        # Validate prefetch factor
+        if prefetch_factor < 1:
+            raise PipelineConfigError("prefetch_factor must be at least 1")
+            
+        # Validate device IDs if provided
+        if device_ids is not None:
+            if not torch.cuda.is_available():
+                raise PipelineConfigError("CUDA not available but device_ids provided")
+            max_devices = torch.cuda.device_count()
+            invalid_ids = [i for i in device_ids if i >= max_devices or i < 0]
+            if invalid_ids:
+                raise PipelineConfigError(
+                    f"Invalid device IDs: {invalid_ids}. "
+                    f"Available devices: 0-{max_devices-1}"
+                )
 
     def _create_memory_tracker(self):
         """Create enhanced memory tracking utilities."""
