@@ -306,31 +306,14 @@ class CacheManager:
         return tensors, metadata
 
     def _validate_tensor(self, tensor: torch.Tensor) -> bool:
-        """Validate tensor properties with memory tracking."""
-        try:
-            if self.enable_memory_tracking:
-                self._track_memory("validate_start")
-                
-            if not isinstance(tensor, torch.Tensor):
-                return False
-                
-            if tensor.dim() != 4:  # [B, C, H, W]
-                return False
-                
-            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
-                return False
-                
-            # Check tensor device placement
-            if tensor.device.type == 'cuda':
-                # Ensure tensor is in contiguous memory
-                if not tensor.is_contiguous():
-                    tensor = tensor.contiguous()
-                    
-            return True
-            
-        finally:
-            if self.enable_memory_tracking:
-                self._track_memory("validate_complete")
+        """Validate tensor properties."""
+        from .utils import validate_tensor
+        return validate_tensor(
+            tensor,
+            expected_dims=4,
+            enable_memory_tracking=self.enable_memory_tracking,
+            memory_stats=self.memory_stats if hasattr(self, 'memory_stats') else None
+        )
 
     def get_cached_item(
         self,
