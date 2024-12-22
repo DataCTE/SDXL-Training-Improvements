@@ -195,8 +195,7 @@ class CacheManager:
             )
             
             # Ensure consistent dtype using DataType enum
-            target_dtype = DataType.FLOAT_32
-            torch_dtype = target_dtype.to_torch_dtype()
+            target_dtype = DataType.FLOAT_32.to_torch_dtype()
             
             for tensor_dict in [latent_data, text_embeddings]:
                 for k, v in tensor_dict.items():

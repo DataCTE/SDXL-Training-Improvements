@@ -146,13 +146,13 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             # Convert dtype if string
             if isinstance(dtype, str):
                 dtype = DataType.from_str(dtype)
-            torch_dtype = dtype.to_torch_dtype()
+            target_dtype = dtype.to_torch_dtype()
             
             # Load VAE
             self.vae = AutoencoderKL.from_pretrained(
                 pretrained_model_name,
                 subfolder="vae",
-                torch_dtype=torch_dtype,
+                torch_dtype=target_dtype,
                 use_safetensors=use_safetensors
             )
             
@@ -160,13 +160,13 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             self.text_encoder_1 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder",
-                torch_dtype=torch_dtype,
+                torch_dtype=target_dtype,
                 use_safetensors=use_safetensors
             )
             self.text_encoder_2 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder_2",
-                torch_dtype=torch_dtype,
+                torch_dtype=target_dtype,
                 use_safetensors=use_safetensors
             )
             
