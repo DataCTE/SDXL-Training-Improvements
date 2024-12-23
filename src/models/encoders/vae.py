@@ -207,7 +207,6 @@ class VAEEncoder:
                         w_end = min(width, (w + 1) * self.vae_tile_size)
                         
                         # Extract and process tile batch efficiently
-                        curr_batch = b_end - b_idx
                         tiles = pixel_values[b_idx:b_end, :, h_start:h_end, w_start:w_end]
                         tiles = tiles.to(memory_format=torch.channels_last)
                         
