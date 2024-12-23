@@ -1,177 +1,45 @@
-"""Flow Matching trainer implementation."""
+"""Flow Matching trainer implementation with extreme speedups."""
 import logging
-import math
-from typing import Dict, Optional, Tuple, Union
 import torch
-from src.core.types import DataType
-from src.core.memory import torch_sync, create_stream_context
+import torch.backends.cudnn
 import torch.nn.functional as F
 
+# Force maximal speed
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('medium')
+
+from typing import Dict, Optional, Tuple, Union
+from src.core.types import DataType
+from src.core.memory import torch_sync, create_stream_context
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
 logger = logging.getLogger(__name__)
 
 class FlowMatchingTrainer(TrainingMethod):
-    """SDXL trainer using Flow Matching method."""
-    
-    name = "flow_matching"  # Class attribute for registration
+    name = "flow_matching"
 
-    def sample_logit_normal(
-        self,
-        shape: Tuple[int, ...],
-        device: torch.device,
-        dtype: torch.dtype,
-        mean: float = 0.0,
-        std: float = 1.0,
-        generator: Optional[torch.Generator] = None
-    ) -> torch.Tensor:
-        """Sample from logit-normal distribution.
-        
-        Args:
-            shape: Output tensor shape
-            device: Target device
-            dtype: Target dtype
-            mean: Mean of underlying normal distribution
-            std: Standard deviation of underlying normal distribution
-            generator: Optional random generator
-            
-        Returns:
-            Samples from logit-normal distribution
-        """
-        # Sample from normal distribution
-        normal = torch.randn(shape, device=device, dtype=dtype, generator=generator)
-        normal = mean + std * normal
-        
-        # Transform to logit-normal
-        return torch.sigmoid(normal)
+    if hasattr(torch, "compile"):
+        def _compiled_loss(self, model, batch, generator=None):
+            return self._compute_loss_impl(model, batch, generator)
+        compute_loss = torch.compile(_compiled_loss, mode="reduce-overhead", fullgraph=True)
+    else:
+        compute_loss = None
 
-    def optimal_transport_path(
-        self,
-        x0: torch.Tensor,
-        x1: torch.Tensor,
-        t: torch.Tensor
-    ) -> torch.Tensor:
-        """Compute optimal transport path between samples.
-        
-        Args:
-            x0: Initial samples
-            x1: Target samples
-            t: Time values in [0,1]
-            
-        Returns:
-            Interpolated samples at time t
-        """
-        # Expand time dimension
-        t = t.view(-1, 1, 1, 1)
-        
-        # Linear interpolation
-        xt = (1 - t) * x0 + t * x1
-        return xt
+    def compute_loss(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
+        if self.compute_loss:
+            return self.compute_loss(model, batch, generator)
+        else:
+            return self._compute_loss_impl(model, batch, generator)
 
-    def compute_velocity(
-        self,
-        model: torch.nn.Module,
-        xt: torch.Tensor,
-        t: torch.Tensor,
-        condition_embeddings: Dict[str, torch.Tensor]
-    ) -> torch.Tensor:
-        """Compute velocity field prediction.
-        
-        Args:
-            model: UNet model
-            xt: Current samples
-            t: Time values
-            condition_embeddings: Conditioning information
-            
-        Returns:
-            Predicted velocity field
-        """
-        # Get model prediction
-        with torch.set_grad_enabled(self.training):
-            v_pred = model(
-                xt,
-                t,
-                encoder_hidden_states=condition_embeddings["prompt_embeds"],
-                added_cond_kwargs=condition_embeddings["added_cond_kwargs"]
-            ).sample
-            
-        return v_pred
-
-    def compute_flow_matching_loss(
-        self,
-        model: torch.nn.Module,
-        x0: torch.Tensor,
-        x1: torch.Tensor,
-        t: torch.Tensor,
-        condition_embeddings: Dict[str, torch.Tensor]
-    ) -> torch.Tensor:
-        """Compute Flow Matching training loss.
-        
-        Args:
-            model: UNet model
-            x0: Initial samples
-            x1: Target samples
-            t: Time values
-            condition_embeddings: Conditioning information
-            
-        Returns:
-            Flow Matching loss
-        """
-        # Validate devices
-        if x0.device != x1.device or x0.device != t.device:
-            raise RuntimeError(f"Device mismatch: x0={x0.device}, x1={x1.device}, t={t.device}")
-            
-        # Get current point on optimal transport path
-        xt = self.optimal_transport_path(x0, x1, t)
-        
-        # Compute ground truth velocity
-        # v_t = dx_t/dt = x1 - x0 for linear interpolation
-        v_true = x1 - x0
-        
-        # Get model's velocity prediction
-        v_pred = self.compute_velocity(model, xt, t, condition_embeddings)
-        
-        # Compute MSE loss between predicted and true velocities
-        loss = F.mse_loss(v_pred, v_true, reduction="none")
-        loss = loss.mean(dim=[1, 2, 3])  # Mean over CHW dimensions
-        
-        return loss
-
-    def compute_loss(
-        self,
-        model: torch.nn.Module,
-        batch: Dict[str, torch.Tensor],
-        generator: Optional[torch.Generator] = None
-    ) -> Dict[str, torch.Tensor]:
-        """Compute Flow Matching training loss.
-        
-        Args:
-            batch: Training batch
-            generator: Optional random generator
-            
-        Returns:
-            Dict with loss and metrics
-        """
-        # Get batch inputs
+    def _compute_loss_impl(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
         x1 = batch["model_input"]
         prompt_embeds = batch["prompt_embeds"]
         pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-        
-        # Sample time values from logit-normal
-        t = self.sample_logit_normal(
-            (x1.shape[0],),
-            device=x1.device,
-            dtype=x1.dtype,
-            mean=0.0,
-            std=1.0,
-            generator=generator
-        )
-        
-        # Sample initial points from standard normal
+        t = self.sample_logit_normal((x1.shape[0],), x1.device, x1.dtype, generator=generator)
         x0 = torch.randn_like(x1)
-        
-        # Get conditioning embeddings
         add_time_ids = get_add_time_ids(
             batch["original_sizes"],
             batch["crop_top_lefts"],
@@ -179,31 +47,38 @@ class FlowMatchingTrainer(TrainingMethod):
             dtype=prompt_embeds.dtype,
             device=x1.device
         )
-        
-        condition_embeddings = {
+        cond_emb = {
             "prompt_embeds": prompt_embeds,
-            "added_cond_kwargs": {
-                "text_embeds": pooled_prompt_embeds,
-                "time_ids": add_time_ids
-            }
+            "added_cond_kwargs": {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
         }
-        
-        # Compute Flow Matching loss
-        loss = self.compute_flow_matching_loss(
-            self.unet,
-            x0,
-            x1,
-            t,
-            condition_embeddings
-        )
-        
-        # Apply loss weights if provided
+        loss = self.compute_flow_matching_loss(self.unet, x0, x1, t, cond_emb)
         if "loss_weights" in batch:
             loss = loss * batch["loss_weights"]
-            
         loss = loss.mean()
-        
-        # Clean up intermediate tensors
         torch_sync()
-        
         return {"loss": loss}
+
+    def sample_logit_normal(self, shape, device, dtype, mean=0.0, std=1.0, generator=None):
+        normal = torch.randn(shape, device=device, dtype=dtype, generator=generator)
+        normal = mean + std * normal
+        return torch.sigmoid(normal)
+
+    def optimal_transport_path(self, x0, x1, t):
+        t = t.view(-1, 1, 1, 1)
+        return (1 - t) * x0 + t * x1
+
+    def compute_velocity(self, model, xt, t, cond_emb):
+        v_pred = model(
+            xt,
+            t,
+            encoder_hidden_states=cond_emb["prompt_embeds"],
+            added_cond_kwargs=cond_emb["added_cond_kwargs"]
+        ).sample
+        return v_pred
+
+    def compute_flow_matching_loss(self, model, x0, x1, t, cond_emb):
+        xt = self.optimal_transport_path(x0, x1, t)
+        v_true = x1 - x0
+        v_pred = self.compute_velocity(model, xt, t, cond_emb)
+        loss = F.mse_loss(v_pred, v_true, reduction="none").mean([1, 2, 3])
+        return loss

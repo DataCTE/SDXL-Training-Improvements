@@ -26,7 +26,7 @@ model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
   num_timesteps: 1000
   sigma_min: 0.002
-  sigma_max: 80.0
+  sigma_max: 2000.0
   rho: 7.0
 
 training:
@@ -63,7 +63,7 @@ training:
     snr_gamma: 5.0
     zero_terminal_snr: true
     sigma_min: 0.002
-    sigma_max: 20000.0
+    sigma_max: 2000.0
     rho: 7.0
 
 data:
@@ -71,7 +71,6 @@ data:
   # Windows paths (D:\Dataset) will be automatically converted to WSL paths (/mnt/d/Dataset)
   train_data_dir: 
     - "D:\\Datasets\\High-quality-photo10k"  # Windows path
-    - "/mnt/d/Datasets/collage/collage"      # WSL path
   num_workers: 4
   pin_memory: true
   persistent_workers: true

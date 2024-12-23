@@ -1,11 +1,16 @@
-"""CLIP model encoding utilities."""
-from typing import Optional, Tuple
-
+"""CLIP model encoding utilities with extreme speedups."""
+import logging
 import torch
+import torch.backends.cudnn
 from torch import Tensor
 from transformers import CLIPTextModel
+from typing import Optional, Tuple
 
-import logging
+# Force maximum speed
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('medium')
 
 logger = logging.getLogger(__name__)
 
@@ -18,46 +23,34 @@ def encode_clip(
     add_pooled_output: bool = False,
     pooled_text_encoder_output: Optional[Tensor] = None,
     use_attention_mask: bool = False,
-    add_layer_norm: bool = False,
+    add_layer_norm: bool = False
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    """Encode text tokens using CLIP text encoder.
-    
-    Returns:
-        Tuple of (encoder output tensor, optional pooled output tensor)
-    """
     if text_encoder_output is None:
-        # Create attention mask if needed
         attention_mask = None
         if use_attention_mask:
             attention_mask = tokens.ne(text_encoder.config.pad_token_id).long()
-            
-        # Get encoder outputs
-        outputs = text_encoder(
-            tokens,
-            attention_mask=attention_mask,
-            output_hidden_states=True,
-            return_dict=True
-        )
-        
-        # Get hidden states from specified layer
+
+        with torch.inference_mode():
+            outputs = text_encoder(
+                tokens,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True
+            )
         target_layer = default_layer - layer_skip
         text_encoder_output = outputs.hidden_states[target_layer]
-        
-        # Add layer norm if configured
+
         if add_layer_norm and hasattr(text_encoder, "final_layer_norm"):
             text_encoder_output = text_encoder.final_layer_norm(text_encoder_output)
-            
-    # Get pooled output if needed
+
     pooled_output = None
     if add_pooled_output:
         if pooled_text_encoder_output is not None:
             pooled_output = pooled_text_encoder_output
         else:
-            # Get pooled output from last hidden state if no direct pooler
-            if hasattr(outputs, 'pooler_output'):
+            if hasattr(outputs, "pooler_output"):
                 pooled_output = outputs.pooler_output
             else:
-                # Use mean pooling on last hidden state as fallback
                 pooled_output = outputs.last_hidden_state.mean(dim=1)
-            
+
     return text_encoder_output, pooled_output
