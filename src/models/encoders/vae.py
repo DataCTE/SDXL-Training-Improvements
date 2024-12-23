@@ -143,7 +143,6 @@ class VAEEncoder:
             logger.error(f"VAE encoding failed: {str(e)}")
             raise
             
-    @torch.jit.script
     def _process_tile_batch(self, tiles: torch.Tensor) -> torch.Tensor:
         """Process batch of tiles efficiently.
         
@@ -154,7 +153,9 @@ class VAEEncoder:
             Encoded tile latents
         """
         with torch.no_grad():
-            return self.vae.encode(tiles).latent_dist.sample()
+            # Use local reference to VAE for better performance
+            vae = self.vae
+            return vae.encode(tiles).latent_dist.sample()
 
     def _encode_tiled(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """Encode large images using optimized tiling.
