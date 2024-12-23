@@ -34,7 +34,7 @@ class VAEEncoder:
         # Apply aggressive optimizations
         self.vae.to(device=self.device, dtype=self.dtype, memory_format=torch.channels_last)
         if hasattr(torch, "compile") and self.device.type == "cuda":
-            self.vae = torch.compile(self.vae, mode="reduce-overhead", fullgraph=True)
+            self.vae = torch.compile(self.vae, mode="reduce-overhead", fullgraph=False)
             
         # Track memory stats
         self.peak_memory = 0

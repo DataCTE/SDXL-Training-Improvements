@@ -128,9 +128,9 @@ class SDXLTrainer:
 
         # Compile for speed if available
         if hasattr(torch, "compile"):
-            self.train_step = torch.compile(self.train_step, mode="reduce-overhead", fullgraph=True)
-            self.train_epoch = torch.compile(self.train_epoch, mode="reduce-overhead", fullgraph=True)
-            self.train = torch.compile(self.train, mode="reduce-overhead", fullgraph=True)
+            self.train_step = torch.compile(self.train_step, mode="reduce-overhead", fullgraph=False)
+            self.train_epoch = torch.compile(self.train_epoch, mode="reduce-overhead", fullgraph=False)
+            self.train = torch.compile(self.train, mode="reduce-overhead", fullgraph=False)
 
     def train_step(
         self,

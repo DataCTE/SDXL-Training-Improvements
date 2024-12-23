@@ -24,7 +24,7 @@ class FlowMatchingTrainer(TrainingMethod):
     if hasattr(torch, "compile"):
         def _compiled_loss(self, model, batch, generator=None):
             return self._compute_loss_impl(model, batch, generator)
-        compute_loss = torch.compile(_compiled_loss, mode="reduce-overhead", fullgraph=True)
+        compute_loss = torch.compile(_compiled_loss, mode="reduce-overhead", fullgraph=False)
     else:
         compute_loss = None
 

@@ -22,5 +22,5 @@ def configure_model_memory_format(model: torch.nn.Module) -> None:
 # Optionally compile for further speedups
 if hasattr(torch, "compile"):
     configure_model_memory_format = torch.compile(
-        configure_model_memory_format, mode="reduce-overhead", fullgraph=True
+        configure_model_memory_format, mode="reduce-overhead", fullgraph=False
     )

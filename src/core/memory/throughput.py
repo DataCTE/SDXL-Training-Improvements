@@ -65,8 +65,8 @@ class ThroughputMonitor:
 # Compile for extreme speedups if available
 if hasattr(torch, "compile"):
     ThroughputMonitor.update = torch.compile(
-        ThroughputMonitor.update, mode="reduce-overhead", fullgraph=True
+        ThroughputMonitor.update, mode="reduce-overhead", fullgraph=False
     )
     ThroughputMonitor.get_metrics = torch.compile(
-        ThroughputMonitor.get_metrics, mode="reduce-overhead", fullgraph=True
+        ThroughputMonitor.get_metrics, mode="reduce-overhead", fullgraph=False
     )
