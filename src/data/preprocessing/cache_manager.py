@@ -734,7 +734,6 @@ class CacheManager:
             Dictionary chunks
         """
         # Split tensors into chunks
-        chunks = []
         current_bytes = 0
         current_chunk = {}
         
