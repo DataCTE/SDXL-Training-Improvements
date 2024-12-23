@@ -317,7 +317,7 @@ class CacheManager:
         self,
         image_paths: List[Path],
         caption_ext: str,
-        batch_size: int = 32
+        batch_size: int = 128  # Increased batch size
     ) -> Tuple[List[torch.Tensor], Dict]:
         """Process batch of images with optimized parallel handling.
         
@@ -348,33 +348,55 @@ class CacheManager:
                 self.stats.skipped_items += len(batch_paths)
                 continue
             
-            # Process batch in parallel
+            # Process batch in parallel with chunking
+            chunks = [to_process[i:i + 16] for i in range(0, len(to_process), 16)]
+            
             with ThreadPoolExecutor(max_workers=self.num_proc) as pool:
-                futures = [
-                    pool.submit(self._process_single_image, path, caption_ext)
-                    for path in to_process
-                ]
+                futures = []
+                for chunk in chunks:
+                    futures.extend([
+                        pool.submit(self._process_single_image, path, caption_ext)
+                        for path in chunk
+                    ])
                 
                 # Use torch.cuda.Stream for tensor operations
                 stream = torch.cuda.Stream() if torch.cuda.is_available() else None
                 
                 try:
                     with torch.cuda.stream(stream) if stream else nullcontext():
-                        # Collect and validate results
-                        for future in futures:
-                            try:
-                                result = future.result()
-                                if result is not None:
-                                    tensor, meta = result
-                                    if self._validate_tensor(tensor):
-                                        batch_tensors.append(tensor)
-                                        batch_meta.update(meta)
-                                        self.stats.processed_items += 1
-                                    else:
-                                        self.stats.validation_errors += 1
-                            except Exception as e:
-                                self.stats.failed_items += 1
-                                logger.error(f"Batch processing error: {str(e)}")
+                        # Pre-allocate tensor storage
+                        storage = []
+                        meta_storage = []
+                        
+                        # Process results in chunks
+                        for chunk_futures in [futures[i:i + 16] for i in range(0, len(futures), 16)]:
+                            chunk_tensors = []
+                            chunk_meta = {}
+                            
+                            for future in chunk_futures:
+                                try:
+                                    result = future.result()
+                                    if result is not None:
+                                        tensor, meta = result
+                                        if self._validate_tensor(tensor):
+                                            chunk_tensors.append(tensor)
+                                            chunk_meta.update(meta)
+                                            self.stats.processed_items += 1
+                                        else:
+                                            self.stats.validation_errors += 1
+                                except Exception as e:
+                                    self.stats.failed_items += 1
+                                    logger.error(f"Batch processing error: {str(e)}")
+                                    
+                            # Stack chunk tensors
+                            if chunk_tensors:
+                                storage.append(torch.stack(chunk_tensors))
+                                meta_storage.append(chunk_meta)
+                                
+                        # Combine all chunks
+                        if storage:
+                            batch_tensors = [torch.cat(storage)]
+                            batch_meta = {k: v for d in meta_storage for k, v in d.items()}
                         
                         # Stack tensors if we have any
                         if batch_tensors:
@@ -584,7 +606,7 @@ class CacheManager:
         image_paths: List[str],
         buckets: List[Tuple[int, int]],
         max_aspect_ratio: float,
-        batch_size: int = 64
+        batch_size: int = 256  # Increased batch size
     ) -> List[int]:
         """Assign images to aspect ratio buckets with batched processing."""
         # Initialize bucket assignment cache
@@ -605,17 +627,23 @@ class CacheManager:
             ]
             
             if to_process:
-                # Process uncached images in parallel
+                # Process uncached images in parallel with chunking
+                chunks = [to_process[i:i + 32] for i in range(0, len(to_process), 32)]
+            
                 with ThreadPoolExecutor(max_workers=self.num_cpu_workers) as pool:
-                    futures = [
-                        pool.submit(
-                            self._assign_single_bucket,
-                            img_path,
-                            buckets,
-                            max_aspect_ratio
-                        )
-                        for img_path in to_process
-                    ]
+                    all_futures = []
+                    for chunk in chunks:
+                        chunk_futures = [
+                            pool.submit(
+                                self._assign_single_bucket,
+                                img_path,
+                                buckets,
+                                max_aspect_ratio
+                            )
+                            for img_path in chunk
+                        ]
+                        all_futures.extend(chunk_futures)
+                    futures = all_futures
                     
                     # Update cache with new results
                     for path, future in zip(to_process, futures):
