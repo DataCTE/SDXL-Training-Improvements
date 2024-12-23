@@ -118,10 +118,17 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
         logger.info(f"Moving model to {device}")
         model.to(device)
         return model
+
     except Exception as e:
-        error_context = {'model_name': config.model.pretrained_model_name, 'device': str(device), 'error': str(e)}
+        error_context = {
+            'model_name': config.model.pretrained_model_name,
+            'device_type': device.type,              # <--- capture more details
+            'device_index': device.index,            # <--- explicitly store device index
+            'error': str(e),
+        }
         logger.error("Failed to initialize model", extra=error_context)
         raise RuntimeError("Failed to load models") from e
+
 
 def load_training_data(config: Config) -> tuple[List[str], List[str]]:
     image_paths, captions = [], []
