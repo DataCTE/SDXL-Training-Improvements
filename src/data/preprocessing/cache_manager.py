@@ -179,9 +179,9 @@ class CacheManager:
             bool indicating success
         """
         try:
-            # Validate inputs
-            if latent_data is None or text_embeddings is None:
-                logger.error(f"Invalid input data for {file_path}: latent_data={latent_data is not None}, text_embeddings={text_embeddings is not None}")
+            # Validate inputs - allow either latents or text embeddings to be None
+            if latent_data is None and text_embeddings is None:
+                logger.error(f"Both latent_data and text_embeddings are None for {file_path}")
                 return False
 
             # Track memory before processing
@@ -223,30 +223,33 @@ class CacheManager:
                             pin_tensor_(tensor)
                             
                 try:
-                    # Save latents and text embeddings separately for better memory management
-                    torch.save(
-                        {
-                            "latent": latent_data,
-                            "metadata": {
-                                **metadata,
-                                "latent_timestamp": time.time()
-                            }
-                        },
-                        latent_path,
-                        _use_new_zipfile_serialization=True
-                    )
+                    # Save latents if present
+                    if latent_data is not None:
+                        torch.save(
+                            {
+                                "latent": latent_data,
+                                "metadata": {
+                                    **metadata,
+                                    "latent_timestamp": time.time()
+                                }
+                            },
+                            latent_path,
+                            _use_new_zipfile_serialization=True
+                        )
                     
-                    torch.save(
-                        {
-                            "embeddings": text_embeddings,
-                            "metadata": {
-                                **metadata,
-                                "text_timestamp": time.time()
-                            }
-                        },
-                        text_path,
-                        _use_new_zipfile_serialization=True
-                    )
+                    # Save text embeddings if present
+                    if text_embeddings is not None:
+                        torch.save(
+                            {
+                                "embeddings": text_embeddings,
+                                "metadata": {
+                                    **metadata,
+                                    "text_timestamp": time.time()
+                                }
+                            },
+                            text_path,
+                            _use_new_zipfile_serialization=True
+                        )
                     
                     # Update index
                     self.cache_index["files"][str(file_path)] = {
@@ -385,37 +388,47 @@ class CacheManager:
                 self.stats.cache_misses += 1
                 return None
                 
-            latent_path = Path(file_info["latent_path"])
-            text_path = Path(file_info["text_path"])
+            latent_path = Path(file_info.get("latent_path", ""))
+            text_path = Path(file_info.get("text_path", ""))
             
-            if not latent_path.exists() or not text_path.exists():
+            # Check if at least one type of data exists
+            if not (latent_path.exists() or text_path.exists()):
                 self.stats.corrupted_items += 1
                 return None
                 
             # Load data with memory optimization
             try:
                 with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                    # Load latents
-                    latent_data = torch.load(latent_path, map_location='cpu')
-                    text_data = torch.load(text_path, map_location='cpu')
+                    result = {}
+                    metadata = {}
                     
-                    # Move to target device if specified
-                    if device is not None:
-                        for tensor_dict in [latent_data["latent"], text_data["embeddings"]]:
-                            for k, v in tensor_dict.items():
+                    # Load latents if they exist
+                    if latent_path.exists():
+                        latent_data = torch.load(latent_path, map_location='cpu')
+                        result["latent"] = latent_data["latent"]
+                        metadata.update(latent_data["metadata"])
+                        
+                        # Move to device if specified
+                        if device is not None:
+                            for k, v in result["latent"].items():
                                 if isinstance(v, torch.Tensor):
-                                    tensor_dict[k] = v.to(device, non_blocking=True)
-                                    
-                    self.stats.cache_hits += 1
+                                    result["latent"][k] = v.to(device, non_blocking=True)
                     
-                    return {
-                        "latent": latent_data["latent"],
-                        "text_embeddings": text_data["embeddings"],
-                        "metadata": {
-                            **latent_data["metadata"],
-                            **text_data["metadata"]
-                        }
-                    }
+                    # Load text embeddings if they exist
+                    if text_path.exists():
+                        text_data = torch.load(text_path, map_location='cpu')
+                        result["text_embeddings"] = text_data["embeddings"]
+                        metadata.update(text_data["metadata"])
+                        
+                        # Move to device if specified
+                        if device is not None:
+                            for k, v in result["text_embeddings"].items():
+                                if isinstance(v, torch.Tensor):
+                                    result["text_embeddings"][k] = v.to(device, non_blocking=True)
+                    
+                    self.stats.cache_hits += 1
+                    result["metadata"] = metadata
+                    return result
             finally:
                 if self.enable_memory_tracking:
                     self._track_memory("cache_fetch_complete")
