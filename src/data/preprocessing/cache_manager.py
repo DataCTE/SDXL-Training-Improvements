@@ -218,12 +218,18 @@ class CacheManager:
 
             # Memory optimization: Stream-based processing
             with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                # Pin memory for faster I/O if tensors present
+                # Pin memory for faster I/O if tensors present and support pinning
                 for tensor_dict in [latent_data, text_embeddings]:
                     if tensor_dict is not None:
                         for tensor in tensor_dict.values():
                             if isinstance(tensor, torch.Tensor):
-                                pin_tensor_(tensor)
+                                try:
+                                    if not tensor.is_pinned() and tensor.device.type == 'cpu':
+                                        pin_tensor_(tensor)
+                                except Exception as e:
+                                    logger.debug(f"Could not pin tensor memory: {str(e)}")
+                                    # Continue without pinning if not supported
+                                    continue
                             
                 try:
                     # Save latents if present
@@ -267,12 +273,16 @@ class CacheManager:
                         self._save_cache_index()
                         
                 finally:
-                    # Cleanup: Unpin tensors and free memory if present
+                    # Cleanup: Unpin tensors and free memory if present and pinned
                     for tensor_dict in [latent_data, text_embeddings]:
                         if tensor_dict is not None:
                             for tensor in tensor_dict.values():
-                                if isinstance(tensor, torch.Tensor):
-                                    unpin_tensor_(tensor)
+                                if isinstance(tensor, torch.Tensor) and tensor.is_pinned():
+                                    try:
+                                        unpin_tensor_(tensor)
+                                    except Exception as e:
+                                        logger.debug(f"Could not unpin tensor memory: {str(e)}")
+                                        continue
                                 
                     torch_sync()
                     
