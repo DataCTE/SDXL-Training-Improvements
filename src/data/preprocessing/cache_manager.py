@@ -188,10 +188,10 @@ class CacheManager:
             if self.enable_memory_tracking:
                 self._track_memory("save_start")
                 
-            # Create cache paths
-            file_hash = hashlib.sha256(str(file_path).encode()).hexdigest()[:12]
-            latent_path = self.latents_dir / f"{file_hash}_latent.pt"
-            text_path = self.text_dir / f"{file_hash}_text.pt"
+            # Use filename as base for cache files
+            base_name = Path(file_path).stem
+            latent_path = self.latents_dir / f"{base_name}_latent.pt"
+            text_path = self.text_dir / f"{base_name}_text.pt"
             
             # Check and optimize device placement
             current_device = next(
@@ -260,11 +260,11 @@ class CacheManager:
                             _use_new_zipfile_serialization=True
                         )
                     
-                    # Update index
+                    # Update index with filename-based paths
                     self.cache_index["files"][str(file_path)] = {
                         "latent_path": str(latent_path),
                         "text_path": str(text_path),
-                        "hash": file_hash,
+                        "base_name": base_name,
                         "timestamp": time.time()
                     }
                     
