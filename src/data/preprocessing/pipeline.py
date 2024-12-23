@@ -464,8 +464,8 @@ class PreprocessingPipeline:
             
             # Move to CUDA and apply transforms
             if torch.cuda.is_available():
-                model_dtype = (DataType.from_str(str(self.latent_preprocessor.model.dtype)) 
-                             if self.latent_preprocessor and hasattr(self.latent_preprocessor.model, 'dtype')
+                model_dtype = (DataType.from_str(str(self.latent_preprocessor.model.unet.dtype)) 
+                             if self.latent_preprocessor and hasattr(self.latent_preprocessor.model, 'unet')
                              else DataType.FLOAT_32)
                 target_dtype = model_dtype.to_torch_dtype()
                 tensor = tensor.cuda(non_blocking=True).to(dtype=target_dtype)
