@@ -64,9 +64,7 @@ class PreprocessingPipeline:
         self.input_queue = Queue(maxsize=prefetch_factor * num_gpu_workers)
         self.output_queue = Queue(maxsize=prefetch_factor * num_gpu_workers)
         self._init_pools()
-        if hasattr(torch, "compile"):
-            self.precompute_latents = torch.compile(self.precompute_latents, mode="reduce-overhead", fullgraph=True)
-            self._process_image = torch.compile(self._process_image, mode="reduce-overhead", fullgraph=True)
+        # Disable torch.compile for now due to logging issues
 
     def _init_pools(self):
         self.gpu_pool = (ThreadPoolExecutor(max_workers=self.num_gpu_workers) if torch.cuda.is_available() else None)

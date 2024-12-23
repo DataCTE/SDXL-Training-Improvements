@@ -101,8 +101,7 @@ class CacheManager:
             self.pinned_buffer = torch.empty((stream_buffer_size,), dtype=torch.uint8, pin_memory=True)
         self.index_path = self.cache_dir / "cache_index.json"
         self.cache_index = self._load_cache_index()
-        if hasattr(torch, "compile"):
-            self._process_image_batch = torch.compile(self._process_image_batch, mode="reduce-overhead", fullgraph=True)
+        # Disable torch.compile for now due to logging issues
 
     def _load_cache_index(self) -> Dict:
         try:
