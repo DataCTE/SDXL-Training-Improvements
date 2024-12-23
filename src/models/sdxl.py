@@ -155,18 +155,34 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         
         Args:
             pretrained_model_name: HuggingFace model name or path
-            torch_dtype: Data type for model weights
+            dtype: Base data type for model weights
             use_safetensors: Whether to use safetensors format
             **kwargs: Additional arguments for from_pretrained
         """
         try:
             logger.info(f"Loading model components from {pretrained_model_name}")
             
-            # Convert dtype if string and create weight dtypes
+            # Set model dtype
             if isinstance(dtype, str):
                 dtype = DataType.from_str(dtype)
-            model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
-            target_dtype = model_dtypes.train_dtype.to_torch_dtype()
+            self.dtype = dtype
+            
+            # Create weight dtypes configuration
+            model_dtypes = ModelWeightDtypes(
+                train_dtype=dtype,
+                fallback_train_dtype=DataType.FLOAT_32,
+                unet=dtype,
+                prior=dtype,
+                text_encoder=dtype,
+                text_encoder_2=dtype,
+                vae=dtype,
+                effnet_encoder=dtype,
+                decoder=dtype,
+                decoder_text_encoder=dtype,
+                decoder_vqgan=dtype,
+                lora=dtype,
+                embedding=dtype
+            )
             
             # Load VAE
             self.vae = AutoencoderKL.from_pretrained(
