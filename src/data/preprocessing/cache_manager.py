@@ -162,8 +162,8 @@ class CacheManager:
 
     def save_preprocessed_data(
         self,
-        latent_data: Dict[str, torch.Tensor],
-        text_embeddings: Dict[str, torch.Tensor],
+        latent_data: Optional[Dict[str, torch.Tensor]],
+        text_embeddings: Optional[Dict[str, torch.Tensor]],
         metadata: Dict,
         file_path: Union[str, Path]
     ) -> bool:
@@ -179,6 +179,11 @@ class CacheManager:
             bool indicating success
         """
         try:
+            # Validate inputs
+            if latent_data is None or text_embeddings is None:
+                logger.error(f"Invalid input data for {file_path}: latent_data={latent_data is not None}, text_embeddings={text_embeddings is not None}")
+                return False
+
             # Track memory before processing
             if self.enable_memory_tracking:
                 self._track_memory("save_start")
