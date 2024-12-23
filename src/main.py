@@ -81,7 +81,7 @@ def setup_device_and_logging(config: Config) -> torch.device:
             logger.info(f"cuda Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
     return device
 
-def setup_model(config: Config, device: torch.device) -> StableDiffusionXLModel:
+def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     logger.info("Loading models...")
     try:
         model = StableDiffusionXLModel(ModelType.BASE)
@@ -246,8 +246,11 @@ def main():
         config = Config.from_yaml(args.config)
         with setup_environment(args):
             device = setup_device_and_logging(config)
-            models = setup_model(config, device)
-            if hasattr(models, 'state_dict') and not tensors_match_device(models.state_dict(), device):
+            try:
+                models = setup_model(config, device)
+                if not models:
+                    raise RuntimeError("Model initialization returned None")
+                if hasattr(models, 'state_dict') and not tensors_match_device(models.state_dict(), device):
                 logger.info(f"Moving model to device {device}")
                 if not isinstance(device, torch.device):
                     device = torch.device(device)
@@ -301,7 +304,20 @@ def main():
             if is_main_process():
                 logger.info("Training complete!")
     except Exception as e:
-        logger.error(f"Training failed: {str(e)}")
+        error_context = {
+            'error_type': type(e).__name__,
+            'device': str(device) if 'device' in locals() else 'unknown',
+            'cuda_available': torch.cuda.is_available(),
+            'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            'model_name': config.model.pretrained_model_name if 'config' in locals() else 'unknown'
+        }
+        if torch.cuda.is_available():
+            error_context.update({
+                'cuda_memory_allocated': torch.cuda.memory_allocated(),
+                'cuda_memory_reserved': torch.cuda.memory_reserved(),
+                'cuda_max_memory': torch.cuda.max_memory_allocated()
+            })
+        logger.error(f"Training failed: {str(e)}", extra=error_context)
         if isinstance(e, TrainingSetupError) and e.context:
             logger.error(f"Error context: {e.context}")
         sys.exit(1)
