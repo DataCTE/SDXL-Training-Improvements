@@ -202,25 +202,28 @@ class CacheManager:
             # Create model dtypes configuration
             model_dtypes = ModelWeightDtypes.from_single_dtype(DataType.FLOAT_32)
             
+            # Process tensors if present
             for tensor_dict in [latent_data, text_embeddings]:
-                for k, v in tensor_dict.items():
-                    if isinstance(v, torch.Tensor):
-                        # Use appropriate dtype based on tensor type
-                        target_dtype = (
-                            model_dtypes.text_encoder.to_torch_dtype() 
-                            if 'text' in k.lower() 
-                            else model_dtypes.vae.to_torch_dtype()
-                        )
-                        if v.dtype != target_dtype:
-                            tensor_dict[k] = v.to(dtype=target_dtype)
+                if tensor_dict is not None:
+                    for k, v in tensor_dict.items():
+                        if isinstance(v, torch.Tensor):
+                            # Use appropriate dtype based on tensor type
+                            target_dtype = (
+                                model_dtypes.text_encoder.to_torch_dtype() 
+                                if 'text' in k.lower() 
+                                else model_dtypes.vae.to_torch_dtype()
+                            )
+                            if v.dtype != target_dtype:
+                                tensor_dict[k] = v.to(dtype=target_dtype)
 
             # Memory optimization: Stream-based processing
             with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                # Pin memory for faster I/O
+                # Pin memory for faster I/O if tensors present
                 for tensor_dict in [latent_data, text_embeddings]:
-                    for tensor in tensor_dict.values():
-                        if isinstance(tensor, torch.Tensor):
-                            pin_tensor_(tensor)
+                    if tensor_dict is not None:
+                        for tensor in tensor_dict.values():
+                            if isinstance(tensor, torch.Tensor):
+                                pin_tensor_(tensor)
                             
                 try:
                     # Save latents if present
@@ -264,11 +267,12 @@ class CacheManager:
                         self._save_cache_index()
                         
                 finally:
-                    # Cleanup: Unpin tensors and free memory
+                    # Cleanup: Unpin tensors and free memory if present
                     for tensor_dict in [latent_data, text_embeddings]:
-                        for tensor in tensor_dict.values():
-                            if isinstance(tensor, torch.Tensor):
-                                unpin_tensor_(tensor)
+                        if tensor_dict is not None:
+                            for tensor in tensor_dict.values():
+                                if isinstance(tensor, torch.Tensor):
+                                    unpin_tensor_(tensor)
                                 
                     torch_sync()
                     
