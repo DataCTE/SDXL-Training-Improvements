@@ -178,10 +178,12 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             try:
                 self.unet = UNet2DConditionModel.from_pretrained(
                     pretrained_model_name,
-                subfolder="unet",
-                torch_dtype=model_dtypes.unet.to_torch_dtype(),
-                use_safetensors=use_safetensors
-            )
+                    subfolder="unet",
+                    torch_dtype=model_dtypes.unet.to_torch_dtype(),
+                    use_safetensors=use_safetensors
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to load UNet: {str(e)}") from e
 
             # 5. Load tokenizers
             logger.info("Loading tokenizer 1...")
