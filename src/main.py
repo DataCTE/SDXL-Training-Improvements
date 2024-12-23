@@ -67,6 +67,8 @@ def setup_environment(args: argparse.Namespace):
 
 def setup_device_and_logging(config: Config) -> torch.device:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if not isinstance(device, torch.device):
+        device = torch.device(device)
     output_dir = Path(config.global_config.output_dir)
     log_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -247,6 +249,8 @@ def main():
             models = setup_model(config, device)
             if hasattr(models, 'state_dict') and not tensors_match_device(models.state_dict(), device):
                 logger.info(f"Moving model to device {device}")
+                if not isinstance(device, torch.device):
+                    device = torch.device(device)
                 try:
                     stream = torch.cuda.Stream() if torch.cuda.is_available() else None
                     pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
