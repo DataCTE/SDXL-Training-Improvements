@@ -82,22 +82,11 @@ def setup_device_and_logging(config: Config) -> torch.device:
     return device
 
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
+    """Initialize SDXL model components."""
     logger.info("Loading models...")
-    model = None
     try:
         model = StableDiffusionXLModel(ModelType.BASE)
-        
-        # Track memory before loading
         initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-        
-        components = [
-            ("VAE", "vae", AutoencoderKL, "vae"),
-            ("Text Encoder 1", "text_encoder_1", CLIPTextModel, "text_encoder"),
-            ("Text Encoder 2", "text_encoder_2", CLIPTextModel, "text_encoder_2"),
-            ("UNet", "unet", UNet2DConditionModel, "unet"),
-            ("Tokenizer 1", "tokenizer_1", CLIPTokenizer, "tokenizer"),
-            ("Tokenizer 2", "tokenizer_2", CLIPTokenizer, "tokenizer_2")
-        ]
         
         for name, attr, cls, subfolder in components:
             try:
@@ -374,7 +363,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    if hasattr(torch, "compile"):
-        # Only compile the training loop, not argument parsing
-        main = torch.compile(main, mode="reduce-overhead", fullgraph=False)
     main()
