@@ -147,7 +147,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     def from_pretrained(
         self,
         pretrained_model_name: str,
-        dtype: Union[DataType, str] = DataType.FLOAT_32,
+        dtype: Union[DataType, str, ModelWeightDtypes] = DataType.FLOAT_32,
         use_safetensors: bool = True,
         **kwargs
     ) -> None:
@@ -162,27 +162,19 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         try:
             logger.info(f"Loading model components from {pretrained_model_name}")
             
-            # Set model dtype
+            # Handle dtype configuration
             if isinstance(dtype, str):
-                dtype = DataType.from_str(dtype)
-            self.dtype = dtype
-            
-            # Create weight dtypes configuration
-            model_dtypes = ModelWeightDtypes(
-                train_dtype=dtype,
-                fallback_train_dtype=DataType.FLOAT_32,
-                unet=dtype,
-                prior=dtype,
-                text_encoder=dtype,
-                text_encoder_2=dtype,
-                vae=dtype,
-                effnet_encoder=dtype,
-                decoder=dtype,
-                decoder_text_encoder=dtype,
-                decoder_vqgan=dtype,
-                lora=dtype,
-                embedding=dtype
-            )
+                base_dtype = DataType.from_str(dtype)
+                model_dtypes = ModelWeightDtypes.from_single_dtype(base_dtype)
+            elif isinstance(dtype, DataType):
+                model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
+            elif isinstance(dtype, ModelWeightDtypes):
+                model_dtypes = dtype
+            else:
+                raise ValueError(f"Invalid dtype: {dtype}")
+                
+            # Set model base dtype
+            self.dtype = model_dtypes.train_dtype
             
             # Load VAE
             self.vae = AutoencoderKL.from_pretrained(
