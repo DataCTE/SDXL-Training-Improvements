@@ -1,6 +1,7 @@
 """VAE encoder implementation with optimized memory handling."""
 import logging
 from typing import Dict, Optional, Tuple, Union
+from contextlib import nullcontext
 
 import torch
 import torch.nn.functional as F
