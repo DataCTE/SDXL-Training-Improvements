@@ -143,16 +143,17 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         try:
             logger.info(f"Loading model components from {pretrained_model_name}")
             
-            # Convert dtype if string
+            # Convert dtype if string and create weight dtypes
             if isinstance(dtype, str):
                 dtype = DataType.from_str(dtype)
-            target_dtype = dtype.to_torch_dtype()
+            model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
+            target_dtype = model_dtypes.train_dtype.to_torch_dtype()
             
             # Load VAE
             self.vae = AutoencoderKL.from_pretrained(
                 pretrained_model_name,
                 subfolder="vae",
-                torch_dtype=target_dtype,
+                torch_dtype=model_dtypes.vae.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
             
@@ -160,13 +161,13 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             self.text_encoder_1 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder",
-                torch_dtype=target_dtype,
+                torch_dtype=model_dtypes.text_encoder.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
             self.text_encoder_2 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder_2",
-                torch_dtype=target_dtype,
+                torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
             
@@ -174,7 +175,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             self.unet = UNet2DConditionModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="unet",
-                torch_dtype=torch_dtype,
+                torch_dtype=model_dtypes.unet.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
             

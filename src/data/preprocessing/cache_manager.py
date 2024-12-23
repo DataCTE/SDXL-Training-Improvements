@@ -194,13 +194,20 @@ class CacheManager:
                 torch.device('cpu')
             )
             
-            # Ensure consistent dtype using DataType enum
-            target_dtype = DataType.FLOAT_32.to_torch_dtype()
+            # Create model dtypes configuration
+            model_dtypes = ModelWeightDtypes.from_single_dtype(DataType.FLOAT_32)
             
             for tensor_dict in [latent_data, text_embeddings]:
                 for k, v in tensor_dict.items():
-                    if isinstance(v, torch.Tensor) and v.dtype != torch_dtype:
-                        tensor_dict[k] = v.to(dtype=torch_dtype)
+                    if isinstance(v, torch.Tensor):
+                        # Use appropriate dtype based on tensor type
+                        target_dtype = (
+                            model_dtypes.text_encoder.to_torch_dtype() 
+                            if 'text' in k.lower() 
+                            else model_dtypes.vae.to_torch_dtype()
+                        )
+                        if v.dtype != target_dtype:
+                            tensor_dict[k] = v.to(dtype=target_dtype)
 
             # Memory optimization: Stream-based processing
             with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
