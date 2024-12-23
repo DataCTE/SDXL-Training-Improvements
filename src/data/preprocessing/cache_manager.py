@@ -280,25 +280,25 @@ class CacheManager:
                 # Save index immediately after successful writes
                 self._save_cache_index()
                 
-                finally:
-                    # Cleanup: Unpin tensors and free memory if present and pinned
-                    for tensor_dict in [latent_data, text_embeddings]:
-                        if tensor_dict is not None:
-                            for tensor in tensor_dict.values():
-                                if isinstance(tensor, torch.Tensor) and tensor.is_pinned():
-                                    try:
-                                        unpin_tensor_(tensor)
-                                    except Exception as e:
-                                        logger.debug(f"Could not unpin tensor memory: {str(e)}")
-                                        continue
-                                
-                    torch_sync()
-                    
+                return True
+                
+            finally:
+                # Cleanup: Unpin tensors and free memory if present and pinned
+                for tensor_dict in [latent_data, text_embeddings]:
+                    if tensor_dict is not None:
+                        for tensor in tensor_dict.values():
+                            if isinstance(tensor, torch.Tensor) and tensor.is_pinned():
+                                try:
+                                    unpin_tensor_(tensor)
+                                except Exception as e:
+                                    logger.debug(f"Could not unpin tensor memory: {str(e)}")
+                                    continue
+                            
+                torch_sync()
+                
                 # Track final memory state
                 if self.enable_memory_tracking:
                     self._track_memory("save_complete")
-                    
-                return True
                 
         except Exception as e:
             logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
