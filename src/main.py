@@ -302,8 +302,8 @@ def main():
             logger.error(f"Error context: {e.context}")
         sys.exit(1)
 
-if hasattr(torch, "compile"):
-    main = torch.compile(main, mode="reduce-overhead", fullgraph=True)
-
 if __name__ == "__main__":
+    if hasattr(torch, "compile"):
+        # Only compile the training loop, not argument parsing
+        main = torch.compile(main, mode="reduce-overhead", fullgraph=False)
     main()
