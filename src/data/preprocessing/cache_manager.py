@@ -59,7 +59,9 @@ class CacheManager:
         compression: Optional[str] = "zstd",
         verify_hashes: bool = True,
         max_memory_usage: float = 0.8,
-        enable_memory_tracking: bool = True
+        enable_memory_tracking: bool = True,
+        stream_buffer_size: int = 1024 * 1024,  # 1MB stream buffer
+        max_chunk_memory: float = 0.2  # Max memory per chunk as fraction of total
     ):
         """Initialize cache manager with enhanced memory management.
         
@@ -100,6 +102,10 @@ class CacheManager:
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
         
+        # Configure streaming and chunking
+        self.stream_buffer_size = stream_buffer_size
+        self.max_chunk_memory = max_chunk_memory
+        
         # Setup worker pools with proper resource limits
         self.image_pool = ProcessPoolExecutor(
             max_workers=self.num_proc,
@@ -109,6 +115,14 @@ class CacheManager:
             max_workers=self.num_proc * 2,
             thread_name_prefix="cache_io"
         )
+        
+        # Initialize streaming buffers
+        if torch.cuda.is_available():
+            self.pinned_buffer = torch.empty(
+                (stream_buffer_size,),
+                dtype=torch.uint8,
+                pin_memory=True
+            )
         
         # Load cache index
         self.index_path = self.cache_dir / "cache_index.json"
@@ -235,9 +249,9 @@ class CacheManager:
                                     continue
                             
                 try:
-                    # Save latents if present
+                    # Save latents if present using chunked streaming
                     if latent_data is not None:
-                        torch.save(
+                        self._save_chunked_tensor(
                             {
                                 "latent": latent_data,
                                 "metadata": {
@@ -245,13 +259,12 @@ class CacheManager:
                                     "latent_timestamp": time.time()
                                 }
                             },
-                            latent_path,
-                            _use_new_zipfile_serialization=True
+                            latent_path
                         )
                     
-                    # Save text embeddings if present
+                    # Save text embeddings if present using chunked streaming
                     if text_embeddings is not None:
-                        torch.save(
+                        self._save_chunked_tensor(
                             {
                                 "embeddings": text_embeddings,
                                 "metadata": {
@@ -259,8 +272,7 @@ class CacheManager:
                                     "text_timestamp": time.time()
                                 }
                             },
-                            text_path,
-                            _use_new_zipfile_serialization=True
+                            text_path
                         )
                     
                     # Update index with filename-based paths
@@ -619,3 +631,68 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
             return 0
+    def _save_chunked_tensor(self, data: Dict, path: Path) -> None:
+        """Save tensor data in chunks with streaming.
+        
+        Args:
+            data: Dictionary containing tensors and metadata
+            path: Output file path
+        """
+        # Calculate optimal chunk size based on available memory
+        if torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties(0).total_memory
+            chunk_bytes = int(total_memory * self.max_chunk_memory)
+        else:
+            chunk_bytes = self.stream_buffer_size
+            
+        # Stream data in chunks
+        with open(path, 'wb') as f:
+            for tensor_dict in self._chunk_tensor_dict(data, chunk_bytes):
+                # Use pinned memory for GPU transfers
+                if torch.cuda.is_available():
+                    with torch.cuda.stream(torch.cuda.Stream()):
+                        buffer = self.pinned_buffer
+                        torch.save(tensor_dict, buffer)
+                        f.write(buffer.numpy().tobytes())
+                else:
+                    torch.save(tensor_dict, f)
+                    
+    def _chunk_tensor_dict(self, data: Dict, chunk_bytes: int):
+        """Generate chunks of tensor dictionary.
+        
+        Args:
+            data: Dictionary containing tensors
+            chunk_bytes: Maximum bytes per chunk
+            
+        Yields:
+            Dictionary chunks
+        """
+        # Split tensors into chunks
+        chunks = []
+        current_bytes = 0
+        current_chunk = {}
+        
+        for key, value in data.items():
+            if isinstance(value, torch.Tensor):
+                tensor_bytes = value.nelement() * value.element_size()
+                if tensor_bytes > chunk_bytes:
+                    # Split large tensor
+                    splits = torch.split(value, chunk_bytes // value.element_size())
+                    for i, split in enumerate(splits):
+                        chunk = {
+                            f"{key}_chunk_{i}": split,
+                            "metadata": data.get("metadata", {})
+                        }
+                        yield chunk
+                else:
+                    if current_bytes + tensor_bytes > chunk_bytes:
+                        yield current_chunk
+                        current_chunk = {}
+                        current_bytes = 0
+                    current_chunk[key] = value
+                    current_bytes += tensor_bytes
+            else:
+                current_chunk[key] = value
+                
+        if current_chunk:
+            yield current_chunk
