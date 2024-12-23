@@ -464,9 +464,20 @@ class PreprocessingPipeline:
             
             # Move to CUDA and apply transforms
             if torch.cuda.is_available():
-                model_dtype = (DataType.from_str(str(self.latent_preprocessor.model.unet.dtype)) 
-                             if self.latent_preprocessor and hasattr(self.latent_preprocessor.model, 'unet')
-                             else DataType.FLOAT_32)
+                # Convert torch dtype to DataType enum
+                if self.latent_preprocessor and hasattr(self.latent_preprocessor.model, 'unet'):
+                    unet_dtype = self.latent_preprocessor.model.unet.dtype
+                    if unet_dtype == torch.float32:
+                        model_dtype = DataType.FLOAT_32
+                    elif unet_dtype == torch.float16:
+                        model_dtype = DataType.FLOAT_16
+                    elif unet_dtype == torch.bfloat16:
+                        model_dtype = DataType.BFLOAT_16
+                    else:
+                        model_dtype = DataType.FLOAT_32
+                else:
+                    model_dtype = DataType.FLOAT_32
+                    
                 target_dtype = model_dtype.to_torch_dtype()
                 tensor = tensor.cuda(non_blocking=True).to(dtype=target_dtype)
                 tensor = self._apply_optimized_transforms(tensor)
