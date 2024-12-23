@@ -113,10 +113,9 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         use_safetensors: bool = True,
         **kwargs
     ) -> None:
+        logger.info(f"Loading model components from {pretrained_model_name}")
         try:
-            logger.info(f"Loading model components from {pretrained_model_name}")
-            try:
-                if isinstance(dtype, str):
+            if isinstance(dtype, str):
                     base_dtype = DataType.from_str(dtype)
                     model_dtypes = ModelWeightDtypes.from_single_dtype(base_dtype)
                 elif isinstance(dtype, DataType):
