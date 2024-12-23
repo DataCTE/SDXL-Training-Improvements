@@ -301,13 +301,15 @@ class CacheManager:
     def _process_image_batch(
         self,
         image_paths: List[Path],
-        caption_ext: str
+        caption_ext: str,
+        batch_size: int = 32
     ) -> Tuple[List[torch.Tensor], Dict]:
-        """Process batch of images with optimized memory handling.
+        """Process batch of images with optimized parallel handling.
         
         Args:
             image_paths: List of paths to process
             caption_ext: Caption file extension
+            batch_size: Size of processing batches
             
         Returns:
             Tuple of (tensors, metadata)
@@ -315,34 +317,61 @@ class CacheManager:
         tensors = []
         metadata = {}
         
-        # Use thread pool for parallel I/O
-        with ThreadPoolExecutor(max_workers=self.num_proc) as pool:
-            futures = []
+        # Split into batches for better memory efficiency
+        for i in range(0, len(image_paths), batch_size):
+            batch_paths = image_paths[i:i + batch_size]
+            batch_tensors = []
+            batch_meta = {}
             
-            # Submit processing jobs
-            for path in image_paths:
-                if str(path) in self.cache_index["files"]:
-                    self.stats.skipped_items += 1
-                    continue
-                    
-                futures.append(pool.submit(self._process_single_image, path, caption_ext))
+            # Pre-filter cached items
+            to_process = [
+                path for path in batch_paths 
+                if str(path) not in self.cache_index["files"]
+            ]
+            
+            if not to_process:
+                self.stats.skipped_items += len(batch_paths)
+                continue
+            
+            # Process batch in parallel
+            with ThreadPoolExecutor(max_workers=self.num_proc) as pool:
+                futures = [
+                    pool.submit(self._process_single_image, path, caption_ext)
+                    for path in to_process
+                ]
                 
-            # Collect results with proper error handling
-            for future in futures:
+                # Use torch.cuda.Stream for tensor operations
+                stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                
                 try:
-                    result = future.result()
-                    if result is not None:
-                        tensor, meta = result
-                        # Validate tensor
-                        if self._validate_tensor(tensor):
-                            tensors.append(tensor)
-                            metadata.update(meta)
-                            self.stats.processed_items += 1
-                        else:
-                            self.stats.validation_errors += 1
-                except Exception as e:
-                    self.stats.failed_items += 1
-                    logger.error(f"Batch processing error: {str(e)}")
+                    with torch.cuda.stream(stream) if stream else nullcontext():
+                        # Collect and validate results
+                        for future in futures:
+                            try:
+                                result = future.result()
+                                if result is not None:
+                                    tensor, meta = result
+                                    if self._validate_tensor(tensor):
+                                        batch_tensors.append(tensor)
+                                        batch_meta.update(meta)
+                                        self.stats.processed_items += 1
+                                    else:
+                                        self.stats.validation_errors += 1
+                            except Exception as e:
+                                self.stats.failed_items += 1
+                                logger.error(f"Batch processing error: {str(e)}")
+                        
+                        # Stack tensors if we have any
+                        if batch_tensors:
+                            stacked = torch.stack(batch_tensors)
+                            if stream:
+                                stacked.record_stream(stream)
+                            tensors.append(stacked)
+                            metadata.update(batch_meta)
+                            
+                finally:
+                    if stream:
+                        stream.synchronize()
                     
         return tensors, metadata
 
@@ -501,31 +530,57 @@ class CacheManager:
         self,
         image_paths: List[str],
         buckets: List[Tuple[int, int]],
-        max_aspect_ratio: float
+        max_aspect_ratio: float,
+        batch_size: int = 64
     ) -> List[int]:
-        """Assign images to aspect ratio buckets."""
+        """Assign images to aspect ratio buckets with batched processing."""
+        # Initialize bucket assignment cache
+        if not hasattr(self, '_bucket_cache'):
+            self._bucket_cache = {}
+            
         bucket_indices = []
         
-        # Process images in parallel using worker pool
-        with ThreadPoolExecutor(max_workers=self.num_cpu_workers) as pool:
-            futures = []
+        # Process in batches
+        for i in range(0, len(image_paths), batch_size):
+            batch_paths = image_paths[i:i + batch_size]
+            batch_indices = []
             
-            for img_path in image_paths:
-                futures.append(pool.submit(
-                    self._assign_single_bucket,
-                    img_path,
-                    buckets,
-                    max_aspect_ratio
-                ))
-                
-            for future in futures:
-                try:
-                    bucket_idx = future.result()
-                    bucket_indices.append(bucket_idx)
-                except Exception as e:
-                    logger.error(f"Error in bucket assignment: {str(e)}")
-                    bucket_indices.append(0)
+            # Filter uncached paths
+            to_process = [
+                path for path in batch_paths
+                if path not in self._bucket_cache
+            ]
+            
+            if to_process:
+                # Process uncached images in parallel
+                with ThreadPoolExecutor(max_workers=self.num_cpu_workers) as pool:
+                    futures = [
+                        pool.submit(
+                            self._assign_single_bucket,
+                            img_path,
+                            buckets,
+                            max_aspect_ratio
+                        )
+                        for img_path in to_process
+                    ]
                     
+                    # Update cache with new results
+                    for path, future in zip(to_process, futures):
+                        try:
+                            bucket_idx = future.result()
+                            self._bucket_cache[path] = bucket_idx
+                        except Exception as e:
+                            logger.error(f"Error in bucket assignment: {str(e)}")
+                            self._bucket_cache[path] = 0
+            
+            # Collect results from cache
+            batch_indices = [
+                self._bucket_cache.get(path, 0)
+                for path in batch_paths
+            ]
+            
+            bucket_indices.extend(batch_indices)
+            
         return bucket_indices
         
     def _assign_single_bucket(
