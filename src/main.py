@@ -248,38 +248,41 @@ def setup_training(
         raise TrainingSetupError("Failed to setup training components", {"error": str(e)})
 
 def main():
+    device = None
     try:
         args = parse_args()
         config = Config.from_yaml(args.config)
+        
         with setup_environment(args):
             device = setup_device_and_logging(config)
-            try:
-                model = setup_model(config, device)
-                if model is None:
-                    raise RuntimeError(f"Failed to initialize model from {config.model.pretrained_model_name}")
-                
-                logger.info("Model initialized successfully")
-                if hasattr(model, 'state_dict') and not tensors_match_device(model.state_dict(), device):
-                    logger.info(f"Moving model to device {device}")
-                if not isinstance(device, torch.device):
-                    device = torch.device(device)
+            model = setup_model(config, device)
+            
+            if model is None:
+                raise RuntimeError(f"Failed to initialize model from {config.model.pretrained_model_name}")
+            
+            logger.info("Model initialized successfully")
+            
+            # Move model to device if needed
+            if hasattr(model, 'state_dict'):
                 try:
-                    stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                    pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-                    with create_stream_context(stream):
-                        try:
-                            tensors_to_device_(models.state_dict(), device)
-                        finally:
+                    if not tensors_match_device(model.state_dict(), device):
+                        logger.info(f"Moving model to device {device}")
+                        stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+                        pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                        
+                        with create_stream_context(stream):
+                            tensors_to_device_(model.state_dict(), device)
                             if stream:
                                 stream.synchronize()
                             torch_sync()
-                    if torch.cuda.is_available():
-                        post_transfer_memory = torch.cuda.memory_allocated()
-                        memory_delta = post_transfer_memory - pre_transfer_memory
-                        logger.debug(f"Memory delta: {memory_delta / 1024**2:.1f}MB")
+                            
+                        if torch.cuda.is_available():
+                            post_transfer_memory = torch.cuda.memory_allocated()
+                            memory_delta = post_transfer_memory - pre_transfer_memory
+                            logger.debug(f"Memory delta: {memory_delta / 1024**2:.1f}MB")
                 except Exception as e:
                     raise TrainingSetupError(
-                        "Failed to move models to device",
+                        "Failed to move model to device",
                         {
                             "error": str(e),
                             "device": str(device),
@@ -287,48 +290,63 @@ def main():
                             "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
                         }
                     )
+
+            # Setup training components
             setup_memory_optimizations(model.unet, config, device)
             if is_main_process():
                 verify_memory_optimizations(model.unet, config, device, logger)
+                
             logger.info("Loading training data...")
             image_paths, captions = load_training_data(config)
+            
             logger.info("Setting up training...")
             train_dataloader, optimizer, wandb_logger = setup_training(
                 config=config,
-                model=models,
+                model=model,  # Fixed: was using undefined 'models'
                 device=device,
                 image_paths=image_paths,
                 captions=captions
             )
+            
             trainer = create_trainer(
                 config=config,
-                model=models,
+                model=model,  # Fixed: was using undefined 'models'
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,
                 device=device,
                 wandb_logger=wandb_logger
             )
+            
             logger.info("Starting training...")
             trainer.train()
+            
             if is_main_process():
                 logger.info("Training complete!")
     except Exception as e:
         error_context = {
             'error_type': type(e).__name__,
-            'device': str(device) if 'device' in locals() else 'unknown',
+            'device': str(device) if device is not None else 'unknown',
             'cuda_available': torch.cuda.is_available(),
-            'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            'model_name': config.model.pretrained_model_name if 'config' in locals() else 'unknown'
+            'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0
         }
+        
+        # Add config-related info if available
+        if 'config' in locals():
+            error_context['model_name'] = config.model.pretrained_model_name
+            
+        # Add CUDA memory info if available
         if torch.cuda.is_available():
             error_context.update({
                 'cuda_memory_allocated': torch.cuda.memory_allocated(),
                 'cuda_memory_reserved': torch.cuda.memory_reserved(),
                 'cuda_max_memory': torch.cuda.max_memory_allocated()
             })
+            
         logger.error(f"Training failed: {str(e)}", extra=error_context)
+        
         if isinstance(e, TrainingSetupError) and e.context:
             logger.error(f"Error context: {e.context}")
+            
         sys.exit(1)
 
 if __name__ == "__main__":
