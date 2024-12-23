@@ -29,9 +29,7 @@ class VAEEncoder:
         device: Union[str, torch.device] = "cuda",
         dtype: Optional[torch.dtype] = None,
         enable_memory_efficient_attention: bool = True,
-        enable_vae_slicing: bool = True,
-        enable_vae_tiling: bool = False,
-        vae_tile_size: int = 512,
+        enable_vae_slicing: bool = False,
         enable_gradient_checkpointing: bool = True
     ):
         """Initialize VAE encoder with performance optimizations."""
