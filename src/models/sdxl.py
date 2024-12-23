@@ -138,35 +138,46 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             self.dtype = model_dtypes.train_dtype
 
-            # 2. Load VAE
+            # 2. Load VAE with error tracking
             logger.info("Loading VAE...")
-            self.vae = AutoencoderKL.from_pretrained(
-                pretrained_model_name,
-                subfolder="vae",
-                torch_dtype=model_dtypes.vae.to_torch_dtype(),
-                use_safetensors=use_safetensors
-            )
+            try:
+                self.vae = AutoencoderKL.from_pretrained(
+                    pretrained_model_name,
+                    subfolder="vae",
+                    torch_dtype=model_dtypes.vae.to_torch_dtype(),
+                    use_safetensors=use_safetensors
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to load VAE: {str(e)}") from e
 
-            # 3. Load text encoders
+            # 3. Load text encoders with error tracking
             logger.info("Loading text encoder 1...")
-            self.text_encoder_1 = CLIPTextModel.from_pretrained(
-                pretrained_model_name,
-                subfolder="text_encoder",
-                torch_dtype=model_dtypes.text_encoder.to_torch_dtype(),
-                use_safetensors=use_safetensors
-            )
-            logger.info("Loading text encoder 2...")
-            self.text_encoder_2 = CLIPTextModel.from_pretrained(
-                pretrained_model_name,
-                subfolder="text_encoder_2",
-                torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
-                use_safetensors=use_safetensors
-            )
+            try:
+                self.text_encoder_1 = CLIPTextModel.from_pretrained(
+                    pretrained_model_name,
+                    subfolder="text_encoder",
+                    torch_dtype=model_dtypes.text_encoder.to_torch_dtype(),
+                    use_safetensors=use_safetensors
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to load text encoder 1: {str(e)}") from e
 
-            # 4. Load UNet
+            logger.info("Loading text encoder 2...")
+            try:
+                self.text_encoder_2 = CLIPTextModel.from_pretrained(
+                    pretrained_model_name,
+                    subfolder="text_encoder_2",
+                    torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
+                    use_safetensors=use_safetensors
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to load text encoder 2: {str(e)}") from e
+
+            # 4. Load UNet with error tracking
             logger.info("Loading UNet...")
-            self.unet = UNet2DConditionModel.from_pretrained(
-                pretrained_model_name,
+            try:
+                self.unet = UNet2DConditionModel.from_pretrained(
+                    pretrained_model_name,
                 subfolder="unet",
                 torch_dtype=model_dtypes.unet.to_torch_dtype(),
                 use_safetensors=use_safetensors
