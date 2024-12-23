@@ -196,13 +196,15 @@ class PreprocessingPipeline:
             
         logger.info(f"Precomputing latents for {len(image_paths)} images")
 
-        # First check cache index for all images
-        to_process = []
-        for img_path in image_paths:
-            if not self.cache_manager.has_cached_item(img_path):
-                to_process.append(img_path)
-            else:
-                self.stats.cache_hits += 1
+        # Batch check cache index
+        if self.cache_manager:
+            # Convert to set for O(1) lookups
+            cached_paths = set(path for path in image_paths 
+                             if self.cache_manager.has_cached_item(path))
+            to_process = [path for path in image_paths if path not in cached_paths]
+            self.stats.cache_hits += len(cached_paths)
+        else:
+            to_process = image_paths
 
         if not to_process:
             logger.info("All latents already cached, skipping precomputation")

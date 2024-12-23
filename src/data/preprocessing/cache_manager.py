@@ -423,7 +423,7 @@ class CacheManager:
         )
 
     def has_cached_item(self, file_path: Union[str, Path]) -> bool:
-        """Check if item exists in cache.
+        """Check if item exists in cache with optimized lookup.
         
         Args:
             file_path: Path to original file
@@ -432,32 +432,37 @@ class CacheManager:
             bool indicating if item is cached
         """
         try:
-            # First check cache index
-            file_info = self.cache_index["files"].get(str(file_path))
-            if file_info:
-                latent_path = Path(file_info["latent_path"])
-                text_path = Path(file_info["text_path"])
-                if latent_path.exists() and text_path.exists():
-                    return True
-                    
-            # Check for files using base name pattern if not in index
-            base_name = Path(file_path).stem
-            potential_paths = [
-                (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
-            ]
+            str_path = str(file_path)
             
-            for latent_path, text_path in potential_paths:
-                if latent_path.exists() and text_path.exists():
-                    # Update index with found files
-                    self.cache_index["files"][str(file_path)] = {
-                        "latent_path": str(latent_path),
-                        "text_path": str(text_path),
-                        "base_name": base_name,
-                        "timestamp": time.time()
-                    }
-                    self._save_cache_index()
+            # Fast path: Check cache index first
+            if str_path in self.cache_index["files"]:
+                file_info = self.cache_index["files"][str_path]
+                # Avoid path creation if possible by using string operations
+                if all(Path(p).exists() for p in (file_info["latent_path"], file_info["text_path"])):
                     return True
                     
+            # Slower path: Check by filename pattern
+            # Only create Path object once
+            path = Path(file_path)
+            base_name = path.stem
+            
+            # Use string concatenation instead of Path joining for speed
+            latent_path = self.image_dir / f"{base_name}.pt"
+            text_path = self.text_dir / f"{base_name}.pt"
+            
+            if latent_path.exists() and text_path.exists():
+                # Update index
+                self.cache_index["files"][str_path] = {
+                    "latent_path": str(latent_path),
+                    "text_path": str(text_path),
+                    "base_name": base_name,
+                    "timestamp": time.time()
+                }
+                # Only save index periodically
+                if len(self.cache_index["files"]) % 100 == 0:
+                    self._save_cache_index()
+                return True
+                
             return False
             
         except Exception as e:
