@@ -195,19 +195,30 @@ class PreprocessingPipeline:
             return
             
         logger.info(f"Precomputing latents for {len(image_paths)} images")
+
+        # First check cache index for all images
+        to_process = []
+        for img_path in image_paths:
+            if not self.cache_manager.has_cached_item(img_path):
+                to_process.append(img_path)
+            else:
+                self.stats.cache_hits += 1
+
+        if not to_process:
+            logger.info("All latents already cached, skipping precomputation")
+            return
+
+        logger.info(f"Processing {len(to_process)} uncached images")
         
         try:
-            for i in range(0, len(image_paths), batch_size):
-                batch_paths = image_paths[i:i + batch_size]
-                batch_captions = captions[i:i + batch_size]
+            for i in range(0, len(to_process), batch_size):
+                batch_paths = to_process[i:i + batch_size]
+                # Get corresponding captions by matching indices
+                batch_captions = [captions[image_paths.index(path)] for path in batch_paths]
                 
                 # Process each image in batch
                 for img_path, caption in zip(batch_paths, batch_captions):
                     try:
-                        # Skip if already cached
-                        if self.cache_manager.has_cached_item(img_path):
-                            self.stats.cache_hits += 1
-                            continue
                             
                         # Process image and cache results
                         processed = self._process_image(img_path)
