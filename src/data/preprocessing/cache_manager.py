@@ -648,14 +648,12 @@ class CacheManager:
         # Stream data in chunks
         with open(path, 'wb') as f:
             for tensor_dict in self._chunk_tensor_dict(data, chunk_bytes):
-                # Use pinned memory for GPU transfers
-                if torch.cuda.is_available():
-                    with torch.cuda.stream(torch.cuda.Stream()):
-                        buffer = self.pinned_buffer
-                        torch.save(tensor_dict, buffer)
-                        f.write(buffer.numpy().tobytes())
-                else:
-                    torch.save(tensor_dict, f)
+                # Save directly to file, using memory mapping for large tensors
+                torch.save(
+                    tensor_dict,
+                    f,
+                    _use_new_zipfile_serialization=True
+                )
                     
     def _chunk_tensor_dict(self, data: Dict, chunk_bytes: int):
         """Generate chunks of tensor dictionary.
