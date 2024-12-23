@@ -124,6 +124,25 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         
         # Model configuration
         self.model_type = model_type
+        self._dtype = DataType.FLOAT_32  # Default dtype
+
+    @property
+    def dtype(self) -> DataType:
+        """Get model dtype."""
+        return self._dtype
+
+    @dtype.setter 
+    def dtype(self, value: Union[str, DataType]) -> None:
+        """Set model dtype.
+        
+        Args:
+            value: New dtype value as string or DataType
+        """
+        if isinstance(value, str):
+            value = DataType.from_str(value)
+        elif not isinstance(value, DataType):
+            raise ValueError(f"Invalid dtype: {value}")
+        self._dtype = value
 
     def from_pretrained(
         self,
