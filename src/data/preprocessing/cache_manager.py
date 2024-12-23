@@ -97,15 +97,10 @@ class CacheManager:
         # Setup cache paths
         self.text_dir = self.cache_dir / "text"
         self.image_dir = self.cache_dir / "image"
-        self.latents_dir = self.cache_dir / "latents"  # For compatibility with existing files
         
         # Create cache directories
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
-            
-        # Check for existing latents directory
-        if self.latents_dir.exists():
-            logger.info("Found existing latents directory, will check for cached files there")
         
         # Configure streaming and chunking
         self.stream_buffer_size = stream_buffer_size
@@ -423,11 +418,10 @@ class CacheManager:
                 if latent_path.exists() and text_path.exists():
                     return True
                     
-            # Check for files using image name pattern if not in index
+            # Check for files using base name pattern if not in index
             base_name = Path(file_path).stem
             potential_paths = [
-                (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt"),
-                (self.latents_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
+                (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
             ]
             
             for latent_path, text_path in potential_paths:
@@ -472,8 +466,7 @@ class CacheManager:
                 # Try finding files by image name pattern
                 base_name = Path(file_path).stem
                 potential_paths = [
-                    (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt"),
-                    (self.latents_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
+                    (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
                 ]
                 
                 for latent_path, text_path in potential_paths:
