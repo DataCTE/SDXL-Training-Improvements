@@ -195,8 +195,6 @@ class VAEEncoder:
         with torch.cuda.stream(stream) if stream else nullcontext():
             for b_idx in range(0, batch_size, max_batch_tiles):
                 b_end = min(b_idx + max_batch_tiles, batch_size)
-                curr_batch = b_end - b_idx
-                
                 # Process all tiles for current batch
                 for h in range(num_h):
                     h_start = h * self.vae_tile_size
