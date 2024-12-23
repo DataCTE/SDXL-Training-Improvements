@@ -97,10 +97,15 @@ class CacheManager:
         # Setup cache paths
         self.text_dir = self.cache_dir / "text"
         self.image_dir = self.cache_dir / "image"
+        self.latents_dir = self.cache_dir / "latents"  # For compatibility with existing files
         
         # Create cache directories
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
+            
+        # Check for existing latents directory
+        if self.latents_dir.exists():
+            logger.info("Found existing latents directory, will check for cached files there")
         
         # Configure streaming and chunking
         self.stream_buffer_size = stream_buffer_size
@@ -410,14 +415,34 @@ class CacheManager:
             bool indicating if item is cached
         """
         try:
+            # First check cache index
             file_info = self.cache_index["files"].get(str(file_path))
-            if not file_info:
-                return False
-                
-            latent_path = Path(file_info["latent_path"])
-            text_path = Path(file_info["text_path"])
+            if file_info:
+                latent_path = Path(file_info["latent_path"])
+                text_path = Path(file_info["text_path"])
+                if latent_path.exists() and text_path.exists():
+                    return True
+                    
+            # Check for files using image name pattern if not in index
+            base_name = Path(file_path).stem
+            potential_paths = [
+                (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt"),
+                (self.latents_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
+            ]
             
-            return latent_path.exists() and text_path.exists()
+            for latent_path, text_path in potential_paths:
+                if latent_path.exists() and text_path.exists():
+                    # Update index with found files
+                    self.cache_index["files"][str(file_path)] = {
+                        "latent_path": str(latent_path),
+                        "text_path": str(text_path),
+                        "base_name": base_name,
+                        "timestamp": time.time()
+                    }
+                    self._save_cache_index()
+                    return True
+                    
+            return False
             
         except Exception as e:
             logger.error(f"Error checking cache status: {str(e)}")
@@ -441,13 +466,35 @@ class CacheManager:
             if self.enable_memory_tracking:
                 self._track_memory("cache_fetch_start")
                 
+            # First check cache index
             file_info = self.cache_index["files"].get(str(file_path))
             if not file_info:
-                self.stats.cache_misses += 1
-                return None
+                # Try finding files by image name pattern
+                base_name = Path(file_path).stem
+                potential_paths = [
+                    (self.image_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt"),
+                    (self.latents_dir / f"{base_name}.pt", self.text_dir / f"{base_name}.pt")
+                ]
                 
-            latent_path = Path(file_info.get("latent_path", ""))
-            text_path = Path(file_info.get("text_path", ""))
+                for latent_path, text_path in potential_paths:
+                    if latent_path.exists() and text_path.exists():
+                        file_info = {
+                            "latent_path": str(latent_path),
+                            "text_path": str(text_path),
+                            "base_name": base_name,
+                            "timestamp": time.time()
+                        }
+                        # Update index with found files
+                        self.cache_index["files"][str(file_path)] = file_info
+                        self._save_cache_index()
+                        break
+                        
+                if not file_info:
+                    self.stats.cache_misses += 1
+                    return None
+                    
+            latent_path = Path(file_info["latent_path"])
+            text_path = Path(file_info["text_path"])
             
             # Check if at least one type of data exists
             if not (latent_path.exists() or text_path.exists()):
