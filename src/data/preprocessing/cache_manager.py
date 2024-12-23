@@ -279,19 +279,7 @@ class CacheManager:
                 
                 # Save index immediately after successful writes
                 self._save_cache_index()
-                    
-                    # Update index with filename-based paths
-                    self.cache_index["files"][str(file_path)] = {
-                        "latent_path": str(image_path),  # Use image path instead of latent
-                        "text_path": str(text_path),
-                        "base_name": base_name,
-                        "timestamp": time.time()
-                    }
-                    
-                    # Save index periodically
-                    if len(self.cache_index["files"]) % 100 == 0:
-                        self._save_cache_index()
-                        
+                
                 finally:
                     # Cleanup: Unpin tensors and free memory if present and pinned
                     for tensor_dict in [latent_data, text_embeddings]:
