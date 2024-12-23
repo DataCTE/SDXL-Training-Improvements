@@ -1,4 +1,3 @@
-"""StableDiffusionXL model implementation with 100x speedups."""
 import logging
 import torch
 import torch.backends.cudnn
@@ -39,6 +38,7 @@ from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapp
 
 logger = logging.getLogger(__name__)
 
+
 class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
     def __init__(
         self,
@@ -54,6 +54,7 @@ class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
         )
         self.text_encoder_1_vector = text_encoder_1_vector
         self.text_encoder_2_vector = text_encoder_2_vector
+
 
 class StableDiffusionXLPipeline(BasePipeline):
     def __init__(
@@ -76,7 +77,10 @@ class StableDiffusionXLPipeline(BasePipeline):
             scheduler=scheduler,
         )
 
+
 class StableDiffusionXLModel(torch.nn.Module, BaseModel):
+    """StableDiffusionXL model with training optimizations and memory handling."""
+
     def __init__(self, model_type: ModelType):
         torch.nn.Module.__init__(self)
         BaseModel.__init__(self, model_type)
@@ -88,9 +92,11 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         self.tokenizer_2 = None
         self.unet = None
         self.noise_scheduler = None
+
         self.text_encoder_1_lora = None
         self.text_encoder_2_lora = None
         self.unet_lora = None
+
         self.model_type = model_type
         self._dtype = DataType.FLOAT_32
 
@@ -113,91 +119,110 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         use_safetensors: bool = True,
         **kwargs
     ) -> None:
+        """
+        Load pretrained model components for SDXL.
+        """
         logger.info(f"Loading model components from {pretrained_model_name}")
+
         try:
+            # 1. Resolve dtype config
             if isinstance(dtype, str):
-                    base_dtype = DataType.from_str(dtype)
-                    model_dtypes = ModelWeightDtypes.from_single_dtype(base_dtype)
-                elif isinstance(dtype, DataType):
-                    model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
-                elif isinstance(dtype, ModelWeightDtypes):
-                    model_dtypes = dtype
-                else:
-                    raise ValueError(f"Invalid dtype: {dtype}")
+                base_dtype = DataType.from_str(dtype)
+                model_dtypes = ModelWeightDtypes.from_single_dtype(base_dtype)
+            elif isinstance(dtype, DataType):
+                model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
+            elif isinstance(dtype, ModelWeightDtypes):
+                model_dtypes = dtype
+            else:
+                raise ValueError(f"Invalid dtype: {dtype}")
 
-                self.dtype = model_dtypes.train_dtype
+            self.dtype = model_dtypes.train_dtype
 
-                logger.info("Loading VAE...")
-                self.vae = AutoencoderKL.from_pretrained(
+            # 2. Load VAE
+            logger.info("Loading VAE...")
+            self.vae = AutoencoderKL.from_pretrained(
                 pretrained_model_name,
                 subfolder="vae",
                 torch_dtype=model_dtypes.vae.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-                logger.info("Loading text encoder 1...")
-                self.text_encoder_1 = CLIPTextModel.from_pretrained(
+
+            # 3. Load text encoders
+            logger.info("Loading text encoder 1...")
+            self.text_encoder_1 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder",
                 torch_dtype=model_dtypes.text_encoder.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-                logger.info("Loading text encoder 2...")
-                self.text_encoder_2 = CLIPTextModel.from_pretrained(
+            logger.info("Loading text encoder 2...")
+            self.text_encoder_2 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder_2",
                 torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-                logger.info("Loading UNet...")
-                self.unet = UNet2DConditionModel.from_pretrained(
+
+            # 4. Load UNet
+            logger.info("Loading UNet...")
+            self.unet = UNet2DConditionModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="unet",
                 torch_dtype=model_dtypes.unet.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-                logger.info("Loading tokenizer 1...")
-                self.tokenizer_1 = CLIPTokenizer.from_pretrained(
+
+            # 5. Load tokenizers
+            logger.info("Loading tokenizer 1...")
+            self.tokenizer_1 = CLIPTokenizer.from_pretrained(
                 pretrained_model_name,
                 subfolder="tokenizer"
             )
-                logger.info("Loading tokenizer 2...")
-                self.tokenizer_2 = CLIPTokenizer.from_pretrained(
+            logger.info("Loading tokenizer 2...")
+            self.tokenizer_2 = CLIPTokenizer.from_pretrained(
                 pretrained_model_name,
                 subfolder="tokenizer_2"
             )
-                logger.info("Loading noise scheduler...")
-                self.noise_scheduler = DDPMScheduler.from_pretrained(
-                    pretrained_model_name,
-                    subfolder="scheduler"
-                )
-                logger.info("Successfully loaded all model components")
-            except Exception as e:
-                error_context = {
-                    'model_name': pretrained_model_name,
-                    'dtype': str(dtype),
-                    'error': str(e),
-                    'component': 'unknown'
-                }
-                if not hasattr(self, 'vae') or self.vae is None:
-                    error_context['component'] = 'vae'
-                elif not hasattr(self, 'text_encoder_1') or self.text_encoder_1 is None:
-                    error_context['component'] = 'text_encoder_1'
-                elif not hasattr(self, 'text_encoder_2') or self.text_encoder_2 is None:
-                    error_context['component'] = 'text_encoder_2'
-                elif not hasattr(self, 'unet') or self.unet is None:
-                    error_context['component'] = 'unet'
-                elif not hasattr(self, 'tokenizer_1') or self.tokenizer_1 is None:
-                    error_context['component'] = 'tokenizer_1'
-                elif not hasattr(self, 'tokenizer_2') or self.tokenizer_2 is None:
-                    error_context['component'] = 'tokenizer_2'
-                elif not hasattr(self, 'noise_scheduler') or self.noise_scheduler is None:
-                    error_context['component'] = 'noise_scheduler'
-                
-                error_msg = f"Failed to load {error_context['component']}: {str(e)}"
-                logger.error(error_msg, extra=error_context)
-                raise ValueError(error_msg)
+
+            # 6. Load scheduler
+            logger.info("Loading noise scheduler...")
+            self.noise_scheduler = DDPMScheduler.from_pretrained(
+                pretrained_model_name,
+                subfolder="scheduler"
+            )
+
+            logger.info("Successfully loaded all model components.")
+
+        except Exception as e:
+            error_context = {
+                'model_name': pretrained_model_name,
+                'dtype': str(dtype),
+                'error': str(e),
+                'component': 'unknown'
+            }
+            if self.vae is None:
+                error_context['component'] = 'vae'
+            elif self.text_encoder_1 is None:
+                error_context['component'] = 'text_encoder_1'
+            elif self.text_encoder_2 is None:
+                error_context['component'] = 'text_encoder_2'
+            elif self.unet is None:
+                error_context['component'] = 'unet'
+            elif self.tokenizer_1 is None:
+                error_context['component'] = 'tokenizer_1'
+            elif self.tokenizer_2 is None:
+                error_context['component'] = 'tokenizer_2'
+            elif self.noise_scheduler is None:
+                error_context['component'] = 'noise_scheduler'
+
+            error_msg = f"Failed to load {error_context['component']}: {str(e)}"
+            logger.error(error_msg, extra=error_context)
+            raise ValueError(error_msg) from e
 
     def vae_to(self, device: torch.device) -> None:
+        """
+        Move VAE to the specified device.
+        """
         if isinstance(self.vae, VAEEncoder):
             self.vae.to(device=device)
         else:
@@ -212,72 +237,107 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                     tensors_record_stream(torch.cuda.current_stream(), self.vae.state_dict())
 
     def text_encoder_to(self, device: torch.device) -> None:
+        """
+        Move both text encoders (and any LoRA modules) to the specified device.
+        """
         if device.type == "cuda":
             if not torch.cuda.is_available():
                 raise RuntimeError("cuda is not available")
             device_idx = device.index if device.index is not None else 0
             torch.cuda.set_device(device_idx)
+
         with create_stream_context(torch.cuda.current_stream()):
             for encoder in [self.text_encoder_1, self.text_encoder_2]:
                 if not device_equals(encoder.device, device):
                     tensors_to_device_(encoder.state_dict(), device, non_blocking=True)
                     tensors_record_stream(torch.cuda.current_stream(), encoder.state_dict())
+
             for lora in [self.text_encoder_1_lora, self.text_encoder_2_lora]:
                 if lora is not None:
                     tensors_to_device_(lora.state_dict(), device, non_blocking=True)
                     tensors_record_stream(torch.cuda.current_stream(), lora.state_dict())
 
     def text_encoder_1_to(self, device: torch.device) -> None:
+        """
+        Move only the first text encoder (and LoRA) to the specified device.
+        """
         with create_stream_context(torch.cuda.current_stream()):
             if not device_equals(self.text_encoder_1.device, device):
                 tensors_to_device_(self.text_encoder_1.state_dict(), device, non_blocking=True)
             if self.text_encoder_1_lora is not None:
                 tensors_to_device_(self.text_encoder_1_lora.state_dict(), device, non_blocking=True)
+
             if device.type == "cuda":
                 tensors_record_stream(torch.cuda.current_stream(), self.text_encoder_1.state_dict())
 
     def text_encoder_2_to(self, device: torch.device) -> None:
+        """
+        Move only the second text encoder (and LoRA) to the specified device.
+        """
         with create_stream_context(torch.cuda.current_stream()):
             if not device_equals(self.text_encoder_2.device, device):
                 tensors_to_device_(self.text_encoder_2.state_dict(), device, non_blocking=True)
             if self.text_encoder_2_lora is not None:
                 tensors_to_device_(self.text_encoder_2_lora.state_dict(), device, non_blocking=True)
+
             if device.type == "cuda":
                 tensors_record_stream(torch.cuda.current_stream(), self.text_encoder_2.state_dict())
 
     def unet_to(self, device: torch.device) -> None:
+        """
+        Move UNet (and LoRA) to the specified device.
+        """
         if device.type == "cuda":
             if not torch.cuda.is_available():
                 raise RuntimeError("cuda is not available")
             device_idx = device.index if device.index is not None else 0
             torch.cuda.set_device(device_idx)
+
         with create_stream_context(torch.cuda.current_stream()):
             if not device_equals(self.unet.device, device):
                 tensors_to_device_(self.unet.state_dict(), device, non_blocking=True)
                 tensors_record_stream(torch.cuda.current_stream(), self.unet.state_dict())
+
             if self.unet_lora is not None:
                 tensors_to_device_(self.unet_lora.state_dict(), device, non_blocking=True)
                 tensors_record_stream(torch.cuda.current_stream(), self.unet_lora.state_dict())
 
     def eval(self) -> None:
+        """
+        Set VAE and text encoders to eval mode, UNet to eval mode as well.
+        """
         self.vae.eval()
         self.text_encoder_1.eval()
         self.text_encoder_2.eval()
         self.unet.eval()
 
     def train(self) -> None:
+        """
+        Keep VAE and text encoders in eval mode, set UNet to train mode.
+        """
         self.vae.eval()
         self.text_encoder_1.eval()
         self.text_encoder_2.eval()
         self.unet.train()
 
     def zero_grad(self) -> None:
+        """
+        Zero out gradients of the UNet (trainable component).
+        """
         self.unet.zero_grad(set_to_none=True)
 
     def parameters(self):
+        """
+        Return trainable parameters of the UNet by default.
+        """
         return self.unet.parameters()
 
     def add_embeddings_to_prompt(self, prompt: str) -> str:
+        """
+        Optionally inject custom embeddings into a prompt string.
+        """
+        # This method references self.additional_embeddings or self.embedding,
+        # which you may need to implement. It's kept for completeness:
         return self._add_embeddings_to_prompt(
             self.additional_embeddings,
             self.embedding,
@@ -300,6 +360,10 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         text_encoder_2_dropout_probability: Optional[float] = None,
         pooled_text_encoder_2_output: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
+        """
+        Encode text with both text encoders (and optional dropout).
+        """
+        # Tokenize if needed
         if tokens_1 is None and text is not None:
             tokens_1 = self.tokenizer_1(
                 text,
@@ -318,6 +382,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 return_tensors="pt"
             ).input_ids.to(self.text_encoder_2.device)
 
+        # Encode with first text encoder
         text_encoder_1_output, _ = encode_clip(
             text_encoder=self.text_encoder_1,
             tokens=tokens_1,
@@ -328,6 +393,8 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             use_attention_mask=False,
             add_layer_norm=False
         )
+
+        # Encode with second text encoder
         text_encoder_2_output, pooled_text_encoder_2_output = encode_clip(
             text_encoder=self.text_encoder_2,
             tokens=tokens_2,
@@ -339,6 +406,8 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             use_attention_mask=False,
             add_layer_norm=False
         )
+
+        # Apply optional dropout to text_encoder_1 output
         if text_encoder_1_dropout_probability is not None:
             dropout_text_encoder_1_mask = torch.tensor(
                 [rand.random() > text_encoder_1_dropout_probability for _ in range(batch_size)],
@@ -346,6 +415,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             ).float()
             text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
 
+        # Apply optional dropout to text_encoder_2 output
         if text_encoder_2_dropout_probability is not None:
             dropout_text_encoder_2_mask = torch.tensor(
                 [rand.random() > text_encoder_2_dropout_probability for _ in range(batch_size)],
@@ -354,10 +424,14 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             pooled_text_encoder_2_output = pooled_text_encoder_2_output * dropout_text_encoder_2_mask[:, None]
             text_encoder_2_output = text_encoder_2_output * dropout_text_encoder_2_mask[:, None, None]
 
+        # Concatenate final embeddings
         text_encoder_output = torch.cat([text_encoder_1_output, text_encoder_2_output], dim=-1)
         return text_encoder_output, pooled_text_encoder_2_output
 
     def to(self, device: torch.device) -> None:
+        """
+        Move all model components to the specified device (VAE, text encoders, UNet).
+        """
         logger.info(f"Moving model components to {device}")
         try:
             if device.type == "cuda":
@@ -375,6 +449,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 self.vae_to(device)
                 self.text_encoder_to(device)
                 self.unet_to(device)
+
         except Exception as e:
             error_context = {
                 'device': str(device),
@@ -385,6 +460,9 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             raise
 
     def create_pipeline(self) -> 'StableDiffusionXLPipeline':
+        """
+        Create a StableDiffusionXLPipeline for inference, ensuring all components are loaded.
+        """
         if not all([
             self.vae,
             self.text_encoder_1,
