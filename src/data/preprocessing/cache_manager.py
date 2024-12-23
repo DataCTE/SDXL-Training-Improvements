@@ -93,10 +93,12 @@ class CacheManager:
         }
         
         # Setup cache paths
-        self.latents_dir = self.cache_dir / "latents"
         self.text_dir = self.cache_dir / "text"
-        self.latents_dir.mkdir(exist_ok=True)
-        self.text_dir.mkdir(exist_ok=True)
+        self.image_dir = self.cache_dir / "image"
+        
+        # Create cache directories
+        for directory in [self.text_dir, self.image_dir]:
+            directory.mkdir(exist_ok=True)
         
         # Setup worker pools with proper resource limits
         self.image_pool = ProcessPoolExecutor(
@@ -190,8 +192,8 @@ class CacheManager:
                 
             # Use filename as base for cache files
             base_name = Path(file_path).stem
-            latent_path = self.latents_dir / f"{base_name}_latent.pt"
-            text_path = self.text_dir / f"{base_name}_text.pt"
+            text_path = self.text_dir / f"{base_name}.pt"
+            image_path = self.image_dir / f"{base_name}.pt"
             
             # Check and optimize device placement
             current_device = next(
@@ -487,12 +489,10 @@ class CacheManager:
             if remove_files:
                 # Remove cache directories
                 import shutil
-                shutil.rmtree(self.latents_dir)
-                shutil.rmtree(self.text_dir)
-                
-                # Recreate directories
-                self.latents_dir.mkdir(parents=True)
-                self.text_dir.mkdir(parents=True)
+                for directory in [self.text_dir, self.image_dir]:
+                    if directory.exists():
+                        shutil.rmtree(directory)
+                    directory.mkdir(parents=True)
                 
             # Reset index
             self.cache_index = {"files": {}, "chunks": {}}
