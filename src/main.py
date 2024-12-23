@@ -83,51 +83,75 @@ def setup_device_and_logging(config: Config) -> torch.device:
 
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     logger.info("Loading models...")
+    model = None
     try:
         model = StableDiffusionXLModel(ModelType.BASE)
-        logger.info("Loading VAE...")
-        model.vae = AutoencoderKL.from_pretrained(
-            config.model.pretrained_model_name,
-            subfolder="vae",
-            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
-            use_safetensors=True
-        )
-        logger.info("Loading text encoders...")
-        model.text_encoder_1 = CLIPTextModel.from_pretrained(
-            config.model.pretrained_model_name,
-            subfolder="text_encoder",
-            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
-            use_safetensors=True
-        )
-        model.text_encoder_2 = CLIPTextModel.from_pretrained(
-            config.model.pretrained_model_name,
-            subfolder="text_encoder_2",
-            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
-            use_safetensors=True
-        )
-        logger.info("Loading UNet...")
-        model.unet = UNet2DConditionModel.from_pretrained(
-            config.model.pretrained_model_name,
-            subfolder="unet",
-            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
-            use_safetensors=True
-        )
-        logger.info("Loading tokenizers...")
-        model.tokenizer_1 = CLIPTokenizer.from_pretrained(config.model.pretrained_model_name, subfolder="tokenizer")
-        model.tokenizer_2 = CLIPTokenizer.from_pretrained(config.model.pretrained_model_name, subfolder="tokenizer_2")
+        
+        # Track memory before loading
+        initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+        
+        components = [
+            ("VAE", "vae", AutoencoderKL, "vae"),
+            ("Text Encoder 1", "text_encoder_1", CLIPTextModel, "text_encoder"),
+            ("Text Encoder 2", "text_encoder_2", CLIPTextModel, "text_encoder_2"),
+            ("UNet", "unet", UNet2DConditionModel, "unet"),
+            ("Tokenizer 1", "tokenizer_1", CLIPTokenizer, "tokenizer"),
+            ("Tokenizer 2", "tokenizer_2", CLIPTokenizer, "tokenizer_2")
+        ]
+        
+        for name, attr, cls, subfolder in components:
+            try:
+                logger.info(f"Loading {name}...")
+                if cls in (AutoencoderKL, CLIPTextModel, UNet2DConditionModel):
+                    setattr(model, attr, cls.from_pretrained(
+                        config.model.pretrained_model_name,
+                        subfolder=subfolder,
+                        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+                        use_safetensors=True
+                    ))
+                else:  # Tokenizers
+                    setattr(model, attr, cls.from_pretrained(
+                        config.model.pretrained_model_name,
+                        subfolder=subfolder
+                    ))
+                
+                # Track memory after each component
+                if torch.cuda.is_available():
+                    current_memory = torch.cuda.memory_allocated()
+                    logger.debug(f"{name} loaded, memory usage: {(current_memory - initial_memory) / 1024**2:.1f}MB")
+                    
+            except Exception as e:
+                error_context = {
+                    'component': name,
+                    'model_name': config.model.pretrained_model_name,
+                    'device_type': device.type,
+                    'device_index': device.index,
+                    'error': str(e),
+                    'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                }
+                logger.error(f"Failed to load {name}", extra=error_context)
+                raise RuntimeError(f"Failed to load {name}: {str(e)}") from e
+        
         logger.info(f"Moving model to {device}")
         model.to(device)
+        
+        if torch.cuda.is_available():
+            final_memory = torch.cuda.memory_allocated()
+            logger.info(f"Total GPU memory usage: {(final_memory - initial_memory) / 1024**2:.1f}MB")
+            
         return model
 
     except Exception as e:
         error_context = {
             'model_name': config.model.pretrained_model_name,
-            'device_type': device.type,              # <--- capture more details
-            'device_index': device.index,            # <--- explicitly store device index
+            'device_type': device.type,
+            'device_index': device.index,
             'error': str(e),
+            'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+            'model_state': 'partially_loaded' if model else 'not_created'
         }
         logger.error("Failed to initialize model", extra=error_context)
-        raise RuntimeError("Failed to load models") from e
+        raise RuntimeError(f"Failed to load models: {str(e)}") from e
 
 
 def load_training_data(config: Config) -> tuple[List[str], List[str]]:
