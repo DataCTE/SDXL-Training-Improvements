@@ -223,27 +223,47 @@ class CacheManager:
             try:
                 # Save latents if present
                 if latent_data is not None:
-                    # Move to CPU and convert dtype if needed
-                    processed_latents = {}
-                    for k, v in latent_data.items():
-                        if isinstance(v, torch.Tensor):
-                            target_dtype = model_dtypes.vae.to_torch_dtype()
-                            processed_latents[k] = v.detach().cpu().to(dtype=target_dtype)
-                        else:
-                            processed_latents[k] = v
+                    try:
+                        # Move to CPU and convert dtype if needed
+                        processed_latents = {}
+                        for k, v in latent_data.items():
+                            if isinstance(v, torch.Tensor):
+                                # Ensure tensor is detached and on CPU
+                                tensor = v.detach()
+                                if tensor.device.type != 'cpu':
+                                    tensor = tensor.cpu()
+                                # Convert dtype if needed
+                                target_dtype = model_dtypes.vae.to_torch_dtype()
+                                if tensor.dtype != target_dtype:
+                                    tensor = tensor.to(dtype=target_dtype)
+                                processed_latents[k] = tensor
+                            else:
+                                processed_latents[k] = v
 
-                    # Save latents with metadata
-                    torch.save(
-                        {
+                        # Create save data dictionary
+                        save_data = {
                             "latent": processed_latents,
                             "metadata": {
                                 **metadata,
                                 "latent_timestamp": time.time()
                             }
-                        },
-                        latent_path
-                    )
-                    logger.debug(f"Saved latent data to {latent_path}")
+                        }
+
+                        # Ensure directory exists
+                        latent_path.parent.mkdir(parents=True, exist_ok=True)
+
+                        # Save with explicit flush to disk
+                        torch.save(save_data, latent_path)
+                        
+                        # Verify file was written
+                        if not latent_path.exists():
+                            raise IOError(f"Failed to write latent file: {latent_path}")
+                            
+                        logger.debug(f"Successfully saved latent data to {latent_path}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error saving latent data: {str(e)}")
+                        raise
 
                 # Save text embeddings if present
                 if text_embeddings is not None:
