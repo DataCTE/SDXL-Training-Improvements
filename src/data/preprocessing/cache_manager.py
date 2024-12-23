@@ -434,36 +434,9 @@ class CacheManager:
         try:
             str_path = str(file_path)
             
-            # Fast path: Check cache index first
-            if str_path in self.cache_index["files"]:
-                file_info = self.cache_index["files"][str_path]
-                # Avoid path creation if possible by using string operations
-                if all(Path(p).exists() for p in (file_info["latent_path"], file_info["text_path"])):
-                    return True
-                    
-            # Slower path: Check by filename pattern
-            # Only create Path object once
-            path = Path(file_path)
-            base_name = path.stem
-            
-            # Use string concatenation instead of Path joining for speed
-            latent_path = self.image_dir / f"{base_name}.pt"
-            text_path = self.text_dir / f"{base_name}.pt"
-            
-            if latent_path.exists() and text_path.exists():
-                # Update index
-                self.cache_index["files"][str_path] = {
-                    "latent_path": str(latent_path),
-                    "text_path": str(text_path),
-                    "base_name": base_name,
-                    "timestamp": time.time()
-                }
-                # Only save index periodically
-                if len(self.cache_index["files"]) % 100 == 0:
-                    self._save_cache_index()
-                return True
-                
-            return False
+            # Fast path: Only check cache index
+            # This assumes index is kept in sync with filesystem
+            return str_path in self.cache_index["files"]
             
         except Exception as e:
             logger.error(f"Error checking cache status: {str(e)}")
