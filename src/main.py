@@ -249,7 +249,7 @@ def main():
             try:
                 models = setup_model(config, device)
                 if not models:
-                    raise RuntimeError("Model initialization returned None")
+                    raise RuntimeError(f"Failed to initialize model from {config.model.pretrained_model_name}")
                 if hasattr(models, 'state_dict') and not tensors_match_device(models.state_dict(), device):
                 logger.info(f"Moving model to device {device}")
                 if not isinstance(device, torch.device):
