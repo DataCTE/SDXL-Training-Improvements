@@ -219,61 +219,66 @@ class CacheManager:
             # Create model dtypes configuration
             model_dtypes = ModelWeightDtypes.from_single_dtype(DataType.FLOAT_32)
             
-            # Process tensors if present
-            for tensor_dict in [latent_data, text_embeddings]:
-                if tensor_dict is not None:
-                    for k, v in tensor_dict.items():
+            # Process and save tensors directly
+            try:
+                # Save latents if present
+                if latent_data is not None:
+                    # Move to CPU and convert dtype if needed
+                    processed_latents = {}
+                    for k, v in latent_data.items():
                         if isinstance(v, torch.Tensor):
-                            # Use appropriate dtype based on tensor type
-                            target_dtype = (
-                                model_dtypes.text_encoder.to_torch_dtype() 
-                                if 'text' in k.lower() 
-                                else model_dtypes.vae.to_torch_dtype()
-                            )
-                            if v.dtype != target_dtype:
-                                tensor_dict[k] = v.to(dtype=target_dtype)
+                            target_dtype = model_dtypes.vae.to_torch_dtype()
+                            processed_latents[k] = v.detach().cpu().to(dtype=target_dtype)
+                        else:
+                            processed_latents[k] = v
 
-            # Memory optimization: Stream-based processing
-            with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                # Pin memory for faster I/O if tensors present and support pinning
-                for tensor_dict in [latent_data, text_embeddings]:
-                    if tensor_dict is not None:
-                        for tensor in tensor_dict.values():
-                            if isinstance(tensor, torch.Tensor):
-                                try:
-                                    if not tensor.is_pinned() and tensor.device.type == 'cpu':
-                                        pin_tensor_(tensor)
-                                except Exception as e:
-                                    logger.debug(f"Could not pin tensor memory: {str(e)}")
-                                    # Continue without pinning if not supported
-                                    continue
+                    # Save latents with metadata
+                    torch.save(
+                        {
+                            "latent": processed_latents,
+                            "metadata": {
+                                **metadata,
+                                "latent_timestamp": time.time()
+                            }
+                        },
+                        latent_path
+                    )
+                    logger.debug(f"Saved latent data to {latent_path}")
+
+                # Save text embeddings if present
+                if text_embeddings is not None:
+                    # Move to CPU and convert dtype if needed
+                    processed_embeddings = {}
+                    for k, v in text_embeddings.items():
+                        if isinstance(v, torch.Tensor):
+                            target_dtype = model_dtypes.text_encoder.to_torch_dtype()
+                            processed_embeddings[k] = v.detach().cpu().to(dtype=target_dtype)
+                        else:
+                            processed_embeddings[k] = v
+
+                    # Save embeddings with metadata
+                    torch.save(
+                        {
+                            "embeddings": processed_embeddings,
+                            "metadata": {
+                                **metadata,
+                                "text_timestamp": time.time()
+                            }
+                        },
+                        text_path
+                    )
+                    logger.debug(f"Saved text embeddings to {text_path}")
                             
-                try:
-                    # Save latents if present using chunked streaming
-                    if latent_data is not None:
-                        self._save_chunked_tensor(
-                            {
-                                "latent": latent_data,
-                                "metadata": {
-                                    **metadata,
-                                    "latent_timestamp": time.time()
-                                }
-                            },
-                            latent_path
-                        )
-                    
-                    # Save text embeddings if present using chunked streaming
-                    if text_embeddings is not None:
-                        self._save_chunked_tensor(
-                            {
-                                "embeddings": text_embeddings,
-                                "metadata": {
-                                    **metadata,
-                                    "text_timestamp": time.time()
-                                }
-                            },
-                            text_path
-                        )
+                # Update cache index
+                self.cache_index["files"][str(file_path)] = {
+                    "latent_path": str(latent_path),
+                    "text_path": str(text_path),
+                    "base_name": base_name,
+                    "timestamp": time.time()
+                }
+                
+                # Save index immediately after successful writes
+                self._save_cache_index()
                     
                     # Update index with filename-based paths
                     self.cache_index["files"][str(file_path)] = {
