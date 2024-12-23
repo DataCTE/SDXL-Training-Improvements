@@ -194,6 +194,7 @@ class CacheManager:
             base_name = Path(file_path).stem
             text_path = self.text_dir / f"{base_name}.pt"
             image_path = self.image_dir / f"{base_name}.pt"
+            latent_path = image_path  # Use image path for latents
             
             # Check and optimize device placement
             current_device = next(
@@ -264,7 +265,7 @@ class CacheManager:
                     
                     # Update index with filename-based paths
                     self.cache_index["files"][str(file_path)] = {
-                        "latent_path": str(latent_path),
+                        "latent_path": str(image_path),  # Use image path instead of latent
                         "text_path": str(text_path),
                         "base_name": base_name,
                         "timestamp": time.time()
