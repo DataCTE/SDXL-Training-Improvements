@@ -33,6 +33,7 @@ class VAEEncoder:
         vae_tile_size: int = 512,
         enable_gradient_checkpointing: bool = True
     ):
+        """Initialize VAE encoder with performance optimizations."""
         """Initialize VAE encoder with memory optimizations.
         
         Args:
@@ -55,10 +56,18 @@ class VAEEncoder:
         self.enable_vae_tiling = enable_vae_tiling
         self.vae_tile_size = vae_tile_size
         
-        # Setup model
-        self.vae.to(device=self.device, dtype=self.dtype)
+        # Setup model with optimizations
+        self.vae.to(device=self.device, dtype=self.dtype, memory_format=torch.channels_last)
         if enable_gradient_checkpointing:
             self.vae.enable_gradient_checkpointing()
+            
+        # Enable memory efficient attention
+        if hasattr(self.vae, "set_use_memory_efficient_attention_xformers"):
+            self.vae.set_use_memory_efficient_attention_xformers(True)
+            
+        # Compile model for faster execution if torch.compile is available
+        if hasattr(torch, 'compile') and self.device.type == "cuda":
+            self.vae = torch.compile(self.vae, mode="reduce-overhead", fullgraph=True)
             
         # Track memory stats
         self.peak_memory = 0
