@@ -16,8 +16,13 @@ class DataType(Enum):
         mapping = {
             "float32": cls.FLOAT_32,
             "float16": cls.FLOAT_16,
-            "bfloat16": cls.BFLOAT_16
+            "bfloat16": cls.BFLOAT_16,
+            "torch.float32": cls.FLOAT_32,
+            "torch.float16": cls.FLOAT_16, 
+            "torch.bfloat16": cls.BFLOAT_16
         }
+        # Normalize string representation
+        dtype_str = str(dtype_str).lower().replace('torch.', '')
         if dtype_str not in mapping:
             raise ValueError(f"Unknown dtype string: {dtype_str}")
         return mapping[dtype_str]
