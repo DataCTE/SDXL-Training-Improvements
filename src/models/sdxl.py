@@ -115,59 +115,88 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     ) -> None:
         try:
             logger.info(f"Loading model components from {pretrained_model_name}")
-            if isinstance(dtype, str):
-                base_dtype = DataType.from_str(dtype)
-                model_dtypes = ModelWeightDtypes.from_single_dtype(base_dtype)
-            elif isinstance(dtype, DataType):
-                model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
-            elif isinstance(dtype, ModelWeightDtypes):
-                model_dtypes = dtype
-            else:
-                raise ValueError(f"Invalid dtype: {dtype}")
+            try:
+                if isinstance(dtype, str):
+                    base_dtype = DataType.from_str(dtype)
+                    model_dtypes = ModelWeightDtypes.from_single_dtype(base_dtype)
+                elif isinstance(dtype, DataType):
+                    model_dtypes = ModelWeightDtypes.from_single_dtype(dtype)
+                elif isinstance(dtype, ModelWeightDtypes):
+                    model_dtypes = dtype
+                else:
+                    raise ValueError(f"Invalid dtype: {dtype}")
 
-            self.dtype = model_dtypes.train_dtype
+                self.dtype = model_dtypes.train_dtype
 
-            self.vae = AutoencoderKL.from_pretrained(
+                logger.info("Loading VAE...")
+                self.vae = AutoencoderKL.from_pretrained(
                 pretrained_model_name,
                 subfolder="vae",
                 torch_dtype=model_dtypes.vae.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-            self.text_encoder_1 = CLIPTextModel.from_pretrained(
+                logger.info("Loading text encoder 1...")
+                self.text_encoder_1 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder",
                 torch_dtype=model_dtypes.text_encoder.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-            self.text_encoder_2 = CLIPTextModel.from_pretrained(
+                logger.info("Loading text encoder 2...")
+                self.text_encoder_2 = CLIPTextModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="text_encoder_2",
                 torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-            self.unet = UNet2DConditionModel.from_pretrained(
+                logger.info("Loading UNet...")
+                self.unet = UNet2DConditionModel.from_pretrained(
                 pretrained_model_name,
                 subfolder="unet",
                 torch_dtype=model_dtypes.unet.to_torch_dtype(),
                 use_safetensors=use_safetensors
             )
-            self.tokenizer_1 = CLIPTokenizer.from_pretrained(
+                logger.info("Loading tokenizer 1...")
+                self.tokenizer_1 = CLIPTokenizer.from_pretrained(
                 pretrained_model_name,
                 subfolder="tokenizer"
             )
-            self.tokenizer_2 = CLIPTokenizer.from_pretrained(
+                logger.info("Loading tokenizer 2...")
+                self.tokenizer_2 = CLIPTokenizer.from_pretrained(
                 pretrained_model_name,
                 subfolder="tokenizer_2"
             )
-            self.noise_scheduler = DDPMScheduler.from_pretrained(
-                pretrained_model_name,
-                subfolder="scheduler"
-            )
-            logger.info("Successfully loaded all model components")
-        except Exception as e:
-            error_msg = f"Failed to load pretrained model: {str(e)}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+                logger.info("Loading noise scheduler...")
+                self.noise_scheduler = DDPMScheduler.from_pretrained(
+                    pretrained_model_name,
+                    subfolder="scheduler"
+                )
+                logger.info("Successfully loaded all model components")
+            except Exception as e:
+                error_context = {
+                    'model_name': pretrained_model_name,
+                    'dtype': str(dtype),
+                    'error': str(e),
+                    'component': 'unknown'
+                }
+                if not hasattr(self, 'vae') or self.vae is None:
+                    error_context['component'] = 'vae'
+                elif not hasattr(self, 'text_encoder_1') or self.text_encoder_1 is None:
+                    error_context['component'] = 'text_encoder_1'
+                elif not hasattr(self, 'text_encoder_2') or self.text_encoder_2 is None:
+                    error_context['component'] = 'text_encoder_2'
+                elif not hasattr(self, 'unet') or self.unet is None:
+                    error_context['component'] = 'unet'
+                elif not hasattr(self, 'tokenizer_1') or self.tokenizer_1 is None:
+                    error_context['component'] = 'tokenizer_1'
+                elif not hasattr(self, 'tokenizer_2') or self.tokenizer_2 is None:
+                    error_context['component'] = 'tokenizer_2'
+                elif not hasattr(self, 'noise_scheduler') or self.noise_scheduler is None:
+                    error_context['component'] = 'noise_scheduler'
+                
+                error_msg = f"Failed to load {error_context['component']}: {str(e)}"
+                logger.error(error_msg, extra=error_context)
+                raise ValueError(error_msg)
 
     def vae_to(self, device: torch.device) -> None:
         if isinstance(self.vae, VAEEncoder):
