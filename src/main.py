@@ -247,10 +247,12 @@ def main():
         with setup_environment(args):
             device = setup_device_and_logging(config)
             try:
-                models = setup_model(config, device)
-                if not models:
+                model = setup_model(config, device)
+                if model is None:
                     raise RuntimeError(f"Failed to initialize model from {config.model.pretrained_model_name}")
-                if hasattr(models, 'state_dict') and not tensors_match_device(models.state_dict(), device):
+                
+                logger.info("Model initialized successfully")
+                if hasattr(model, 'state_dict') and not tensors_match_device(model.state_dict(), device):
                     logger.info(f"Moving model to device {device}")
                 if not isinstance(device, torch.device):
                     device = torch.device(device)
@@ -278,9 +280,9 @@ def main():
                             "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
                         }
                     )
-            setup_memory_optimizations(models.unet, config, device)
+            setup_memory_optimizations(model.unet, config, device)
             if is_main_process():
-                verify_memory_optimizations(models.unet, config, device, logger)
+                verify_memory_optimizations(model.unet, config, device, logger)
             logger.info("Loading training data...")
             image_paths, captions = load_training_data(config)
             logger.info("Setting up training...")
