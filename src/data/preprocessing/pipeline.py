@@ -82,22 +82,44 @@ class PreprocessingPipeline:
         Returns:
             Dict mapping aspect ratio strings to lists of image paths
         """
+        if not isinstance(image_paths, (list, tuple)):
+            raise ValueError("image_paths must be a list or tuple of path strings")
+            
         buckets = {}
         for path in image_paths:
+            # Skip if path is not a string or Path object
+            if not isinstance(path, (str, Path)):
+                logger.warning(f"Skipping invalid path type: {type(path)}")
+                continue
+                
             try:
-                with Image.open(path) as img:
+                path_str = str(path)
+                if not Path(path_str).exists():
+                    logger.warning(f"Image path does not exist: {path_str}")
+                    continue
+                    
+                with Image.open(path_str) as img:
                     w, h = img.size
                     aspect = w / h
                     # Round aspect ratio to nearest tolerance interval
                     bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
                     if bucket_key not in buckets:
                         buckets[bucket_key] = []
-                    buckets[bucket_key].append(str(path))
+                    buckets[bucket_key].append(path_str)
+                    self.stats.successful += 1
             except Exception as e:
                 logger.warning(f"Failed to process {path} for bucketing: {e}")
                 self.stats.failed += 1
                 continue
+        
+        if not buckets:
+            logger.warning("No valid images found for bucketing")
+            
         return buckets
+
+    def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> Dict[str, List[str]]:
+        """Alias for get_aspect_buckets to maintain compatibility."""
+        return self.get_aspect_buckets(image_paths, tolerance)
 
     def precompute_latents(self, image_paths, captions, latent_preprocessor, batch_size=1, proportion_empty_prompts=0.0):
         if not latent_preprocessor or not self.cache_manager or not self.is_train:
