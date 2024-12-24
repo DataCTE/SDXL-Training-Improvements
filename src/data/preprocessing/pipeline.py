@@ -310,7 +310,6 @@ class PreprocessingPipeline:
     def precompute_latents(
         self,
         image_paths,
-        captions,
         latent_preprocessor,
         batch_size=1,
         proportion_empty_prompts=0.0,
