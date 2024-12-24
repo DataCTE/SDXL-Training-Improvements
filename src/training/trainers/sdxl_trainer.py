@@ -6,11 +6,6 @@ from typing import Dict, List, Optional, Union
 
 import torch
 import torch.backends.cudnn
-import torch.multiprocessing as mp
-
-# Set multiprocessing start method to spawn
-if mp.get_start_method(allow_none=True) != 'spawn':
-    mp.set_start_method('spawn', force=True)
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
