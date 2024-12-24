@@ -224,6 +224,44 @@ class AspectBucketDataset(Dataset):
             )
         except Exception as e:
             logger.error(f"Error during dataset cleanup: {e}")
+            
+    @staticmethod
+    def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Collate function for batching dataset items.
+        
+        Args:
+            batch: List of dictionaries containing processed items
+            
+        Returns:
+            Batched dictionary with all items properly stacked
+        """
+        if not batch:
+            return {}
+            
+        result = {}
+        # Get all keys from first item
+        keys = batch[0].keys()
+        
+        for key in keys:
+            if key == "text":
+                # Keep text items as list
+                result[key] = [item[key] for item in batch]
+            elif isinstance(batch[0][key], torch.Tensor):
+                # Stack tensors
+                try:
+                    result[key] = torch.stack([item[key] for item in batch])
+                except RuntimeError as e:
+                    logger.warning(f"Failed to stack tensors for key {key}: {e}")
+                    # Fallback to list if stacking fails
+                    result[key] = [item[key] for item in batch]
+            elif isinstance(batch[0][key], (int, float)):
+                # Convert numeric values to tensor
+                result[key] = torch.tensor([item[key] for item in batch])
+            else:
+                # Keep other types as list
+                result[key] = [item[key] for item in batch]
+                
+        return result
 
 def create_dataset(
     config: Config,
