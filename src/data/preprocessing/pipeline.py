@@ -150,7 +150,7 @@ class PreprocessingPipeline:
             
         return buckets
 
-    def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> Dict[str, List[str]]:
+    def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> List[int]:
         """Assign images to aspect ratio buckets.
         
         Args:
