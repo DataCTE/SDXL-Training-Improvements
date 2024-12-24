@@ -61,7 +61,7 @@ class PreprocessingPipeline:
         self.latent_preprocessor = latent_preprocessor
         self.cache_manager = cache_manager
         self.is_train = is_train
-        self.num_gpu_workers = 1  # Set to 1 to disable GPU multi-workers
+        self.num_gpu_workers = 0  # Disable GPU multi-workers
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         self.prefetch_factor = prefetch_factor

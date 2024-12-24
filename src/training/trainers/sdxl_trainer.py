@@ -82,7 +82,15 @@ class SDXLTrainer:
         self.unet = model.unet
         self.optimizer = optimizer
         self.history = TorchHistory(self.model)
-        self.train_dataloader = train_dataloader
+        # Ensure DataLoader uses a single worker
+        self.train_dataloader = DataLoader(
+            train_dataloader.dataset,
+            batch_size=train_dataloader.batch_size,
+            shuffle=True,
+            num_workers=0,  # Use single worker
+            pin_memory=True,
+            drop_last=True,
+        )
         self.training_method = training_method
         self.device = device
         self.wandb_logger = wandb_logger

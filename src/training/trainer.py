@@ -12,7 +12,7 @@ def create_trainer(
     config: Config,
     model: StableDiffusionXLModel,
     optimizer: torch.optim.Optimizer,
-    train_dataloader: torch.utils.data.DataLoader,  # Ensure num_workers=0 in DataLoader initialization
+    train_dataloader: torch.utils.data.DataLoader,
     device: Union[str, torch.device],
     wandb_logger: Optional[WandbLogger] = None,
     validation_prompts: Optional[List[str]] = None
