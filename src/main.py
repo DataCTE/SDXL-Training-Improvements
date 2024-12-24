@@ -245,7 +245,6 @@ def setup_training(
         train_dataset = create_dataset(
             config=config,
             image_paths=image_paths,
-            captions=captions,
             preprocessing_pipeline=preprocessing_pipeline,
             enable_memory_tracking=True,
             max_memory_usage=0.8
