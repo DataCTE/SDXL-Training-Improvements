@@ -71,6 +71,33 @@ class PreprocessingPipeline:
         self.cpu_pool = ProcessPoolExecutor(max_workers=self.num_cpu_workers)
         self.io_pool = ThreadPoolExecutor(max_workers=self.num_io_workers)
 
+    def get_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> Dict[str, List[str]]:
+        """Group images into buckets based on aspect ratio for efficient batch processing.
+        
+        Args:
+            image_paths: List of paths to images
+            tolerance: Tolerance for aspect ratio differences (default: 0.1)
+            
+        Returns:
+            Dict mapping aspect ratio strings to lists of image paths
+        """
+        buckets = {}
+        for path in image_paths:
+            try:
+                with Image.open(path) as img:
+                    w, h = img.size
+                    aspect = w / h
+                    # Round aspect ratio to nearest tolerance interval
+                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
+                    if bucket_key not in buckets:
+                        buckets[bucket_key] = []
+                    buckets[bucket_key].append(str(path))
+            except Exception as e:
+                logger.warning(f"Failed to process {path} for bucketing: {e}")
+                self.stats.failed += 1
+                continue
+        return buckets
+
     def precompute_latents(self, image_paths, captions, latent_preprocessor, batch_size=1, proportion_empty_prompts=0.0):
         if not latent_preprocessor or not self.cache_manager or not self.is_train:
             return
