@@ -27,19 +27,21 @@ logger = logging.getLogger(__name__)
 class FlowMatchingTrainer(TrainingMethod):
     name = "flow_matching"
 
-    if hasattr(torch, "compile"):
-        @make_picklable
-        def _compiled_loss(self, model, batch, generator=None):
-            return self._compute_loss_impl(model, batch, generator)
-        compute_loss = torch.compile(_compiled_loss, mode="reduce-overhead", fullgraph=False)
-    else:
-        compute_loss = None
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if hasattr(torch, "compile"):
+            self._compiled_loss = torch.compile(
+                self._compute_loss_impl,
+                mode="reduce-overhead",
+                fullgraph=False
+            )
 
+    @make_picklable 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
-        if self.compute_loss:
-            return self.compute_loss(model, batch, generator)
-        else:
-            return self._compute_loss_impl(model, batch, generator)
+        """Compute training loss."""
+        if hasattr(self, '_compiled_loss'):
+            return self._compiled_loss(model, batch, generator)
+        return self._compute_loss_impl(model, batch, generator)
 
     def _compute_loss_impl(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
         x1 = batch["model_input"]
