@@ -38,6 +38,30 @@ class ColoredFormatter(logging.Formatter):
     
     # Fields to exclude from console output
     exclude_fields = ['process', 'thread', 'processName', 'threadName']
+
+    def format(self, record):
+        """Enhanced formatter with detailed context and error tracking."""
+        # Add color to level name
+        levelname = record.levelname
+        if levelname in self.COLORS:
+            color = self.COLORS[levelname]
+            levelname_color = f"{color}{levelname}{Style.RESET_ALL}"
+            record.levelname = levelname_color
+
+        # Format the message
+        message = super().format(record)
+
+        # Add exception info and stack trace if present
+        if record.exc_info:
+            exception_text = self.formatException(record.exc_info)
+            message = f"{message}\nException:\n{exception_text}"
+
+        if record.stack_info:
+            stack_info_text = self.formatStack(record.stack_info)
+            message = f"{message}\nStack Trace:\n{stack_info_text}"
+
+        return message
+    exclude_fields = ['process', 'thread', 'processName', 'threadName']
     
     KEYWORDS = {
         'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
@@ -161,9 +185,11 @@ def setup_logging(
     try:
         # Create console handler with simplified colored output
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(ColoredFormatter(
-            '%(levelname)s | %(name)s | %(message)s'
-        ))
+        console_formatter = ColoredFormatter(
+            '%(asctime)s | %(levelname)s | %(name)s | %(filename)s:%(lineno)d | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        console_handler.setFormatter(console_formatter)
         console_handler.setLevel(level)
         logger.addHandler(console_handler)
 

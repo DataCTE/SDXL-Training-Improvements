@@ -101,6 +101,6 @@ class DDPMTrainer(TrainingMethod):
             torch_sync()
             return {"loss": loss}
         except Exception as e:
-            logger.error(f"Error computing DDPM loss: {str(e)}", exc_info=True, stack_info=True)
+            logger.error(f"Error computing DDPM loss: {str(e)}", exc_info=True)
             torch_sync()
             raise

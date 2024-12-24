@@ -387,7 +387,7 @@ class CacheManager:
                 if self.enable_memory_tracking:
                     self._track_memory("cache_fetch_complete")
         except Exception as e:
-            logger.error(f"Error retrieving cached item: {str(e)}")
+            logger.error(f"Error retrieving cached item: {str(e)}", exc_info=True)
             self.stats.failed_items += 1
             return None
 
