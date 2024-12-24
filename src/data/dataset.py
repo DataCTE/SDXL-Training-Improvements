@@ -16,6 +16,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import crop
+import torch.nn.functional as F
 from tqdm.auto import tqdm
 
 # Force speed optimizations
@@ -244,7 +245,22 @@ class AspectBucketDataset(Dataset):
             if key == "text":
                 # Keep text items as list
                 result[key] = [item[key] for item in batch]
-            elif isinstance(batch[0][key], torch.Tensor):
+            elif key == "latent":
+                # Handle the 'latent' dict containing latent tensors
+                result[key] = {}
+                latent_keys = batch[0][key].keys()
+                for latent_key in latent_keys:
+                    tensors = [item[key][latent_key] for item in batch]
+                    # Pad and stack tensors
+                    max_shape = [max(sizes) for sizes in zip(*[t.shape for t in tensors])]
+                    padded_tensors = []
+                    for t in tensors:
+                        pad_sizes = []
+                        for i in range(len(t.shape)-1, -1, -1):
+                            pad_sizes.extend([0, max_shape[i] - t.shape[i]])
+                        padded_t = F.pad(t, pad_sizes, value=0)
+                        padded_tensors.append(padded_t)
+                    result[key][latent_key] = torch.stack(padded_tensors)
                 # Stack tensors
                 try:
                     result[key] = torch.stack([item[key] for item in batch])
