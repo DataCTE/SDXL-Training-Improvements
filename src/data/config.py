@@ -212,6 +212,19 @@ class Config:
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     transforms: TransformsConfig = field(default_factory=TransformsConfig)
 
+    def __iter__(self):
+        """Make Config iterable to access its sections."""
+        for field in [
+            self.global_config,
+            self.model,
+            self.training,
+            self.data,
+            self.tag_weighting,
+            self.preprocessing,
+            self.transforms
+        ]:
+            yield field
+
     def __post_init__(self):
         from .utils.paths import convert_windows_path
 
