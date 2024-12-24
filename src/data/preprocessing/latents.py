@@ -73,8 +73,10 @@ class LatentPreprocessor:
 
     def encode_images(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
         try:
-            encoder = VAEEncoder(self.model.vae, device=self.device)
-            return encoder.encode(pixel_values)
+            with torch.no_grad():
+                latents = self.model.vae.encode(pixel_values).latents
+                latents = latents * self.model.vae.config.scaling_factor
+            return {"latent": latents}
         except Exception as e:
             logger.error(f"Failed to encode images: {str(e)}")
             raise
