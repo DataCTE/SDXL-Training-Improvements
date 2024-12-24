@@ -93,10 +93,6 @@ class CacheManager:
         self.image_dir = self.cache_dir / "image"
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
-        self.io_pool = ThreadPoolExecutor(
-            max_workers=self.num_proc * 2,
-            thread_name_prefix="cache_io"
-        )
         self.index_path = self.cache_dir / "cache_index.json"
         self.cache_index = self._load_cache_index()
 
@@ -351,7 +347,6 @@ class CacheManager:
         try:
             self._save_cache_index()
         finally:
-            self.image_pool.shutdown()
             self.io_pool.shutdown()
             torch_sync()
 
