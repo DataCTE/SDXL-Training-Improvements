@@ -93,16 +93,12 @@ class CacheManager:
         self.image_dir = self.cache_dir / "image"
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
-        self.image_pool = None  # Disable image processing pool if it's for GPU tasks
         self.io_pool = ThreadPoolExecutor(
             max_workers=self.num_proc * 2,
             thread_name_prefix="cache_io"
         )
-        if torch.cuda.is_available():
-            self.pinned_buffer = torch.empty((stream_buffer_size,), dtype=torch.uint8, pin_memory=True)
         self.index_path = self.cache_dir / "cache_index.json"
         self.cache_index = self._load_cache_index()
-        # Disable torch.compile for now due to logging issues
 
     def _load_cache_index(self) -> Dict:
         try:
@@ -359,24 +355,7 @@ class CacheManager:
             self.io_pool.shutdown()
             torch_sync()
 
-    def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        return config.global_config.image.supported_dims
         
-    def assign_aspect_buckets(
-        self,
-        image_paths: List[str],
-        buckets: List[Tuple[int, int]],
-        max_aspect_ratio: float,
-        batch_size: int = 256
-    ) -> List[int]:
-        if not hasattr(self, '_bucket_cache'):
-            self._bucket_cache = {}
-        bucket_indices = []
-        for i in range(0, len(image_paths), batch_size):
-            batch_paths = image_paths[i:i + batch_size]
-            batch_indices = [self._bucket_cache.get(path, 0) for path in batch_paths]
-            bucket_indices.extend(batch_indices)
-        return bucket_indices
         
     def _assign_single_bucket(
         self,

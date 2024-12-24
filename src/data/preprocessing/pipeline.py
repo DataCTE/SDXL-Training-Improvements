@@ -70,24 +70,13 @@ class PreprocessingPipeline:
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         self.prefetch_factor = prefetch_factor
-        self.device_ids = device_ids or list(range(torch.cuda.device_count()))
         self.use_pinned_memory = use_pinned_memory
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
         self.stats = PipelineStats()
-        self.input_queue = Queue(maxsize=prefetch_factor * num_gpu_workers)
-        self.output_queue = Queue(maxsize=prefetch_factor * num_gpu_workers)
         self.target_image_size = (512, 512)  # Define your target dimensions
-        self._init_pools()
         # Disable torch.compile for now due to logging issues
 
-    def _init_pools(self):
-        self.gpu_pool = None  # Disable GPU worker pool
-        self.cpu_pool = ProcessPoolExecutor(
-            max_workers=self.num_cpu_workers,
-            mp_context=mp.get_context('spawn')  # Specify 'spawn' start method
-        )
-        self.io_pool = ThreadPoolExecutor(max_workers=self.num_io_workers)
 
     def _read_caption(self, img_path: Union[str, Path]) -> str:
         base_name = Path(img_path).stem
@@ -342,6 +331,7 @@ class PreprocessingPipeline:
     def _process_image(self, img_path):
         try:
             img = Image.open(img_path).convert('RGB')
+            img = img.resize(self.target_image_size, Image.ANTIALIAS)
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
             if torch.cuda.is_available():
