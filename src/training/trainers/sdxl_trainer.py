@@ -171,12 +171,12 @@ class SDXLTrainer:
                 step_metrics.update(self.throughput_monitor.get_metrics())
             except RuntimeError as e:
                 if "out of memory" in str(e):
-                    logger.error(f"GPU OOM at step {self.global_step}. Attempting recovery...")
+                    logger.error(f"GPU OOM at step {self.global_step}. Attempting recovery...", exc_info=True, stack_info=True)
                     if hasattr(torch.cuda, 'empty_cache'):
                         torch.cuda.empty_cache()
                     continue
                 else:
-                    logger.error(f"Error during training step: {str(e)}")
+                    logger.error(f"Error during training step: {str(e)}", exc_info=True, stack_info=True)
                     raise
 
             for k, v in step_metrics.items():

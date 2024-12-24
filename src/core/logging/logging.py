@@ -81,20 +81,16 @@ class ColoredFormatter(logging.Formatter):
                         value_str = str(value)
                     context_parts.append(f"{field}: {value_str}")
 
-        # Add full traceback for errors
+        # Add exception info and stack trace
         if record.exc_info:
-            if context_parts:
-                context_parts.append("Traceback:")
-            context_parts.append(''.join(traceback.format_exception(*record.exc_info)))
-            
-        # Add stack info for warnings and above
-        if record.levelno >= logging.WARNING and record.stack_info:
-            if context_parts:
-                context_parts.append("Stack trace:")
-            context_parts.append(record.stack_info)
+            exception_text = self.formatException(record.exc_info)
+            record.msg = f"{record.msg}\nException:\n{exception_text}"
+        
+        if record.levelno >= logging.ERROR and record.stack_info:
+            stack_info_text = self.formatStack(record.stack_info)
+            record.msg = f"{record.msg}\nStack Trace:\n{stack_info_text}"
 
-        context_str = "\n  ".join(context_parts)
-        record.msg = f"[{timestamp}] {record.msg}\n  {context_str}" if context_str else f"[{timestamp}] {record.msg}"
+        return super().format(record)
         
         # Add color to level name
         if record.levelname in self.COLORS:
@@ -126,7 +122,7 @@ class ColoredFormatter(logging.Formatter):
 
 def setup_logging(
     log_dir: str = "outputs/wslref/logs",
-    level: int = logging.INFO,
+    level: int = logging.DEBUG,
     filename: Optional[str] = None,
     module_name: Optional[str] = None,
     capture_warnings: bool = True,
