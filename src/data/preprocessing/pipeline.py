@@ -11,6 +11,7 @@ from PIL import Image
 from dataclasses import dataclass
 from contextlib import nullcontext
 import numpy as np
+from src.data.config import Config
 
 # Force maximal speed
 torch.backends.cudnn.benchmark = True
