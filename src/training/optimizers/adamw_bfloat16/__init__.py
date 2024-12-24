@@ -14,6 +14,7 @@ should be suitable for different backends.
 
 import torch
 from torch.optim.optimizer import Optimizer
+from src.core.types import DataType
 
 from .stochastic import (
     add_stochastic_,
@@ -64,7 +65,7 @@ class AdamWBF16(Optimizer):
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
-                        assert p.dtype == torch.bfloat16, "only bfloat 16 is supported."
+                        assert p.dtype == DataType.BFLOAT_16.to_torch_dtype(), "only bfloat16 is supported."
                         state["step"] = 0.0
                         # Exponential moving average of gradient values
                         state["exp_avg"] = torch.zeros_like(
