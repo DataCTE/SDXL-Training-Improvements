@@ -243,71 +243,6 @@ class CacheManager:
             if self.enable_memory_tracking:
                 self._track_memory("save_complete")
 
-    def _process_image_batch(
-        self,
-        image_paths: List[Path],
-        caption_ext: str,
-        batch_size: int = 128
-    ) -> Tuple[List[torch.Tensor], Dict]:
-        tensors = []
-        metadata = {}
-        for i in range(0, len(image_paths), batch_size):
-            batch_paths = image_paths[i:i + batch_size]
-            batch_tensors = []
-            batch_meta = {}
-            to_process = [
-                path for path in batch_paths 
-                if str(path) not in self.cache_index["files"]
-            ]
-            if not to_process:
-                self.stats.skipped_items += len(batch_paths)
-                continue
-            chunks = [to_process[i:i + 16] for i in range(0, len(to_process), 16)]
-            with ThreadPoolExecutor(max_workers=self.num_proc) as pool:
-                futures = []
-                for chunk in chunks:
-                    futures.extend([
-                        pool.submit(self._process_single_image, path, caption_ext)
-                        for path in chunk
-                    ])
-                stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                try:
-                    with torch.cuda.stream(stream) if stream else nullcontext():
-                        storage = []
-                        meta_storage = []
-                        for chunk_futures in [futures[i:i + 16] for i in range(0, len(futures), 16)]:
-                            chunk_tensors = []
-                            chunk_meta = {}
-                            for future in chunk_futures:
-                                try:
-                                    result = future.result()
-                                    if result is not None:
-                                        tensor, meta = result
-                                        if self._validate_tensor(tensor):
-                                            chunk_tensors.append(tensor)
-                                            chunk_meta.update(meta)
-                                            self.stats.processed_items += 1
-                                        else:
-                                            self.stats.validation_errors += 1
-                                except Exception as e:
-                                    self.stats.failed_items += 1
-                                    logger.error(f"Batch processing error: {str(e)}")
-                            if chunk_tensors:
-                                storage.append(torch.stack(chunk_tensors))
-                                meta_storage.append(chunk_meta)
-                        if storage:
-                            batch_tensors = [torch.cat(storage)]
-                            batch_meta = {k: v for d in meta_storage for k, v in d.items()}
-                        if batch_tensors:
-                            stacked = torch.stack(batch_tensors)
-                            if stream:
-                                stacked.record_stream(stream)
-                            tensors.append(stacked)
-                            metadata.update(batch_meta)
-                finally:
-                    if stream:
-                        stream.synchronize()
-        return tensors, metadata
 
     def _validate_tensor(self, tensor: torch.Tensor) -> bool:
         from ..utils.tensor_utils import validate_tensor
@@ -439,30 +374,6 @@ class CacheManager:
         bucket_indices = []
         for i in range(0, len(image_paths), batch_size):
             batch_paths = image_paths[i:i + batch_size]
-            batch_indices = []
-            to_process = [path for path in batch_paths if path not in self._bucket_cache]
-            if to_process:
-                chunks = [to_process[i:i + 32] for i in range(0, len(to_process), 32)]
-                with ThreadPoolExecutor(max_workers=self.num_proc) as pool:
-                    all_futures = []
-                    for chunk in chunks:
-                        chunk_futures = [
-                            pool.submit(
-                                self._assign_single_bucket,
-                                img_path,
-                                buckets,
-                                max_aspect_ratio
-                            )
-                            for img_path in chunk
-                        ]
-                        all_futures.extend(chunk_futures)
-                    for path, future in zip(to_process, all_futures):
-                        try:
-                            bucket_idx = future.result()
-                            self._bucket_cache[path] = bucket_idx
-                        except Exception as e:
-                            logger.error(f"Error in bucket assignment: {str(e)}")
-                            self._bucket_cache[path] = 0
             batch_indices = [self._bucket_cache.get(path, 0) for path in batch_paths]
             bucket_indices.extend(batch_indices)
         return bucket_indices
