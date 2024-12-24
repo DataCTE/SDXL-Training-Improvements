@@ -234,8 +234,8 @@ class PreprocessingPipeline:
         try:
             processed_data = {}
 
-            if cache_manager:
-                cached_data = cache_manager.load_preprocessed_data(image_path)
+            if self.cache_manager:
+                cached_data = self.cache_manager.load_preprocessed_data(image_path)
                 if cached_data:
                     self.stats.cache_hits += 1
                     processed_data.update(cached_data)
