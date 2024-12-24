@@ -197,11 +197,13 @@ class AspectBucketDataset(Dataset):
                 cache_manager=self.cache_manager,
                 latent_preprocessor=self.latent_preprocessor
             )
-            processed_data.update({
+            latent_tensor = processed_data["latent"]
+            data_item = {
+                "model_input": latent_tensor,
                 "text": caption,
-                "loss_weight": (self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0)
-            })
-            return processed_data
+                "loss_weight": self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
+            }
+            return data_item
         except Exception as e:
             logger.error(f"Error getting item {idx}: {e}")
             raise
@@ -245,29 +247,19 @@ class AspectBucketDataset(Dataset):
             if key == "text":
                 # Keep text items as list
                 result[key] = [item[key] for item in batch]
-            elif key == "latent":
-                # Handle the 'latent' dict containing latent tensors
-                result[key] = {}
-                latent_keys = batch[0][key].keys()
-                for latent_key in latent_keys:
-                    tensors = [item[key][latent_key] for item in batch]
-                    # Pad and stack tensors
-                    max_shape = [max(sizes) for sizes in zip(*[t.shape for t in tensors])]
-                    padded_tensors = []
-                    for t in tensors:
-                        pad_sizes = []
-                        for i in range(len(t.shape)-1, -1, -1):
-                            pad_sizes.extend([0, max_shape[i] - t.shape[i]])
-                        padded_t = F.pad(t, pad_sizes, value=0)
-                        padded_tensors.append(padded_t)
-                    result[key][latent_key] = torch.stack(padded_tensors)
-                # Stack tensors
-                try:
-                    result[key] = torch.stack([item[key] for item in batch])
-                except RuntimeError as e:
-                    logger.warning(f"Failed to stack tensors for key {key}: {e}")
-                    # Fallback to list if stacking fails
-                    result[key] = [item[key] for item in batch]
+            elif key == "model_input":
+                # Handle the latent tensors
+                tensors = [item[key] for item in batch]
+                # Pad and stack tensors
+                max_shape = [max(sizes) for sizes in zip(*[t.shape for t in tensors])]
+                padded_tensors = []
+                for t in tensors:
+                    pad_sizes = []
+                    for i in range(len(t.shape)-1, -1, -1):
+                        pad_sizes.extend([0, max_shape[i] - t.shape[i]])
+                    padded_t = F.pad(t, pad_sizes, value=0)
+                    padded_tensors.append(padded_t)
+                result[key] = torch.stack(padded_tensors)
             elif isinstance(batch[0][key], (int, float)):
                 # Convert numeric values to tensor
                 result[key] = torch.tensor([item[key] for item in batch])

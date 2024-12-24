@@ -67,7 +67,7 @@ class VAEEncoder:
                 self.peak_memory = max(self.peak_memory, current)
                 self.current_memory = current
                 
-            return {"latent_dist": latents} if return_dict else latents
+            return {"latent_dist": latents_sampled} if return_dict else latents_sampled
             
         
     def get_memory_stats(self) -> Dict[str, int]:
