@@ -7,7 +7,7 @@ from pathlib import Path
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from queue import Queue
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Tuple
 from PIL import Image
 from dataclasses import dataclass
 from pathlib import Path
