@@ -3,6 +3,7 @@ import logging
 import torch
 import torch.backends.cudnn
 import torch.multiprocessing as mp
+from src.training.methods.base import make_picklable
 
 # Set multiprocessing start method to spawn
 if mp.get_start_method(allow_none=True) != 'spawn':
@@ -27,6 +28,7 @@ class FlowMatchingTrainer(TrainingMethod):
     name = "flow_matching"
 
     if hasattr(torch, "compile"):
+        @make_picklable
         def _compiled_loss(self, model, batch, generator=None):
             return self._compute_loss_impl(model, batch, generator)
         compute_loss = torch.compile(_compiled_loss, mode="reduce-overhead", fullgraph=False)

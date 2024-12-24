@@ -3,6 +3,7 @@ from abc import ABC, ABCMeta, abstractmethod
 from typing import Dict, Optional, Type
 import torch
 import torch.backends.cudnn
+import functools
 from torch import Tensor
 from diffusers import DDPMScheduler
 from src.data.config import Config
@@ -30,6 +31,13 @@ class TrainingMethodMeta(ABCMeta):
                 f"Available methods: {list(mcs._methods.keys())}"
             )
         return mcs._methods[name]
+
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
 
 class TrainingMethod(metaclass=TrainingMethodMeta):
     name: str = None

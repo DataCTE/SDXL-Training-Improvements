@@ -3,18 +3,11 @@ import logging
 import torch
 import torch.backends.cudnn
 import torch.multiprocessing as mp
-import functools
+from src.training.methods.base import make_picklable
 
 # Set multiprocessing start method to spawn
 if mp.get_start_method(allow_none=True) != 'spawn':
     mp.set_start_method('spawn', force=True)
-    
-# Make functions picklable
-def make_picklable(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    return wrapper
 import torch.nn.functional as F
 from typing import Dict, Optional
 from torch import Tensor
