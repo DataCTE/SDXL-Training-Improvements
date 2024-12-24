@@ -82,9 +82,6 @@ class SDXLTrainer:
         self.unet = model.unet
         self.optimizer = optimizer
         self.history = TorchHistory(self.model)
-        self.history.add_log_parameters_hook()
-        self.history = TorchHistory(self.model)
-        self.history.add_log_parameters_hook()
         self.train_dataloader = train_dataloader
         self.training_method = training_method
         self.device = device
@@ -225,7 +222,6 @@ class SDXLTrainer:
             self.save_checkpoint()
             if self.global_step >= self.max_steps:
                 break
-        self.history.remove_log_parameters_hook()
         self.history.remove_log_parameters_hook()
         return metrics
 

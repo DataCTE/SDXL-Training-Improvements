@@ -23,8 +23,16 @@ class TorchHistory:
 
         # Register the hook using the top-level function
         self.hook_handle = self.module.register_forward_hook(log_parameters_hook)
+
     def remove_log_parameters_hook(self):
         # Remove the hook when it's no longer needed
         if self.hook_handle is not None:
             self.hook_handle.remove()
             self.hook_handle = None
+
+    def __enter__(self):
+        self.add_log_parameters_hook()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.remove_log_parameters_hook()
