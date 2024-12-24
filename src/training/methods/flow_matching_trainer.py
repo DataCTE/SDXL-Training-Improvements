@@ -37,6 +37,7 @@ class FlowMatchingTrainer(TrainingMethod):
             )
 
     @make_picklable 
+    @make_picklable 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
         """Compute training loss."""
         if hasattr(self, '_compiled_loss'):

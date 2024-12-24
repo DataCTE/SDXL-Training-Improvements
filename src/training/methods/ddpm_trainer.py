@@ -37,6 +37,7 @@ class DDPMTrainer(TrainingMethod):
             )
 
     @make_picklable
+    @make_picklable
     def compute_loss(
         self,
         model: torch.nn.Module,

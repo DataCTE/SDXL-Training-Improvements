@@ -14,6 +14,13 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
+
 class TrainingMethodMeta(ABCMeta):
     _methods: Dict[str, Type['TrainingMethod']] = {}
 
