@@ -150,7 +150,7 @@ class CacheManager:
         latent_data: Optional[Dict[str, torch.Tensor]],
         text_embeddings: Optional[Dict[str, torch.Tensor]],
         metadata: Dict,
-        file_path: Union[str, Path]
+        file_path: Union[str, Path],
         caption: Optional[str] = None  # Add caption parameter
     ) -> bool:
         try:
