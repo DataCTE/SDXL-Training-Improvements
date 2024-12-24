@@ -150,6 +150,47 @@ class PreprocessingPipeline:
             
         return buckets
 
+    def get_processed_item(self, image_path: Union[str, Path], caption: str, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
+        """Process a single dataset item.
+        
+        Args:
+            image_path: Path to image file
+            caption: Image caption
+            cache_manager: Optional cache manager
+            latent_preprocessor: Optional latent preprocessor
+            
+        Returns:
+            Dictionary containing processed data
+        """
+        try:
+            # Check cache first if available
+            if cache_manager:
+                cached_data = cache_manager.load_preprocessed_data(image_path)
+                if cached_data:
+                    self.stats.cache_hits += 1
+                    return cached_data
+                    
+            # Process image if not cached
+            processed = self._process_image(image_path)
+            if processed is None:
+                raise ProcessingError(f"Failed to process image: {image_path}")
+                
+            # Add to cache if available
+            if cache_manager and latent_preprocessor:
+                cache_manager.save_preprocessed_data(
+                    latent_data=processed["latent"],
+                    text_embeddings=processed.get("text_embeddings"),
+                    metadata=processed.get("metadata", {}),
+                    file_path=image_path
+                )
+                self.stats.cache_misses += 1
+                
+            return processed
+            
+        except Exception as e:
+            logger.error(f"Error processing item {image_path}: {e}")
+            raise
+
     def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> List[int]:
         """Assign images to aspect ratio buckets.
         
