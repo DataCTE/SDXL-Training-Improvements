@@ -7,11 +7,6 @@ import torch.nn.functional as F
 from typing import Dict, Optional
 from torch import Tensor
 
-# Force maximum speed
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 from src.core.memory import torch_sync, create_stream_context
 from src.training.methods.base import TrainingMethod
@@ -23,6 +18,12 @@ class DDPMTrainer(TrainingMethod):
     name = "ddpm"
 
     def __init__(self, *args, **kwargs):
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+
         super().__init__(*args, **kwargs)
         if hasattr(torch, "compile"):
             self._compiled_loss = torch.compile(

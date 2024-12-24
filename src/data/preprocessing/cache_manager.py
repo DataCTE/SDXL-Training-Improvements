@@ -16,11 +16,6 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
 
-# Force speed optimizations
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 from tqdm.auto import tqdm
 from contextlib import nullcontext
@@ -69,6 +64,12 @@ class CacheManager:
         stream_buffer_size: int = 1024 * 1024,
         max_chunk_memory: float = 0.2
     ):
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+
         self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.num_proc = num_proc or mp.cpu_count()

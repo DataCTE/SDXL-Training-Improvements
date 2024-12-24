@@ -8,10 +8,6 @@ from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.models.encoders.vae import VAEEncoder
 
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +22,12 @@ class LatentPreprocessor:
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
     ):
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+
         self.config = config
         self.model = sdxl_model
         self.device = torch.device(device) if isinstance(device, str) else device

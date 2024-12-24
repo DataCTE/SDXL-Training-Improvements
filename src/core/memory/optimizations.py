@@ -4,11 +4,6 @@ import torch
 from typing import Dict, Optional
 from pathlib import Path
 
-# Force maximal speed
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 from ..types import DataType, ModelWeightDtypes
 
@@ -21,6 +16,12 @@ def setup_memory_optimizations(
     batch_size: Optional[int] = None,
     micro_batch_size: Optional[int] = None
 ) -> bool:
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision('medium')
+
     if config is None or device is None:
         return False
     try:

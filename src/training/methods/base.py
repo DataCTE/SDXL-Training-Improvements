@@ -8,11 +8,6 @@ from torch import Tensor
 from diffusers import DDPMScheduler
 from src.data.config import Config
 
-# Force maximal speed
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 def make_picklable(func):
     """Decorator to make functions picklable."""
@@ -50,6 +45,12 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
     name: str = None
 
     def __init__(self, unet: torch.nn.Module, config: Config):
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+
         self.unet = unet
         self.config = config
         self.training = True

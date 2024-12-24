@@ -5,11 +5,6 @@ import torch.backends.cudnn
 from src.training.methods.base import make_picklable
 import torch.nn.functional as F
 
-# Force maximal speed
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 from typing import Dict, Optional, Tuple, Union
 from src.core.types import DataType
@@ -23,6 +18,12 @@ class FlowMatchingTrainer(TrainingMethod):
     name = "flow_matching"
 
     def __init__(self, *args, **kwargs):
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+
         super().__init__(*args, **kwargs)
         if hasattr(torch, "compile"):
             self._compiled_loss = torch.compile(

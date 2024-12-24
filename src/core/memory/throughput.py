@@ -7,11 +7,6 @@ import functools
 
 import torch
 
-# Force speed optimizations
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +24,12 @@ class ThroughputMonitor:
         legacy_mode: bool = False,
         metric_prefix: str = "throughput/"
     ):
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+
         self.window_size = window_size
         self.legacy_mode = legacy_mode
         self.metric_prefix = metric_prefix

@@ -21,11 +21,6 @@ class ProcessingError(Exception):
 import numpy as np
 from src.data.config import Config
 
-# Force maximal speed
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +52,11 @@ class PreprocessingPipeline:
         stream_timeout=10.0
     ):
         # Basic initialization
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
         self.config = config if config is not None else Config()
         self.latent_preprocessor = latent_preprocessor
         self.cache_manager = cache_manager
