@@ -239,38 +239,61 @@ class PreprocessingPipeline:
             return []
         return self.valid_image_paths
 
-    def precompute_latents(self, image_paths, captions, latent_preprocessor, batch_size=1, proportion_empty_prompts=0.0):
+    def precompute_latents(
+        self,
+        image_paths,
+        captions,
+        latent_preprocessor,
+        batch_size=1,
+        proportion_empty_prompts=0.0,
+        process_latents=True,
+        process_text_embeddings=True
+    ):
         if not latent_preprocessor or not self.cache_manager or not self.is_train:
             return
-        logger.info(f"Precomputing {len(image_paths)} latents")
+        logger.info(f"Precomputing latents and embeddings for {len(image_paths)} items")
         to_process = []
-        
+
         # Get cache index if available
-        cache_index = {}
-        if self.cache_manager and hasattr(self.cache_manager, 'cache_index'):
-            cache_index = self.cache_manager.cache_index.get("files", {})
+        cache_index = self.cache_manager.cache_index.get("files", {})
         cached = set(cache_index.keys())
+
         for path in image_paths:
-            if path not in cached: to_process.append(path)
-            else: self.stats.cache_hits += 1
+            if path not in cached:
+                to_process.append(path)
+
         for i in range(0, len(to_process), batch_size):
-            batch = to_process[i:i+batch_size]
-            batch_caps = [captions[image_paths.index(p)] for p in batch]
-            for img_path, cap in zip(batch, batch_caps):
+            batch_paths = to_process[i:i+batch_size]
+            batch_caps = [captions[image_paths.index(p)] for p in batch_paths]
+            for img_path, cap in zip(batch_paths, batch_caps):
                 try:
-                    processed = self._process_image(img_path)
-                    if processed:
+                    latent_data = None
+                    text_embeddings = None
+                    metadata = {"path": img_path, "timestamp": time.time()}
+
+                    if process_latents:
+                        processed = self._process_image(img_path)
+                        if processed:
+                            latent_data = processed["latent"]
+                            metadata.update(processed.get("metadata", {}))
+
+                    if process_text_embeddings:
+                        embeddings = self.latent_preprocessor.encode_prompt([cap])
+                        text_embeddings = embeddings
+
+                    # Save to cache
+                    if latent_data or text_embeddings:
                         self.cache_manager.save_preprocessed_data(
-                            latent_data=processed["latent"],
-                            text_embeddings=processed.get("text_embeddings"),
-                            metadata=processed.get("metadata", {}),
+                            latent_data=latent_data,
+                            text_embeddings=text_embeddings,
+                            metadata=metadata,
                             file_path=img_path
                         )
                         self.stats.cache_misses += 1
                         self.stats.successful += 1
                 except Exception as e:
                     self.stats.failed += 1
-                    logger.warning(e)
+                    logger.warning(f"Failed to precompute data for {img_path}: {e}")
 
     def _process_image(self, img_path):
         try:

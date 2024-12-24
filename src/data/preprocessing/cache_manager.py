@@ -165,76 +165,76 @@ class CacheManager:
             if self.enable_memory_tracking:
                 self._track_memory("save_start")
             base_name = Path(file_path).stem
-            text_path = self.text_dir / f"{base_name}.pt"
-            image_path = self.image_dir / f"{base_name}.pt"
-            latent_path = image_path
-            current_device = next(
-                (t.device for t in latent_data.values() if isinstance(t, torch.Tensor)),
-                torch.device('cpu')
-            )
-            model_dtypes = ModelWeightDtypes.from_single_dtype(DataType.FLOAT_32)
-            try:
-                if latent_data is not None:
-                    try:
-                        processed_latents = {}
-                        for k, v in latent_data.items():
-                            if isinstance(v, torch.Tensor):
-                                tensor = v.detach()
-                                if tensor.device.type != 'cpu':
-                                    tensor = tensor.cpu()
-                                target_dtype = model_dtypes.vae.to_torch_dtype()
-                                if tensor.dtype != target_dtype:
-                                    tensor = tensor.to(dtype=target_dtype)
-                                processed_latents[k] = tensor
-                            else:
-                                processed_latents[k] = v
-                        save_data = {
-                            "latent": processed_latents,
-                            "metadata": {**metadata, "latent_timestamp": time.time()}
-                        }
-                        latent_path.parent.mkdir(parents=True, exist_ok=True)
-                        torch.save(save_data, latent_path)
-                        if not latent_path.exists():
-                            raise IOError(f"Failed to write latent file: {latent_path}")
-                    except Exception as e:
-                        logger.error(f"Error saving latent data: {str(e)}")
-                        raise
-                if text_embeddings is not None:
-                    processed_embeddings = {}
-                    for k, v in text_embeddings.items():
-                        if isinstance(v, torch.Tensor):
-                            target_dtype = model_dtypes.text_encoder.to_torch_dtype()
-                            processed_embeddings[k] = v.detach().cpu().to(dtype=target_dtype)
-                        else:
-                            processed_embeddings[k] = v
-                    torch.save(
-                        {
-                            "embeddings": processed_embeddings,
-                            "metadata": {**metadata, "text_timestamp": time.time()}
-                        },
-                        text_path
-                    )
-                self.cache_index["files"][str(file_path)] = {
-                    "latent_path": str(latent_path),
-                    "text_path": str(text_path),
-                    "base_name": base_name,
-                    "timestamp": time.time()
+            current_entry = self.cache_index["files"].get(str(file_path), {})
+            metadata["timestamp"] = time.time()
+
+            # Initialize or update the cache index entry
+            file_info = current_entry.copy()
+            file_info["base_name"] = base_name
+            file_info["timestamp"] = metadata["timestamp"]
+
+            if latent_data is not None:
+                # Handle latent data
+                latent_path = self.image_dir / f"{base_name}.pt"
+                processed_latents = {}
+                for k, v in latent_data.items():
+                    if isinstance(v, torch.Tensor):
+                        tensor = v.detach()
+                        if tensor.device.type != 'cpu':
+                            tensor = tensor.cpu()
+                        target_dtype = self.model_dtypes.vae.to_torch_dtype()
+                        if tensor.dtype != target_dtype:
+                            tensor = tensor.to(dtype=target_dtype)
+                        processed_latents[k] = tensor
+                    else:
+                        processed_latents[k] = v
+                save_data = {
+                    "latent": processed_latents,
+                    "metadata": {**metadata, "latent_timestamp": time.time()}
                 }
-                self._save_cache_index()
-                return True
-            finally:
-                for tensor_dict in [latent_data, text_embeddings]:
-                    if tensor_dict is not None:
-                        for tensor in tensor_dict.values():
-                            if isinstance(tensor, torch.Tensor) and tensor.is_pinned():
-                                try:
-                                    unpin_tensor_(tensor)
-                                except Exception as e:
-                                    logger.debug(f"Could not unpin tensor: {str(e)}")
-                                    continue
-                torch_sync()
-                if self.enable_memory_tracking:
-                    self._track_memory("save_complete")
+                latent_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(save_data, latent_path)
+                if not latent_path.exists():
+                    raise IOError(f"Failed to write latent file: {latent_path}")
+                file_info["latent_path"] = str(latent_path)
+
+            if text_embeddings is not None:
+                # Handle text embeddings
+                text_path = self.text_dir / f"{base_name}.pt"
+                processed_embeddings = {}
+                for k, v in text_embeddings.items():
+                    if isinstance(v, torch.Tensor):
+                        target_dtype = self.model_dtypes.text_encoder.to_torch_dtype()
+                        processed_embeddings[k] = v.detach().cpu().to(dtype=target_dtype)
+                    else:
+                        processed_embeddings[k] = v
+                save_data = {
+                    "embeddings": processed_embeddings,
+                    "metadata": {**metadata, "text_timestamp": time.time()}
+                }
+                text_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(save_data, text_path)
+                if not text_path.exists():
+                    raise IOError(f"Failed to write text embeddings file: {text_path}")
+                file_info["text_path"] = str(text_path)
+
+            # Update the cache index
+            self.cache_index["files"][str(file_path)] = file_info
+            self._save_cache_index()
+            return True
+        finally:
+            for tensor_dict in [latent_data, text_embeddings]:
+                if tensor_dict is not None:
+                    for tensor in tensor_dict.values():
+                        if isinstance(tensor, torch.Tensor) and tensor.is_pinned():
+                            try:
+                                unpin_tensor_(tensor)
+                            except Exception as e:
+                                logger.debug(f"Could not unpin tensor: {str(e)}")
+                                continue
+            torch_sync()
+            if self.enable_memory_tracking:
+                self._track_memory("save_complete")
         except Exception as e:
             logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
             if self.enable_memory_tracking:
@@ -352,42 +352,47 @@ class CacheManager:
                 if not file_info:
                     self.stats.cache_misses += 1
                     return None
-            latent_path = Path(file_info["latent_path"])
-            text_path = Path(file_info["text_path"])
-            if not (latent_path.exists() or text_path.exists()):
-                self.stats.corrupted_items += 1
+            result = {}
+            metadata = {}
+            if "latent_path" in file_info:
+                latent_path = Path(file_info["latent_path"])
+                if latent_path.exists():
+                    latent_data = torch.load(latent_path, map_location='cpu')
+                    result["latent"] = latent_data["latent"]
+                    metadata.update(latent_data["metadata"])
+                    if device is not None:
+                        for k, v in result["latent"].items():
+                            if isinstance(v, torch.Tensor):
+                                result["latent"][k] = v.to(device, non_blocking=True)
+                else:
+                    self.stats.corrupted_items += 1
+                    return None
+
+            if "text_path" in file_info:
+                text_path = Path(file_info["text_path"])
+                if text_path.exists():
+                    text_data = torch.load(text_path, map_location='cpu')
+                    result["text_embeddings"] = text_data["embeddings"]
+                    metadata.update(text_data["metadata"])
+                    if device is not None:
+                        for k, v in result["text_embeddings"].items():
+                            if isinstance(v, torch.Tensor):
+                                result["text_embeddings"][k] = v.to(device, non_blocking=True)
+                else:
+                    self.stats.corrupted_items += 1
+                    return None
+
+            if not result:
+                self.stats.cache_misses += 1
                 return None
-            try:
-                with torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else nullcontext():
-                    result = {}
-                    metadata = {}
-                    if latent_path.exists():
-                        latent_data = torch.load(latent_path, map_location='cpu')
-                        logger.debug(f"latent_data keys: {latent_data.keys()}")
-                        if 'latent_dist' in latent_data["latent"]:
-                            result["latent"] = latent_data["latent"]["latent_dist"]
-                        else:
-                            logger.warning(f"Key 'latent_dist' not found in latent_data['latent'] for {file_path}")
-                            return None  # Cannot proceed without 'latent_dist'
-                        metadata.update(latent_data["metadata"])
-                        if device is not None:
-                            for k, v in result["latent"].items():
-                                if isinstance(v, torch.Tensor):
-                                    result["latent"][k] = v.to(device, non_blocking=True)
-                    if text_path.exists():
-                        text_data = torch.load(text_path, map_location='cpu')
-                        result["text_embeddings"] = text_data["embeddings"]
-                        metadata.update(text_data["metadata"])
-                        if device is not None:
-                            for k, v in result["text_embeddings"].items():
-                                if isinstance(v, torch.Tensor):
-                                    result["text_embeddings"][k] = v.to(device, non_blocking=True)
-                    self.stats.cache_hits += 1
-                    result["metadata"] = metadata
-                    return result
-            finally:
-                if self.enable_memory_tracking:
-                    self._track_memory("cache_fetch_complete")
+
+            self.stats.cache_hits += 1
+            result["metadata"] = metadata
+            return result
+    except Exception as e:
+        logger.error(f"Error retrieving cached item: {str(e)}", exc_info=True)
+        self.stats.failed_items += 1
+        return None
         except Exception as e:
             logger.error(f"Error retrieving cached item: {str(e)}", exc_info=True)
             self.stats.failed_items += 1

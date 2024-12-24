@@ -197,16 +197,23 @@ class AspectBucketDataset(Dataset):
                 cache_manager=self.cache_manager,
                 latent_preprocessor=self.latent_preprocessor
             )
-            latent_tensor = processed_data["latent"]
-            data_item = {
-                "model_input": latent_tensor,
-                "text": caption,
-                "loss_weight": self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
-            }
+            data_item = {}
+            if "latent" in processed_data:
+                latent_tensor = processed_data["latent"]
+                data_item["model_input"] = latent_tensor
+            if "text_embeddings" in processed_data:
+                data_item["text_embeddings"] = processed_data["text_embeddings"]
+            else:
+                # Process text embeddings on-the-fly if not cached
+                embeddings = self.latent_preprocessor.encode_prompt([caption])
+                data_item["text_embeddings"] = embeddings
+
+            data_item["text"] = caption
+            data_item["loss_weight"] = self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
             return data_item
-        except Exception as e:
-            logger.error(f"Error getting item {idx}: {e}")
-            raise
+    except Exception as e:
+        logger.error(f"Error getting item {idx}: {e}")
+        raise
 
     def __enter__(self):
         return self
