@@ -141,6 +141,17 @@ class CacheManager:
             except Exception as e:
                 logger.error(f"Memory tracking error in {context}: {str(e)}")
 
+    def load_preprocessed_data(self, file_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
+        """Load preprocessed data from cache.
+        
+        Args:
+            file_path: Path to original image file
+            
+        Returns:
+            Dictionary containing cached data if available, None otherwise
+        """
+        return self.get_cached_item(file_path)
+        
     def save_preprocessed_data(
         self,
         latent_data: Optional[Dict[str, torch.Tensor]],
