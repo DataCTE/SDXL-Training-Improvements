@@ -17,6 +17,17 @@ setup(
         "numpy>=1.24.0",
         "tqdm>=4.65.0",
         "colorama>=0.4.6",
-        "pyyaml>=6.0.1"
+        "pyyaml>=6.0.1",
+        "bitsandbytes>=0.41.0",
+        "xformers>=0.0.20",
+        "einops>=0.6.1",
+        "safetensors>=0.3.1",
+        "scipy>=1.10.1",
+        "matplotlib>=3.7.1",
+        "torchvision>=0.15.1",
+        "omegaconf>=2.3.0",
+        "gradio>=3.39.0",
+        "adamw-bf16"
+
     ]
 )
