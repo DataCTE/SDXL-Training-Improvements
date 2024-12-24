@@ -9,6 +9,7 @@ from queue import Queue
 from typing import Dict, List, Optional, Union, Any
 from PIL import Image
 from dataclasses import dataclass
+from src.data.utils.paths import convert_windows_path, is_windows_path
 from contextlib import nullcontext
 import numpy as np
 from src.data.config import Config
@@ -92,11 +93,12 @@ class PreprocessingPipeline:
                 
                 # Scan directories for image files
                 for dir_path in train_dirs:
-                    dir_path = Path(dir_path)
+                    # Convert Windows paths if needed
+                    dir_path = Path(convert_windows_path(dir_path) if is_windows_path(dir_path) else dir_path)
                     if dir_path.exists() and dir_path.is_dir():
                         # Find all image files in directory
                         for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
-                            paths.extend(str(p) for p in dir_path.glob(ext))
+                            paths.extend(str(convert_windows_path(p)) for p in dir_path.glob(ext))
                     else:
                         logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")
                 
@@ -117,7 +119,8 @@ class PreprocessingPipeline:
                 continue
                 
             try:
-                path_str = str(path)
+                # Convert Windows paths if needed
+                path_str = str(convert_windows_path(path) if is_windows_path(path) else path)
                 if not Path(path_str).exists():
                     logger.warning(f"Image path does not exist: {path_str}")
                     continue
