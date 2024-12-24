@@ -1,9 +1,12 @@
 """Memory optimization utilities for training with extreme speedups."""
 import logging
 import torch
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 from pathlib import Path
 
+
+if TYPE_CHECKING:
+    from src.data.config import Config
 
 from ..types import DataType, ModelWeightDtypes
 
