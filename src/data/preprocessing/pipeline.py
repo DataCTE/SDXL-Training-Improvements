@@ -48,7 +48,7 @@ class PreprocessingPipeline:
         stream_timeout=10.0
     ):
         # Basic initialization
-        self.config = config
+        self.config = config if config is not None else {}
         self.latent_preprocessor = latent_preprocessor
         self.cache_manager = cache_manager
         self.is_train = is_train
