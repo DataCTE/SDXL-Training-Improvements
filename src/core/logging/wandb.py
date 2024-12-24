@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 import functools
+from functools import wraps
 
 import functools
 import torch
@@ -11,6 +12,13 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
 
 class WandbLogger:
     """Weights & Biases logger for SDXL training."""
