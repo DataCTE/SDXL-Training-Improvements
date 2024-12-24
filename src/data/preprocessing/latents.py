@@ -6,7 +6,7 @@ import torch
 from src.models import StableDiffusionXLModel
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
-from src.models.encoders.vae import VAEEncoder
+from src.core.types import DataType, ModelWeightDtypes
 
 
 logger = logging.getLogger(__name__)
