@@ -336,18 +336,35 @@ class PreprocessingPipeline:
         cache_index = self.cache_manager.cache_index.get("files", {})
         cached_files = set(cache_index.keys())
 
+        # Use the validated cache index
+        cache_index = self.cache_manager.cache_index.get("files", {})
+        cached_files = set(cache_index.keys())
+
         for path in image_paths:
             path_str = str(path)
-            cache_entry = cache_index.get(path_str)
-            if not cache_entry:
+            if path_str not in cached_files:
+                # No cache entry exists, need to process
                 to_process.append(path)
             else:
-                latent_path = Path(cache_entry.get("latent_path", ""))
-                text_path = Path(cache_entry.get("text_path", ""))
-                # Check if latent or text files are missing
-                if not latent_path.exists() or not text_path.exists():
+                # Access file_info from cache_index
+                file_info = cache_index.get(path_str)
+                if not file_info:
+                    to_process.append(path)
+                    continue
+
+                # Check if latent and text paths exist
+                latent_path = Path(file_info.get("latent_path", ""))
+                text_path = Path(file_info.get("text_path", ""))
+
+                latent_exists = latent_path.exists()
+                text_exists = text_path.exists()
+
+                if not latent_exists or not text_exists:
                     logger.warning(f"Missing cached files for {path_str}. Recomputing.")
                     to_process.append(path)
+                else:
+                    # Files exist, no need to process
+                    continue
 
         for i in range(0, len(to_process), batch_size):
             batch_paths = to_process[i:i+batch_size]

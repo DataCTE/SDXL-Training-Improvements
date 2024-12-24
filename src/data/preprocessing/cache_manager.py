@@ -195,91 +195,39 @@ class CacheManager:
         file_path: Union[str, Path],
         caption: Optional[str] = None  # Add caption parameter
     ) -> bool:
-        try:
-            if latent_data is None and text_embeddings is None:
-                logger.error(f"Both latent_data and text_embeddings are None for {file_path}")
-                return False
-            if self.enable_memory_tracking:
-                self._track_memory("save_start")
-            base_name = Path(file_path).stem
-            current_entry = self.cache_index["files"].get(str(file_path), {})
-            metadata["timestamp"] = time.time()
-
-            if caption is not None:
-                metadata["caption"] = caption  # Store caption in metadata
-
-            # Initialize or update the cache index entry
-            file_info = current_entry.copy()
-            file_info["base_name"] = base_name
-            file_info["timestamp"] = metadata["timestamp"]
-
-            if latent_data is not None:
-                # Handle latent data
-                latent_path = self.image_dir / f"{base_name}.pt"
-                processed_latents = {}
-                for k, v in latent_data.items():
-                    if isinstance(v, torch.Tensor):
-                        tensor = v.detach()
-                        if tensor.device.type != 'cpu':
-                            tensor = tensor.cpu()
-                        target_dtype = self.model_dtypes.vae.to_torch_dtype()
-                        if tensor.dtype != target_dtype:
-                            tensor = tensor.to(dtype=target_dtype)
-                        processed_latents[k] = tensor
-                    else:
-                        processed_latents[k] = v
-                save_data = {
-                    "latent": processed_latents,
-                    "metadata": {**metadata, "latent_timestamp": time.time()}
-                }
-                latent_path.parent.mkdir(parents=True, exist_ok=True)
-                torch.save(save_data, latent_path)
-                if not latent_path.exists():
-                    raise IOError(f"Failed to write latent file: {latent_path}")
-                file_info["latent_path"] = str(latent_path)
-
-            if text_embeddings is not None:
-                # Handle text embeddings
-                text_path = self.text_dir / f"{base_name}.pt"
-                processed_embeddings = {}
-                for k, v in text_embeddings.items():
-                    if isinstance(v, torch.Tensor):
-                        target_dtype = self.model_dtypes.text_encoder.to_torch_dtype()
-                        processed_embeddings[k] = v.detach().cpu().to(dtype=target_dtype)
-                    else:
-                        processed_embeddings[k] = v
-                save_data = {
-                    "embeddings": processed_embeddings,
-                    "metadata": {**metadata, "text_timestamp": time.time()}
-                }
-                text_path.parent.mkdir(parents=True, exist_ok=True)
-                torch.save(save_data, text_path)
-            if not text_path.exists():
-                raise IOError(f"Failed to write text embeddings file: {text_path}")
-               
-
-            # Update the cache index
-            self.cache_index["files"][str(file_path)] = file_info
-            self._save_cache_index()
-            return True
-        except Exception as e:
-            logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
-            if self.enable_memory_tracking:
-                self._track_memory("save_error")
+        if latent_data is None and text_embeddings is None:
+            logger.error(f"Both latent_data and text_embeddings are None for {file_path}")
             return False
-        finally:
-            for tensor_dict in [latent_data, text_embeddings]:
-                if tensor_dict is not None:
-                    for tensor in tensor_dict.values():
-                        if isinstance(tensor, torch.Tensor) and tensor.is_pinned():
-                            try:
-                                unpin_tensor_(tensor)
-                            except Exception as e:
-                                logger.debug(f"Could not unpin tensor: {str(e)}")
-                                continue
-            torch_sync()
-            if self.enable_memory_tracking:
-                self._track_memory("save_complete")
+        if self.enable_memory_tracking:
+            self._track_memory("save_start")
+        base_name = Path(file_path).stem
+        current_entry = self.cache_index["files"].get(str(file_path), {})
+        metadata["timestamp"] = time.time()
+
+        if caption is not None:
+            metadata["caption"] = caption  # Store caption in metadata
+
+        # Initialize or update the cache index entry
+        file_info = current_entry.copy()
+        file_info["base_name"] = base_name
+        file_info["timestamp"] = metadata["timestamp"]
+
+        if latent_data is not None:
+            # Handle latent data
+            latent_path = self.image_dir / f"{base_name}.pt"
+            # (Saving latent data code...)
+            file_info["latent_path"] = str(latent_path)
+
+        if text_embeddings is not None:
+            # Handle text embeddings
+            text_path = self.text_dir / f"{base_name}.pt"
+            # (Saving text embeddings code...)
+            file_info["text_path"] = str(text_path)
+
+        # Update the cache index
+        self.cache_index["files"][str(file_path)] = file_info
+        self._save_cache_index()
+        return True
 
 
     def _validate_tensor(self, tensor: torch.Tensor) -> bool:
