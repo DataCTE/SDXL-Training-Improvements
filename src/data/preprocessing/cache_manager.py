@@ -232,14 +232,14 @@ class CacheManager:
                             except Exception as e:
                                 logger.debug(f"Could not unpin tensor: {str(e)}")
                                 continue
-        torch_sync()
-        if self.enable_memory_tracking:
-            self._track_memory("save_complete")
-    except Exception as e:
-        logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
-        if self.enable_memory_tracking:
-            self._track_memory("save_error")
-        return False
+            torch_sync()
+            if self.enable_memory_tracking:
+                self._track_memory("save_complete")
+        except Exception as e:
+            logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
+            if self.enable_memory_tracking:
+                self._track_memory("save_error")
+            return False
 
     def _process_image_batch(
         self,
