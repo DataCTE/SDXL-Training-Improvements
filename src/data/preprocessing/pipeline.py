@@ -15,12 +15,12 @@ from src.data.utils.paths import convert_windows_path, is_windows_path
 from contextlib import nullcontext
 from src.data.preprocessing.cache_manager import CacheManager
 from src.data.preprocessing.latents import LatentPreprocessor
+import numpy as np
+from src.data.config import Config
 
 class ProcessingError(Exception):
     """Exception raised when image processing fails."""
     pass
-import numpy as np
-from src.data.config import Config
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,10 @@ class PreprocessingPipeline:
             torch.set_float32_matmul_precision('medium')
         self.config = config if config is not None else Config()
         self.latent_preprocessor = latent_preprocessor
+        if self.latent_preprocessor:
+            self.device = self.latent_preprocessor.device
+        else:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.cache_manager = cache_manager
         self.is_train = is_train
         self.num_gpu_workers = 0  # Disable GPU multi-workers
@@ -166,57 +170,44 @@ class PreprocessingPipeline:
         return buckets
 
     def get_processed_item(self, image_path: Union[str, Path], caption: Optional[str] = None, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
-        """Process a single dataset item.
-        
-        Args:
-            image_path: Path to image file
-            caption: Image caption
-            cache_manager: Optional cache manager
-            latent_preprocessor: Optional latent preprocessor
-            
-        Returns:
-            Dictionary containing processed data
-        """
         try:
-            # Check cache first if available
+            processed_data = {}
+
             if cache_manager:
                 cached_data = cache_manager.load_preprocessed_data(image_path)
                 if cached_data:
                     self.stats.cache_hits += 1
-                    return cached_data
-                    
-            # Process image if not cached
-            processed = self._process_image(image_path)
-            if processed is None:
-                raise ProcessingError(f"Failed to process image: {image_path}")
-                
-            # Read caption if not provided
+                    processed_data.update(cached_data)
+                else:
+                    self.stats.cache_misses += 1
+
+            if "latent" not in processed_data:
+                processed = self._process_image(image_path)
+                if processed:
+                    processed_data["latent"] = processed["latent"]
+                    processed_data.setdefault("metadata", {}).update(processed.get("metadata", {}))
+                else:
+                    raise ProcessingError(f"Failed to process image: {image_path}")
+
             if caption is None:
                 caption = self._read_caption(image_path)
 
-            # Process text embeddings if needed
-            text_embeddings = None
-            if latent_preprocessor:
-                text_embeddings = latent_preprocessor.encode_prompt([caption])
+            if "text_embeddings" not in processed_data:
+                embeddings = self.latent_preprocessor.encode_prompt([caption])
+                processed_data["text_embeddings"] = embeddings
 
-            # Create processed data dictionary
-            processed_data = {
-                "latent": processed["latent"],
-                "text_embeddings": text_embeddings,
-                "metadata": processed.get("metadata", {}),
-                "text": caption
-            }
-            if cache_manager and latent_preprocessor:
+            processed_data["text"] = caption
+
+            if cache_manager:
                 cache_manager.save_preprocessed_data(
-                    latent_data=processed["latent"],
-                    text_embeddings=processed.get("text_embeddings"),
-                    metadata=processed.get("metadata", {}),
+                    latent_data=processed_data.get("latent"),
+                    text_embeddings=processed_data.get("text_embeddings"),
+                    metadata=processed_data.get("metadata", {}),
                     file_path=image_path
                 )
-                self.stats.cache_misses += 1
-                
-            return processed
-            
+
+            return processed_data
+
         except Exception as e:
             logger.error(f"Error processing item {image_path}: {e}")
             raise
@@ -324,20 +315,16 @@ class PreprocessingPipeline:
     def _process_image(self, img_path):
         try:
             img = Image.open(img_path).convert('RGB')
-            # Do not resize the image
-            metadata = {"original_size": img.size, "path": str(img_path), "timestamp": time.time()}
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
             if torch.cuda.is_available():
-                tensor = tensor.cuda(non_blocking=True)
-            if self.latent_preprocessor:
-                # Get the VAE data type from the latent_preprocessor
-                vae_dtype = next(self.latent_preprocessor.model.vae.parameters()).dtype
-                tensor = tensor.to(dtype=vae_dtype)
-                latent = self.latent_preprocessor.encode_images(tensor)
-            else:
-                latent = tensor
-            return {"latent": latent, "metadata": metadata}
+                tensor = tensor.to(self.device, non_blocking=True)
+            vae_dtype = next(self.latent_preprocessor.model.vae.parameters()).dtype
+            tensor = tensor.to(dtype=vae_dtype)
+
+            latent_output = self.latent_preprocessor.encode_images(tensor)
+            metadata = {"original_size": img.size, "path": str(img_path), "timestamp": time.time()}
+            return {"latent": latent_output["latent"], "metadata": metadata}
         except Exception as e:
             self.stats.failed += 1
             logger.warning(f"Failed to process {img_path}: {e}")
