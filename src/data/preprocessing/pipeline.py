@@ -76,6 +76,19 @@ class PreprocessingPipeline:
         self.stats = PipelineStats()
         self.target_image_size = (1024, 1024)  # Define your target dimensions
         self.valid_image_paths = []
+
+    def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
+        """
+        Generate aspect buckets based on the image configurations.
+
+        Args:
+            config: Configuration object containing image settings.
+
+        Returns:
+            List of tuples representing the bucket dimensions (height, width).
+        """
+        # Use the supported_dims from the config or compute buckets dynamically
+        return config.global_config.image.supported_dims
         # Disable torch.compile for now due to logging issues
 
 
