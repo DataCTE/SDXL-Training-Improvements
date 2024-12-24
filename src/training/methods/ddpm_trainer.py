@@ -3,10 +3,18 @@ import logging
 import torch
 import torch.backends.cudnn
 import torch.multiprocessing as mp
+import functools
 
 # Set multiprocessing start method to spawn
 if mp.get_start_method(allow_none=True) != 'spawn':
     mp.set_start_method('spawn', force=True)
+    
+# Make functions picklable
+def make_picklable(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
 import torch.nn.functional as F
 from typing import Dict, Optional
 from torch import Tensor
@@ -28,6 +36,7 @@ class DDPMTrainer(TrainingMethod):
 
     # Compile if available
     if hasattr(torch, "compile"):
+        @make_picklable
         def _compiled_loss(self, model, batch, generator=None):
             return self._compute_loss_impl(model, batch, generator)
         compute_loss = torch.compile(_compiled_loss, mode="reduce-overhead", fullgraph=False)
