@@ -270,7 +270,6 @@ class AspectBucketDataset(Dataset):
 def create_dataset(
     config: Config,
     image_paths: List[str],
-    captions: List[str],
     preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
@@ -278,7 +277,6 @@ def create_dataset(
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,
-        captions=captions,
         preprocessing_pipeline=preprocessing_pipeline,
         enable_memory_tracking=enable_memory_tracking,
         max_memory_usage=max_memory_usage
