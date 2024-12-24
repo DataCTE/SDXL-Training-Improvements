@@ -253,17 +253,37 @@ def setup_training(
             persistent_workers=config.data.persistent_workers,
             collate_fn=train_dataset.collate_fn
         )
-        # Configure optimizer with BF16 support
+        # Configure optimizer
         optimizer_kwargs = {
             "lr": config.training.learning_rate,
             "betas": config.training.optimizer_betas,
             "weight_decay": config.training.weight_decay,
             "eps": config.training.optimizer_eps
         }
-            
+
+        # Select optimizer based on config and hardware capabilities
         if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            from src.training.optimizers import AdamWBF16
             optimizer = AdamWBF16(model.unet.parameters(), **optimizer_kwargs)
             logger.info("Using BF16-optimized AdamW optimizer")
+        elif config.training.method == "flow_matching":
+            from src.training.optimizers import SOAP
+            optimizer = SOAP(
+                model.unet.parameters(),
+                **optimizer_kwargs,
+                precondition_frequency=10,
+                max_precond_dim=10000
+            )
+            logger.info("Using SOAP optimizer for flow matching")
+        elif config.training.zero_terminal_snr:
+            from src.training.optimizers import AdamWScheduleFreeKahan
+            optimizer = AdamWScheduleFreeKahan(
+                model.unet.parameters(),
+                **optimizer_kwargs,
+                warmup_steps=config.training.warmup_steps,
+                kahan_sum=True
+            )
+            logger.info("Using Schedule-free AdamW with Kahan summation")
         else:
             optimizer = torch.optim.AdamW(model.unet.parameters(), **optimizer_kwargs)
             logger.info("Using standard AdamW optimizer")
