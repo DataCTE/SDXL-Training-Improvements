@@ -61,7 +61,7 @@ class PreprocessingPipeline:
         self.latent_preprocessor = latent_preprocessor
         self.cache_manager = cache_manager
         self.is_train = is_train
-        self.num_gpu_workers = num_gpu_workers
+        self.num_gpu_workers = 1  # Set to 1 to disable GPU multi-workers
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         self.prefetch_factor = prefetch_factor
@@ -76,7 +76,7 @@ class PreprocessingPipeline:
         # Disable torch.compile for now due to logging issues
 
     def _init_pools(self):
-        self.gpu_pool = (ThreadPoolExecutor(max_workers=self.num_gpu_workers) if torch.cuda.is_available() else None)
+        self.gpu_pool = None  # Disable GPU worker pool
         self.cpu_pool = ProcessPoolExecutor(
             max_workers=self.num_cpu_workers,
             mp_context=mp.get_context('spawn')  # Specify 'spawn' start method

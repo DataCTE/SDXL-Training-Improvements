@@ -91,10 +91,7 @@ class CacheManager:
         self.image_dir = self.cache_dir / "image"
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
-        self.image_pool = ProcessPoolExecutor(
-            max_workers=self.num_proc,
-            mp_context=mp.get_context('spawn')  # Ensures 'spawn' start method
-        )
+        self.image_pool = None  # Disable image processing pool if it's for GPU tasks
         self.io_pool = ThreadPoolExecutor(
             max_workers=self.num_proc * 2,
             thread_name_prefix="cache_io"
