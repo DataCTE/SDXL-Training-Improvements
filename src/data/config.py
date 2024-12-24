@@ -80,6 +80,7 @@ class ModelConfig:
     rho: float = 7.0
     dtype: str = "bfloat16"
     fallback_dtype: str = "float32"
+    enable_bf16_training: bool = True
     unet_dtype: Optional[str] = None
     prior_dtype: Optional[str] = None
     text_encoder_dtype: Optional[str] = None
@@ -131,6 +132,7 @@ class TrainingConfig:
     micro_batch_size: Optional[int] = None
     gradient_accumulation_steps: int = 1
     mixed_precision: bool = True
+    use_bf16: bool = True
     gradient_checkpointing: bool = True
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     learning_rate: float = 4.0e-7

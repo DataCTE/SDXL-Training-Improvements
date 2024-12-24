@@ -102,10 +102,18 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
             try:
                 logger.info(f"Loading {name}...")
                 if cls in (AutoencoderKL, CLIPTextModel, UNet2DConditionModel):
+                    # Determine optimal dtype for model components
+                    if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                        model_dtype = torch.bfloat16
+                    elif device.type == "cuda":
+                        model_dtype = torch.float16
+                    else:
+                        model_dtype = torch.float32
+                        
                     setattr(model, attr, cls.from_pretrained(
                         config.model.pretrained_model_name,
                         subfolder=subfolder,
-                        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+                        torch_dtype=model_dtype,
                         use_safetensors=True
                     ))
                 else:  # Tokenizers
@@ -245,13 +253,20 @@ def setup_training(
             persistent_workers=config.data.persistent_workers,
             collate_fn=train_dataset.collate_fn
         )
-        optimizer = AdamWBF16(
-            model.unet.parameters(),
-            lr=config.training.learning_rate,
-            betas=config.training.optimizer_betas,
-            weight_decay=config.training.weight_decay,
-            eps=config.training.optimizer_eps
-        )
+        # Configure optimizer with BF16 support
+        optimizer_kwargs = {
+            "lr": config.training.learning_rate,
+            "betas": config.training.optimizer_betas,
+            "weight_decay": config.training.weight_decay,
+            "eps": config.training.optimizer_eps
+        }
+            
+        if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            optimizer = AdamWBF16(model.unet.parameters(), **optimizer_kwargs)
+            logger.info("Using BF16-optimized AdamW optimizer")
+        else:
+            optimizer = torch.optim.AdamW(model.unet.parameters(), **optimizer_kwargs)
+            logger.info("Using standard AdamW optimizer")
         if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
             model.unet = torch.nn.parallel.DistributedDataParallel(
                 model.unet, device_ids=[device] if device.type == "cuda" else None
