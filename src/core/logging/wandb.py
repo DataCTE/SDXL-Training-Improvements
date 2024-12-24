@@ -32,6 +32,7 @@ class WandbLogger:
     ):
         """Initialize W&B logger."""
         self.enabled = True
+        self.model_logged = False
         try:
             self.run = wandb.init(
                 project=project,
@@ -103,29 +104,17 @@ class WandbLogger:
             return
             
         try:
-            def log_params(module, prefix=""):
-                for name, param in module.named_parameters():
-                    if param.requires_grad:
-                        self.run.history.torch.log_tensor_stat(
-                            f"{prefix}{name}",
-                            param,
-                            log_values=False
-                        )
-                
-                for name, child in module.named_children():
-                    child_prefix = f"{prefix}{name}."
-                    log_params(child, child_prefix)
-                    
-            log_params(model)
-            
-            if criterion or optimizer:
+            # Remove the custom log_params function and invalid API call
+            # Use wandb.watch to log the model
+            # Ensure that wandb.watch is called only once
+            if not hasattr(self, 'model_logged') or not self.model_logged:
                 wandb.watch(
                     model,
                     criterion=criterion,
                     log="all",
-                    log_freq=100,
-                    idx=step
+                    log_freq=100
                 )
+                self.model_logged = True
         except Exception as e:
             logger.error(f"Failed to log model: {str(e)}")
 
