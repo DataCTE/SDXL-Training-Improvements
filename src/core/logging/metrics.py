@@ -1,5 +1,6 @@
 """Training metrics logging utilities."""
 import logging
+import functools
 from typing import Any, Dict, Optional
 
 import torch.distributed as dist
@@ -9,6 +10,14 @@ from .wandb import WandbLogger
 
 logger = logging.getLogger(__name__)
 
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
+
+@make_picklable
 def log_metrics(
     metrics: Dict[str, Any],
     step: int,
