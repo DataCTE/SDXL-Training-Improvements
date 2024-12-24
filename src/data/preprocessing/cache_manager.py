@@ -63,7 +63,7 @@ class CacheManager:
         enable_memory_tracking: bool = True,
         stream_buffer_size: int = 1024 * 1024,
         max_chunk_memory: float = 0.2,
-        model_dtypes: ModelWeightDtypes = ModelWeightDtypes
+        model_dtypes: Optional[ModelWeightDtypes] = None
     ):
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
@@ -73,7 +73,24 @@ class CacheManager:
 
         self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.model_dtypes = model_dtypes
+        if model_dtypes is None:
+            self.model_dtypes = ModelWeightDtypes(
+                train_dtype=DataType.FLOAT_32,
+                fallback_train_dtype=DataType.FLOAT_32,
+                unet=DataType.FLOAT_32,
+                prior=DataType.FLOAT_32,
+                text_encoder=DataType.FLOAT_32,
+                text_encoder_2=DataType.FLOAT_32,
+                vae=DataType.FLOAT_32,
+                effnet_encoder=DataType.FLOAT_32,
+                decoder=DataType.FLOAT_32,
+                decoder_text_encoder=DataType.FLOAT_32,
+                decoder_vqgan=DataType.FLOAT_32,
+                lora=DataType.FLOAT_32,
+                embedding=DataType.FLOAT_32
+            )
+        else:
+            self.model_dtypes = model_dtypes
         self.num_proc = num_proc or mp.cpu_count()
         self.chunk_size = chunk_size
         self.compression = compression

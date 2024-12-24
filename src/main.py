@@ -222,7 +222,24 @@ def setup_training(
         if config.global_config.cache.clear_cache_on_start:
             logger.info("Clearing latent cache...")
             latent_preprocessor.clear_cache()
+        model_dtypes = ModelWeightDtypes(
+            train_dtype=DataType.from_str(config.model.dtype),
+            fallback_train_dtype=DataType.from_str(config.model.fallback_dtype),
+            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
+            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
+            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
+            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
+            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
+            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
+            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
+            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
+            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
+            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
+            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
+        )
+    
         cache_manager = CacheManager(
+            model_dtypes=model_dtypes,
             cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
             num_proc=config.global_config.cache.num_proc,
             chunk_size=config.global_config.cache.chunk_size,
