@@ -4,13 +4,54 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
+from pathlib import Path
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
+
+class WandbLogger:
+    """Custom WandB logger with picklable parameter tracking."""
+    
+    def __init__(self, project: str, name: str, config: dict, dir: str, tags: List[str]):
+        import wandb
+        self.run = wandb.init(
+            project=project,
+            name=name, 
+            config=config,
+            dir=dir,
+            tags=tags
+        )
+        
+    def log_model(self, model):
+        """Log model parameters without using lambda functions."""
+        import wandb
+        
+        def log_params(module, prefix=""):
+            for name, param in module.named_parameters():
+                if param.requires_grad:
+                    self.run.history.torch.log_tensor_stat(
+                        f"{prefix}{name}",
+                        param,
+                        log_values=False
+                    )
+            
+            for name, child in module.named_children():
+                child_prefix = f"{prefix}{name}."
+                log_params(child, child_prefix)
+                
+        log_params(model)
+        
+    def log(self, metrics, step=None):
+        """Log metrics."""
+        self.run.log(metrics, step=step)
+        
+    def finish(self):
+        """Finish the run."""
+        self.run.finish()
 
 # Track actions and their timing
 action_history: Dict[str, Any] = {}

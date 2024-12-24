@@ -293,14 +293,19 @@ def setup_training(
             )
         wandb_logger = None
         if config.training.use_wandb and is_main_process():
-            wandb_logger = WandbLogger(
-                project="sdxl-training",
-                name=Path(config.global_config.output_dir).name,
-                config=config.__dict__,
-                dir=config.global_config.output_dir,
-                tags=["sdxl", "fine-tuning"]
-            )
-            wandb_logger.log_model(model.unet)
+            try:
+                wandb_logger = WandbLogger(
+                    project="sdxl-training",
+                    name=Path(config.global_config.output_dir).name,
+                    config=config.__dict__,
+                    dir=config.global_config.output_dir,
+                    tags=["sdxl", "fine-tuning"]
+                )
+                # Explicitly log model parameters
+                wandb_logger.log_model(model.unet)
+            except Exception as e:
+                logger.warning(f"Failed to initialize WandB logging: {str(e)}")
+                wandb_logger = None
         return train_dataloader, optimizer, wandb_logger
     except Exception as e:
         raise TrainingSetupError("Failed to setup training components", {"error": str(e)})
