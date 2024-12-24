@@ -192,7 +192,7 @@ class PreprocessingPipeline:
             return
 
         cache_index = self.cache_manager.cache_index.get("files", {})
-        for image_path_str, cache_entry in cache_index.items():
+        for image_path_str in cache_index:
             image_path = Path(image_path_str)
             caption_path = image_path.with_suffix('.txt')
 
@@ -332,7 +332,6 @@ class PreprocessingPipeline:
 
         for i in range(0, len(to_process), batch_size):
             batch_paths = to_process[i:i+batch_size]
-            batch_caps = [captions[image_paths.index(p)] for p in batch_paths]
             for img_path in batch_paths:
                 try:
                     latent_data = None
