@@ -185,6 +185,41 @@ class PreprocessingPipeline:
 
         return buckets
 
+    def generate_missing_captions_from_cache(self):
+        """Generate missing caption files from cache index."""
+        if not self.cache_manager:
+            logger.warning("CacheManager is not available.")
+            return
+
+        cache_index = self.cache_manager.cache_index.get("files", {})
+        for image_path_str, cache_entry in cache_index.items():
+            image_path = Path(image_path_str)
+            caption_path = image_path.with_suffix('.txt')
+
+            # Skip if caption file already exists
+            if caption_path.exists():
+                continue
+
+            # Load text embeddings from cache
+            text_embeddings = self.cache_manager.load_text_embeddings(image_path)
+            if not text_embeddings:
+                logger.warning(f"No text embeddings found for {image_path}. Skipping.")
+                continue
+
+            # Assume that the original caption is stored in the metadata
+            caption = text_embeddings.get("metadata", {}).get("caption", "")
+            if not caption:
+                logger.warning(f"No caption found in metadata for {image_path}. Skipping.")
+                continue
+
+            # Write the caption to a .txt file
+            try:
+                with open(caption_path, 'w', encoding='utf-8') as f:
+                    f.write(caption)
+                logger.info(f"Created caption file: {caption_path}")
+            except Exception as e:
+                logger.error(f"Failed to write caption file {caption_path}: {e}")
+
     def get_processed_item(self, image_path: Union[str, Path], caption: Optional[str] = None, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
         try:
             processed_data = {}
@@ -219,7 +254,8 @@ class PreprocessingPipeline:
                     latent_data=processed_data.get("latent"),
                     text_embeddings=processed_data.get("text_embeddings"),
                     metadata=processed_data.get("metadata", {}),
-                    file_path=image_path
+                    file_path=image_path,
+                    caption=caption  # Pass caption
                 )
 
             return processed_data

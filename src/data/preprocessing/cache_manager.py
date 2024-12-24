@@ -151,6 +151,7 @@ class CacheManager:
         text_embeddings: Optional[Dict[str, torch.Tensor]],
         metadata: Dict,
         file_path: Union[str, Path]
+        caption: Optional[str] = None  # Add caption parameter
     ) -> bool:
         try:
             if latent_data is None and text_embeddings is None:
@@ -161,6 +162,9 @@ class CacheManager:
             base_name = Path(file_path).stem
             current_entry = self.cache_index["files"].get(str(file_path), {})
             metadata["timestamp"] = time.time()
+
+            if caption is not None:
+                metadata["caption"] = caption  # Store caption in metadata
 
             # Initialize or update the cache index entry
             file_info = current_entry.copy()
@@ -323,7 +327,32 @@ class CacheManager:
             self.stats.failed_items += 1
             return None
 
-    def clear_cache(self, remove_files: bool = True):
+    def load_text_embeddings(
+        self,
+        file_path: Union[str, Path],
+        device: Optional[torch.device] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Load text embeddings and metadata from cache.
+        
+        Args:
+            file_path: Path to original image file
+            device: Optional device to load tensors onto
+            
+        Returns:
+            Dictionary containing embeddings and metadata if available, None otherwise
+        """
+        try:
+            file_info = self.cache_index["files"].get(str(file_path))
+            if not file_info or "text_path" not in file_info:
+                return None
+            text_path = Path(file_info["text_path"])
+            if not text_path.exists():
+                return None
+            text_data = torch.load(text_path, map_location=device or 'cpu')
+            return text_data  # Contains 'embeddings' and 'metadata'
+        except Exception as e:
+            logger.error(f"Error loading text embeddings for {file_path}: {str(e)}")
+            return None
         try:
             if remove_files:
                 import shutil
