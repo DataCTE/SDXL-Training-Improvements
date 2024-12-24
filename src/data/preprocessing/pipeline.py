@@ -89,20 +89,6 @@ class PreprocessingPipeline:
         """
         return config.global_config.image.supported_dims
 
-    def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        """
-        Generate aspect buckets based on the image configurations.
-
-        Args:
-            config: Configuration object containing image settings.
-
-        Returns:
-            List of tuples representing the bucket dimensions (height, width).
-        """
-        # Use the supported_dims from the config or compute buckets dynamically
-        return config.global_config.image.supported_dims
-        # Disable torch.compile for now due to logging issues
-
 
     def _read_caption(self, img_path: Union[str, Path]) -> str:
         # Construct the path to the corresponding .txt file
@@ -246,6 +232,7 @@ class PreprocessingPipeline:
                 logger.error(f"Failed to write caption file {caption_path}: {e}")
 
     def get_processed_item(self, image_path: Union[str, Path], caption: Optional[str] = None, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
+        """Process a single image and return the preprocessed data."""
         try:
             processed_data = {}
 
