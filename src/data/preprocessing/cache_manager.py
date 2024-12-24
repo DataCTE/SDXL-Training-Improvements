@@ -363,7 +363,13 @@ class CacheManager:
                     metadata = {}
                     if latent_path.exists():
                         latent_data = torch.load(latent_path, map_location='cpu')
-                        result["latent"] = latent_data["latent"]
+                        logger.debug(f"latent_data keys: {latent_data.keys()}")
+                        if 'latent_dist' in latent_data["latent"]:
+                            result["latent"] = latent_data["latent"]
+                        else:
+                            logger.warning("Key 'latent_dist' not found in latent_data['latent']")
+                            # Handle the missing key, e.g., assign a default value
+                            result["latent"] = latent_data["latent"]
                         metadata.update(latent_data["metadata"])
                         if device is not None:
                             for k, v in result["latent"].items():
