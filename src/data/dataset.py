@@ -211,9 +211,9 @@ class AspectBucketDataset(Dataset):
             data_item["text"] = caption
             data_item["loss_weight"] = self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
             return data_item
-    except Exception as e:
-        logger.error(f"Error getting item {idx}: {e}")
-        raise
+        except Exception as e:
+            logger.error(f"Error getting item {idx}: {e}")
+            raise
 
     def __enter__(self):
         return self
