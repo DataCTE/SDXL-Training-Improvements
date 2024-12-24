@@ -347,7 +347,6 @@ class CacheManager:
         try:
             self._save_cache_index()
         finally:
-            self.io_pool.shutdown()
             torch_sync()
 
         
