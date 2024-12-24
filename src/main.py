@@ -1,5 +1,10 @@
 """Main orchestration script for SDXL fine-tuning with 100x speedups."""
 import argparse
+import os
+
+# Disable TorchDynamo in DataLoader workers
+os.environ['TORCHDYNAMO_DISABLE'] = '1'
+import multiprocessing as mp
 import logging
 import sys
 from contextlib import contextmanager, nullcontext
@@ -312,6 +317,7 @@ def setup_training(
         raise TrainingSetupError("Failed to setup training components", {"error": str(e)})
 
 def main():
+    mp.set_start_method('spawn', force=True)
     device = None
     try:
         args = parse_args()
