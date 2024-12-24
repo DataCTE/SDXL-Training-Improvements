@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
 
-
+from src.core.types import DataType, ModelWeightDtypes
 from tqdm.auto import tqdm
 from contextlib import nullcontext
 
@@ -62,7 +62,8 @@ class CacheManager:
         max_memory_usage: float = 0.8,
         enable_memory_tracking: bool = True,
         stream_buffer_size: int = 1024 * 1024,
-        max_chunk_memory: float = 0.2
+        max_chunk_memory: float = 0.2,
+        model_dtypes: ModelWeightDtypes = ModelWeightDtypes
     ):
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
@@ -72,6 +73,7 @@ class CacheManager:
 
         self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.model_dtypes = model_dtypes
         self.num_proc = num_proc or mp.cpu_count()
         self.chunk_size = chunk_size
         self.compression = compression
@@ -214,14 +216,19 @@ class CacheManager:
                 }
                 text_path.parent.mkdir(parents=True, exist_ok=True)
                 torch.save(save_data, text_path)
-                if not text_path.exists():
-                    raise IOError(f"Failed to write text embeddings file: {text_path}")
+            if not text_path.exists():
+                raise IOError(f"Failed to write text embeddings file: {text_path}")
                 file_info["text_path"] = str(text_path)
 
             # Update the cache index
             self.cache_index["files"][str(file_path)] = file_info
             self._save_cache_index()
             return True
+        except Exception as e:
+            logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
+            if self.enable_memory_tracking:
+                self._track_memory("save_error")
+            return False
         finally:
             for tensor_dict in [latent_data, text_embeddings]:
                 if tensor_dict is not None:
@@ -235,11 +242,6 @@ class CacheManager:
             torch_sync()
             if self.enable_memory_tracking:
                 self._track_memory("save_complete")
-        except Exception as e:
-            logger.error(f"Error saving preprocessed data for {file_path}: {str(e)}")
-            if self.enable_memory_tracking:
-                self._track_memory("save_error")
-            return False
 
     def _process_image_batch(
         self,
