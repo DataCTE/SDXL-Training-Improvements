@@ -4,10 +4,6 @@ def log_parameters_hook(module, inputs, outputs):
     # Access the 'history_instance' attribute of the module
     module.history_instance.log_parameters(module)
 
-def log_parameters_hook(module, inputs, outputs):
-    # Access the 'history_instance' attribute of the module
-    module.history_instance.log_parameters(module)
-
 class TorchHistory:
     def __init__(self, module):
         self.module = module
