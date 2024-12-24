@@ -72,21 +72,30 @@ class PreprocessingPipeline:
         self.cpu_pool = ProcessPoolExecutor(max_workers=self.num_cpu_workers)
         self.io_pool = ThreadPoolExecutor(max_workers=self.num_io_workers)
 
-    def get_aspect_buckets(self, image_paths: Union[List[Union[str, Path]], str, Path], tolerance: float = 0.1) -> Dict[str, List[str]]:
+    def get_aspect_buckets(self, image_paths: Union[List[Union[str, Path]], str, Path, Config], tolerance: float = 0.1) -> Dict[str, List[str]]:
         """Group images into buckets based on aspect ratio for efficient batch processing.
         
         Args:
-            image_paths: List of paths to images, or a single path string/Path
+            image_paths: List of paths to images, single path string/Path, or Config object containing paths
             tolerance: Tolerance for aspect ratio differences (default: 0.1)
             
         Returns:
             Dict mapping aspect ratio strings to lists of image paths
         """
+        # Handle Config object input
+        if isinstance(image_paths, Config):
+            paths = []
+            if hasattr(image_paths.data, 'train_data_dir'):
+                if isinstance(image_paths.data.train_data_dir, (str, Path)):
+                    paths.append(image_paths.data.train_data_dir)
+                else:
+                    paths.extend(image_paths.data.train_data_dir)
+            image_paths = paths
         # Convert single path to list
-        if isinstance(image_paths, (str, Path)):
+        elif isinstance(image_paths, (str, Path)):
             image_paths = [image_paths]
         elif not isinstance(image_paths, (list, tuple)):
-            raise ValueError(f"image_paths must be a string, Path, list or tuple, got {type(image_paths)}")
+            raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
             
         buckets = {}
         for path in image_paths:
