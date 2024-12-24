@@ -105,7 +105,16 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to load cache index: {str(e)}")
             return {"files": {}, "chunks": {}}
-            
+
+    def _save_cache_index(self) -> None:
+        """Save the cache index to disk."""
+        try:
+            with open(self.index_path, 'w') as f:
+                json.dump(self.cache_index, f)
+            logger.info(f"Cache index saved to {self.index_path}")
+        except Exception as e:
+            logger.error(f"Failed to save cache index: {str(e)}")
+
     def validate_cache_index(self) -> None:
         """Validate cache index by ensuring all referenced files exist."""
         valid_files = {}
