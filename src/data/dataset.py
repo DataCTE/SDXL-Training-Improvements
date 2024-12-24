@@ -97,6 +97,7 @@ class AspectBucketDataset(Dataset):
 
         self.config = config
         self.captions = captions
+        self.image_paths = image_paths  # Store image paths first
         self.latent_preprocessor = (preprocessing_pipeline.latent_preprocessor
                                     if preprocessing_pipeline else None)
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
@@ -134,7 +135,6 @@ class AspectBucketDataset(Dataset):
         self.buckets = self._create_buckets()
         self.bucket_indices = self._assign_buckets()
         self.transforms = self._setup_transforms()
-        self.image_paths = image_paths
 
     def _create_tag_weighter(self, config: Config, captions: List[str]) -> Optional[TagWeighter]:
         if hasattr(config, 'tag_weighting') and config.tag_weighting.enable_tag_weighting:
