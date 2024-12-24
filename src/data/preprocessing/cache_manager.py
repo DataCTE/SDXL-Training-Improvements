@@ -353,6 +353,7 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Error loading text embeddings for {file_path}: {str(e)}")
             return None
+    def clear_cache(self, remove_files: bool = True):
         try:
             if remove_files:
                 import shutil
