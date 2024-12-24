@@ -3,6 +3,7 @@ import time
 import logging
 from typing import Dict, Optional, Any, Union
 from collections import deque
+import functools
 
 import torch
 
@@ -13,6 +14,13 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
 logger = logging.getLogger(__name__)
+
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
 
 class ThroughputMonitor:
     def __init__(
@@ -30,6 +38,22 @@ class ThroughputMonitor:
         self._total_samples = 0
         self._last_metrics: Dict[str, float] = {}
 
+    def __getstate__(self):
+        """Custom state for pickling."""
+        state = self.__dict__.copy()
+        # Convert deques to lists for pickling
+        state['batch_times'] = list(self.batch_times)
+        state['batch_sizes'] = list(self.batch_sizes)
+        return state
+
+    def __setstate__(self, state):
+        """Custom state restoration for unpickling."""
+        # Restore deques from lists
+        state['batch_times'] = deque(state['batch_times'], maxlen=state['window_size'])
+        state['batch_sizes'] = deque(state['batch_sizes'], maxlen=state['window_size'])
+        self.__dict__.update(state)
+
+    @make_picklable
     def update(self, batch_size: Optional[Union[int, torch.Tensor]] = None, **kwargs: Any) -> None:
         current_time = time.time()
         if batch_size is not None:
@@ -43,6 +67,7 @@ class ThroughputMonitor:
         self.batch_times.append(current_time - self.last_time)
         self.last_time = current_time
 
+    @make_picklable
     def get_metrics(self, include_legacy: bool = True) -> Dict[str, float]:
         metrics = {}
         if self.batch_times:
@@ -61,6 +86,10 @@ class ThroughputMonitor:
                 metrics.update(base_metrics)
             self._last_metrics = metrics
         return metrics if metrics else self._last_metrics
+
+    def __reduce__(self):
+        """Custom reduction for more reliable pickling."""
+        return (self.__class__, (self.window_size, self.legacy_mode, self.metric_prefix))
 
 # Compile for extreme speedups if available
 if hasattr(torch, "compile"):
