@@ -11,6 +11,12 @@ from PIL import Image
 from dataclasses import dataclass
 from src.data.utils.paths import convert_windows_path, is_windows_path
 from contextlib import nullcontext
+from src.data.preprocessing.cache_manager import CacheManager
+from src.data.preprocessing.latents import LatentPreprocessor
+
+class ProcessingError(Exception):
+    """Exception raised when image processing fails."""
+    pass
 import numpy as np
 from src.data.config import Config
 
