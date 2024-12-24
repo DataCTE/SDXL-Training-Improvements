@@ -126,6 +126,22 @@ class DDPMConfig:
     rho: float = 7.0
 
 @dataclass
+class OptimizerConfig:
+    """Optimizer configuration."""
+    type: str = "adamw"  # adamw, adamw_bf16, adamw_kahan, soap
+    soap_config: Dict = field(default_factory=lambda: {
+        "precondition_frequency": 10,
+        "max_precond_dim": 10000,
+        "merge_dims": False,
+        "precondition_1d": False,
+        "normalize_grads": False
+    })
+    kahan_config: Dict = field(default_factory=lambda: {
+        "warmup_steps": 500,
+        "kahan_sum": True
+    })
+
+@dataclass
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
@@ -135,6 +151,7 @@ class TrainingConfig:
     use_bf16: bool = True
     gradient_checkpointing: bool = True
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     learning_rate: float = 4.0e-7
     max_grad_norm: float = 1.0
     num_epochs: int = 100

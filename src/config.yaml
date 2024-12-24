@@ -40,6 +40,17 @@ training:
     enable_activation_offloading: true
     enable_async_offloading: true
     temp_device: "cpu"
+  optimizer:
+    type: "adamw"  # Options: adamw, adamw_bf16, adamw_kahan, soap
+    soap_config:
+      precondition_frequency: 10
+      max_precond_dim: 10000
+      merge_dims: false
+      precondition_1d: false
+      normalize_grads: false
+    kahan_config:
+      warmup_steps: 500
+      kahan_sum: true
   learning_rate: 4.0e-7
   max_grad_norm: 1.0
   num_epochs: 100
