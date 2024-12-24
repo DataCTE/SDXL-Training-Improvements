@@ -165,8 +165,8 @@ class PreprocessingPipeline:
                 with Image.open(path_str) as img:
                     w, h = img.size
                     aspect = w / h
-                    # Use actual dimensions as bucket key
-                    bucket_key = f"{w}_{h}"
+                    # Use rounded aspect ratio as bucket key
+                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
                     if bucket_key not in buckets:
                         buckets[bucket_key] = []
                     buckets[bucket_key].append(path_str)
