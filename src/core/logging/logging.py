@@ -207,7 +207,8 @@ def cleanup_logging() -> Dict[str, Any]:
     Returns:
         Dictionary containing logged action history
     """
-    # Close all handlers
+    global logger
+    logger = logging.getLogger(__name__)
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
         try:
