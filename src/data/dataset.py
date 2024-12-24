@@ -181,8 +181,7 @@ class AspectBucketDataset(Dataset):
             raise ValueError("Preprocessing pipeline not initialized")
         return self.preprocessing_pipeline.assign_aspect_buckets(
             self.image_paths,
-            self.buckets,
-            self.max_aspect_ratio
+            tolerance=0.1  # Using default tolerance value
         )
 
     def __len__(self) -> int:

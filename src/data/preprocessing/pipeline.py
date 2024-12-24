@@ -151,8 +151,41 @@ class PreprocessingPipeline:
         return buckets
 
     def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> Dict[str, List[str]]:
-        """Alias for get_aspect_buckets to maintain compatibility."""
-        return self.get_aspect_buckets(image_paths, tolerance)
+        """Assign images to aspect ratio buckets.
+        
+        Args:
+            image_paths: List of paths to images
+            tolerance: Tolerance for aspect ratio differences (default: 0.1)
+            
+        Returns:
+            List of bucket indices for each image
+        """
+        buckets = {}
+        bucket_indices = []
+        
+        for path in image_paths:
+            try:
+                path_str = str(convert_windows_path(path) if is_windows_path(path) else path)
+                if not Path(path_str).exists():
+                    logger.warning(f"Image path does not exist: {path_str}")
+                    bucket_indices.append(0)  # Default to first bucket
+                    continue
+                    
+                with Image.open(path_str) as img:
+                    w, h = img.size
+                    aspect = w / h
+                    # Round aspect ratio to nearest tolerance interval
+                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
+                    if bucket_key not in buckets:
+                        buckets[bucket_key] = len(buckets)
+                    bucket_indices.append(buckets[bucket_key])
+                    
+            except Exception as e:
+                logger.warning(f"Failed to process {path} for bucketing: {e}")
+                bucket_indices.append(0)  # Default to first bucket
+                continue
+                
+        return bucket_indices
         
     def get_valid_image_paths(self) -> List[str]:
         """Return list of valid image paths found during bucketing."""
