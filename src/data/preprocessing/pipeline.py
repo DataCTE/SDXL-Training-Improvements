@@ -99,6 +99,8 @@ class PreprocessingPipeline:
         with open(caption_path, 'r', encoding='utf-8') as f:
             caption = f.read().strip()
         return caption
+
+    def group_images_by_aspect_ratio(self, image_paths: Union[str, Path, Config], tolerance: float = 0.05) -> Dict[str, List[str]]:
         """Group images into buckets based on aspect ratio for efficient batch processing.
 
         Args:
@@ -134,7 +136,30 @@ class PreprocessingPipeline:
         elif not isinstance(image_paths, (list, tuple)):
             raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
 
-        buckets = {}
+        if isinstance(image_paths, Config):
+            # Extract paths from Config
+            paths = []
+            if hasattr(image_paths.data, 'train_data_dir'):
+                train_dirs = image_paths.data.train_data_dir
+                if isinstance(train_dirs, (str, Path)):
+                    train_dirs = [train_dirs]
+                
+                # Scan directories for image files
+                for dir_path in train_dirs:
+                    dir_path = Path(convert_windows_path(dir_path) if is_windows_path(dir_path) else dir_path)
+                    if dir_path.exists() and dir_path.is_dir():
+                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
+                            paths.extend(str(convert_windows_path(p)) for p in dir_path.glob(ext))
+                    else:
+                        logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")
+                
+                if not paths:
+                    logger.warning(f"No image files found in training directories: {train_dirs}")
+            image_paths = paths
+        elif isinstance(image_paths, (str, Path)):
+            image_paths = [image_paths]
+        elif not isinstance(image_paths, (list, tuple)):
+            raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
         for path in image_paths:
             if not isinstance(path, (str, Path)):
                 logger.warning(f"Skipping invalid path type: {type(path)}")
@@ -212,7 +237,7 @@ class PreprocessingPipeline:
             logger.error(f"Error processing item {image_path}: {e}")
             raise
 
-    def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> List[int]:
+    def assign_aspect_buckets(self, image_paths: Union[str, Path, Config], tolerance: float = 0.1) -> List[int]:
         """Assign images to aspect ratio buckets.
         
         Args:
