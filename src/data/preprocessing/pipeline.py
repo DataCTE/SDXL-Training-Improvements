@@ -72,6 +72,7 @@ class PreprocessingPipeline:
         self.stats = PipelineStats()
         self.input_queue = Queue(maxsize=prefetch_factor * num_gpu_workers)
         self.output_queue = Queue(maxsize=prefetch_factor * num_gpu_workers)
+        self.target_image_size = (512, 512)  # Define your target dimensions
         self._init_pools()
         # Disable torch.compile for now due to logging issues
 
@@ -280,6 +281,7 @@ class PreprocessingPipeline:
     def _process_image(self, img_path):
         try:
             img = Image.open(img_path).convert('RGB')
+            img = img.resize(self.target_image_size, Image.ANTIALIAS)
             metadata = {"original_size": img.size, "path": str(img_path), "timestamp": time.time()}
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
