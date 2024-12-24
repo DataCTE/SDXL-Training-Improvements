@@ -75,7 +75,6 @@ class AspectBucketDataset(Dataset):
         self,
         config: Config,
         image_paths: List[str],
-        captions: List[str],
         preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True,
@@ -95,11 +94,10 @@ class AspectBucketDataset(Dataset):
             torch.backends.cudnn.benchmark = True
 
         self.config = config
-        self.captions = captions
         self.image_paths = image_paths  # Store image paths first
         self.latent_preprocessor = (preprocessing_pipeline.latent_preprocessor
                                     if preprocessing_pipeline else None)
-        self.tag_weighter = tag_weighter or self._create_tag_weighter(config, captions)
+        self.tag_weighter = tag_weighter or self._create_tag_weighter(config, self.image_paths)
         self.is_train = is_train
         self.preprocessing_pipeline = preprocessing_pipeline
 
@@ -129,7 +127,7 @@ class AspectBucketDataset(Dataset):
 
         # Precompute latents if needed
         if self.latent_preprocessor and config.global_config.cache.use_cache:
-            self._precompute_latents(image_paths, captions, self.latent_preprocessor, config)
+            self._precompute_latents(image_paths, self.latent_preprocessor, config)
 
         self.buckets = self._create_buckets()
         self.bucket_indices = self._assign_buckets()
@@ -153,18 +151,11 @@ class AspectBucketDataset(Dataset):
             transforms.Normalize([0.5], [0.5])
         ])
 
-    def _precompute_latents(
-        self,
-        image_paths: List[str],
-        captions: List[str],
-        latent_preprocessor: LatentPreprocessor,
-        config: Config
-    ) -> None:
+    def _precompute_latents(self, image_paths: List[str], latent_preprocessor: LatentPreprocessor, config: Config) -> None:
         if not self.preprocessing_pipeline:
             raise ValueError("Preprocessing pipeline not initialized")
         self.preprocessing_pipeline.precompute_latents(
             image_paths=image_paths,
-            captions=captions,
             latent_preprocessor=latent_preprocessor,
             batch_size=config.training.batch_size,
             proportion_empty_prompts=config.data.proportion_empty_prompts

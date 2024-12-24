@@ -10,6 +10,7 @@ from queue import Queue
 from typing import Dict, List, Optional, Union, Any
 from PIL import Image
 from dataclasses import dataclass
+from pathlib import Path
 from src.data.utils.paths import convert_windows_path, is_windows_path
 from contextlib import nullcontext
 from src.data.preprocessing.cache_manager import CacheManager
@@ -84,7 +85,16 @@ class PreprocessingPipeline:
         )
         self.io_pool = ThreadPoolExecutor(max_workers=self.num_io_workers)
 
-    def get_aspect_buckets(self, image_paths: Union[List[Union[str, Path]], str, Path, Config], tolerance: float = 0.05) -> Dict[str, List[str]]:
+    def _read_caption(self, img_path: Union[str, Path]) -> str:
+        base_name = Path(img_path).stem
+        # Construct the path to the corresponding .txt file
+        caption_path = Path(img_path).with_suffix('.txt')
+        if not caption_path.exists():
+            logger.warning(f"Caption file not found for image {img_path}. Using empty caption.")
+            return ""
+        with open(caption_path, 'r', encoding='utf-8') as f:
+            caption = f.read().strip()
+        return caption
         """Group images into buckets based on aspect ratio for efficient batch processing.
 
         Args:
@@ -155,7 +165,7 @@ class PreprocessingPipeline:
 
         return buckets
 
-    def get_processed_item(self, image_path: Union[str, Path], caption: str, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
+    def get_processed_item(self, image_path: Union[str, Path], caption: Optional[str] = None, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
         """Process a single dataset item.
         
         Args:
@@ -180,7 +190,22 @@ class PreprocessingPipeline:
             if processed is None:
                 raise ProcessingError(f"Failed to process image: {image_path}")
                 
-            # Add to cache if available
+            # Read caption if not provided
+            if caption is None:
+                caption = self._read_caption(image_path)
+
+            # Process text embeddings if needed
+            text_embeddings = None
+            if latent_preprocessor:
+                text_embeddings = latent_preprocessor.encode_prompt([caption])
+
+            # Create processed data dictionary
+            processed_data = {
+                "latent": processed["latent"],
+                "text_embeddings": text_embeddings,
+                "metadata": processed.get("metadata", {}),
+                "text": caption
+            }
             if cache_manager and latent_preprocessor:
                 cache_manager.save_preprocessed_data(
                     latent_data=processed["latent"],
@@ -265,7 +290,7 @@ class PreprocessingPipeline:
         for i in range(0, len(to_process), batch_size):
             batch_paths = to_process[i:i+batch_size]
             batch_caps = [captions[image_paths.index(p)] for p in batch_paths]
-            for img_path, cap in zip(batch_paths, batch_caps):
+            for img_path in batch_paths:
                 try:
                     latent_data = None
                     text_embeddings = None
@@ -278,7 +303,8 @@ class PreprocessingPipeline:
                             metadata.update(processed.get("metadata", {}))
 
                     if process_text_embeddings:
-                        embeddings = self.latent_preprocessor.encode_prompt([cap])
+                        caption = self._read_caption(img_path)
+                        embeddings = self.latent_preprocessor.encode_prompt([caption])
                         text_embeddings = embeddings
 
                     # Save to cache
