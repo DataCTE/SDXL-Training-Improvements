@@ -40,8 +40,6 @@ class PreprocessingPipeline:
     def __init__(
         self,
         config,
-        latent_preprocessor=None,
-        cache_manager=None,
         is_train=True,
         num_gpu_workers=1,
         num_cpu_workers=4,
@@ -231,7 +229,7 @@ class PreprocessingPipeline:
             except Exception as e:
                 logger.error(f"Failed to write caption file {caption_path}: {e}")
 
-    def get_processed_item(self, image_path: Union[str, Path], caption: Optional[str] = None, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
+    def get_processed_item(self, image_path: Union[str, Path], caption: Optional[str] = None) -> Dict[str, Any]:
         """Process a single image and return the preprocessed data."""
         try:
             processed_data = {}
@@ -261,8 +259,8 @@ class PreprocessingPipeline:
 
             processed_data["text"] = caption
 
-            if cache_manager:
-                cache_manager.save_preprocessed_data(
+            if self.cache_manager:
+                self.cache_manager.save_preprocessed_data(
                     latent_data=processed_data.get("latent"),
                     text_embeddings=processed_data.get("text_embeddings"),
                     metadata=processed_data.get("metadata", {}),
@@ -322,13 +320,12 @@ class PreprocessingPipeline:
     def precompute_latents(
         self,
         image_paths,
-        latent_preprocessor,
         batch_size=1,
         proportion_empty_prompts=0.0,
         process_latents=True,
         process_text_embeddings=True
     ):
-        if not latent_preprocessor or not self.cache_manager or not self.is_train:
+        if not self.latent_preprocessor or not self.cache_manager or not self.is_train:
             return
         logger.info(f"Precomputing latents and embeddings for {len(image_paths)} items")
         to_process = []
