@@ -15,7 +15,8 @@ torch.set_float32_matmul_precision('medium')
 
 from torch.distributed import init_process_group
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from src.core.logging import setup_logging, WandbLogger
+from src.core.logging import setup_logging
+from src.core.logging.wandb import WandbLogger
 from src.data.preprocessing import CacheManager, PreprocessingPipeline
 from src.data.utils.paths import convert_windows_path
 from src.core.memory.tensor import (

@@ -2,12 +2,20 @@
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+import functools
 
 import torch
 import wandb
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
 
 class WandbLogger:
     """Weights & Biases logger for SDXL training."""
@@ -22,17 +30,7 @@ class WandbLogger:
         notes: Optional[str] = None,
         resume: bool = False
     ):
-        """Initialize W&B logger.
-        
-        Args:
-            project: W&B project name
-            name: Optional run name
-            config: Optional config dict
-            dir: Optional directory for W&B files
-            tags: Optional list of tags
-            notes: Optional run notes
-            resume: Whether to resume logging
-        """
+        """Initialize W&B logger."""
         self.enabled = True
         try:
             self.run = wandb.init(
@@ -48,19 +46,14 @@ class WandbLogger:
             logger.error(f"Failed to initialize W&B: {str(e)}")
             self.enabled = False
 
+    @make_picklable
     def log_metrics(
         self,
         metrics: Dict[str, Any],
         step: Optional[int] = None,
         commit: bool = True
     ) -> None:
-        """Log metrics to W&B.
-        
-        Args:
-            metrics: Dictionary of metric names and values
-            step: Optional step number
-            commit: Whether to commit immediately
-        """
+        """Log metrics to W&B."""
         if not self.enabled:
             return
             
@@ -69,31 +62,25 @@ class WandbLogger:
         except Exception as e:
             logger.error(f"Failed to log metrics: {str(e)}")
 
+    @make_picklable
     def log_images(
         self,
         images: Dict[str, Union[Image.Image, torch.Tensor]],
         step: Optional[int] = None,
         commit: bool = True
     ) -> None:
-        """Log images to W&B.
-        
-        Args:
-            images: Dictionary of image names and PIL Images or tensors
-            step: Optional step number
-            commit: Whether to commit immediately
-        """
+        """Log images to W&B."""
         if not self.enabled:
             return
             
         try:
-            # Convert tensors to PIL images if needed
             processed_images = {}
             for name, img in images.items():
                 if isinstance(img, torch.Tensor):
                     if img.ndim == 4:
-                        img = img[0]  # Take first image if batched
+                        img = img[0]
                     img = (img * 255).byte().cpu().numpy()
-                    if img.shape[0] == 3:  # CHW to HWC
+                    if img.shape[0] == 3:
                         img = img.transpose(1, 2, 0)
                     img = Image.fromarray(img)
                 processed_images[name] = wandb.Image(img)
@@ -102,6 +89,7 @@ class WandbLogger:
         except Exception as e:
             logger.error(f"Failed to log images: {str(e)}")
 
+    @make_picklable
     def log_model(
         self,
         model: torch.nn.Module,
@@ -110,40 +98,44 @@ class WandbLogger:
         step: Optional[int] = None,
         commit: bool = True
     ) -> None:
-        """Log model architecture and gradients to W&B.
-        
-        Args:
-            model: PyTorch model
-            criterion: Optional loss function
-            optimizer: Optional optimizer
-            step: Optional step number
-            commit: Whether to commit immediately
-        """
+        """Log model architecture and gradients to W&B."""
         if not self.enabled:
             return
             
         try:
-            wandb.watch(
-                model,
-                criterion=criterion,
-                log="all",
-                log_freq=100,
-                idx=step
-            )
+            def log_params(module, prefix=""):
+                for name, param in module.named_parameters():
+                    if param.requires_grad:
+                        self.run.history.torch.log_tensor_stat(
+                            f"{prefix}{name}",
+                            param,
+                            log_values=False
+                        )
+                
+                for name, child in module.named_children():
+                    child_prefix = f"{prefix}{name}."
+                    log_params(child, child_prefix)
+                    
+            log_params(model)
+            
+            if criterion or optimizer:
+                wandb.watch(
+                    model,
+                    criterion=criterion,
+                    log="all",
+                    log_freq=100,
+                    idx=step
+                )
         except Exception as e:
             logger.error(f"Failed to log model: {str(e)}")
 
+    @make_picklable
     def log_hyperparams(
         self,
         params: Dict[str, Any],
         commit: bool = True
     ) -> None:
-        """Log hyperparameters to W&B.
-        
-        Args:
-            params: Dictionary of parameter names and values
-            commit: Whether to commit immediately
-        """
+        """Log hyperparameters to W&B."""
         if not self.enabled:
             return
             
@@ -154,6 +146,7 @@ class WandbLogger:
         except Exception as e:
             logger.error(f"Failed to log hyperparameters: {str(e)}")
 
+    @make_picklable
     def finish(self) -> None:
         """Finish logging and close W&B run."""
         if not self.enabled:
