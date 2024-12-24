@@ -210,7 +210,7 @@ class CacheManager:
                 torch.save(save_data, text_path)
             if not text_path.exists():
                 raise IOError(f"Failed to write text embeddings file: {text_path}")
-                file_info["text_path"] = str(text_path)
+               
 
             # Update the cache index
             self.cache_index["files"][str(file_path)] = file_info

@@ -74,7 +74,7 @@ class PreprocessingPipeline:
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
         self.stats = PipelineStats()
-        self.target_image_size = (512, 512)  # Define your target dimensions
+        self.target_image_size = (1024, 1024)  # Define your target dimensions
         self.valid_image_paths = []
         # Disable torch.compile for now due to logging issues
 
