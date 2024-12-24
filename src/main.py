@@ -37,6 +37,7 @@ from src.data.dataset import create_dataset
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from transformers import CLIPTextModel, CLIPTokenizer
 from src.models import ModelType, StableDiffusionXLModel
+from adamw_bf16 import AdamWBF16
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,7 @@ def setup_training(
             persistent_workers=config.data.persistent_workers,
             collate_fn=train_dataset.collate_fn
         )
-        optimizer = torch.optim.AdamW(
+        optimizer = AdamWBF16(
             model.unet.parameters(),
             lr=config.training.learning_rate,
             betas=config.training.optimizer_betas,
