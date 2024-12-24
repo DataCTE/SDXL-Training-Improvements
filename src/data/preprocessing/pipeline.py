@@ -86,10 +86,22 @@ class PreprocessingPipeline:
         if isinstance(image_paths, Config):
             paths = []
             if hasattr(image_paths.data, 'train_data_dir'):
-                if isinstance(image_paths.data.train_data_dir, (str, Path)):
-                    paths.append(image_paths.data.train_data_dir)
-                else:
-                    paths.extend(image_paths.data.train_data_dir)
+                train_dirs = image_paths.data.train_data_dir
+                if isinstance(train_dirs, (str, Path)):
+                    train_dirs = [train_dirs]
+                
+                # Scan directories for image files
+                for dir_path in train_dirs:
+                    dir_path = Path(dir_path)
+                    if dir_path.exists() and dir_path.is_dir():
+                        # Find all image files in directory
+                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
+                            paths.extend(str(p) for p in dir_path.glob(ext))
+                    else:
+                        logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")
+                
+                if not paths:
+                    logger.warning(f"No image files found in training directories: {train_dirs}")
             image_paths = paths
         # Convert single path to list
         elif isinstance(image_paths, (str, Path)):
