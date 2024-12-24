@@ -4,6 +4,7 @@ from .trainers.sdxl_trainer import SDXLTrainer
 from .methods.base import TrainingMethod
 from .methods.ddpm_trainer import DDPMTrainer
 from .methods.flow_matching_trainer import FlowMatchingTrainer
+from .optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 from .schedulers import (
     NoiseSchedulerConfig,
     configure_noise_scheduler,
@@ -24,6 +25,11 @@ __all__ = [
     "TrainingMethod",
     "DDPMTrainer", 
     "FlowMatchingTrainer",
+    
+    # Optimizers
+    "AdamWBF16",
+    "AdamWScheduleFreeKahan", 
+    "SOAP",
     
     # Scheduler utilities
     "NoiseSchedulerConfig",
