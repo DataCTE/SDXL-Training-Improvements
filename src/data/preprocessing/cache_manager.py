@@ -106,12 +106,28 @@ class CacheManager:
             logger.error(f"Failed to load cache index: {str(e)}")
             return {"files": {}, "chunks": {}}
             
-    def _save_cache_index(self) -> None:
-        try:
-            with open(self.index_path, 'w') as f:
-                json.dump(self.cache_index, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save cache index: {str(e)}")
+    def validate_cache_index(self) -> None:
+        """Validate cache index by ensuring all referenced files exist."""
+        valid_files = {}
+        for file_path, file_info in self.cache_index.get("files", {}).items():
+            latent_path = Path(file_info.get("latent_path", ""))
+            text_path = Path(file_info.get("text_path", ""))
+
+            latent_exists = latent_path.exists()
+            text_exists = text_path.exists()
+
+            if latent_exists and text_exists:
+                valid_files[file_path] = file_info
+            else:
+                if not latent_exists:
+                    logger.warning(f"Missing latent file: {latent_path}")
+                if not text_exists:
+                    logger.warning(f"Missing text embeddings file: {text_path}")
+
+        # Update the cache index with only valid files
+        self.cache_index["files"] = valid_files
+        # Save the updated cache index to disk
+        self._save_cache_index()
 
     def _init_memory_tracking(self):
         if not hasattr(self, 'memory_stats'):

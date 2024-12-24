@@ -231,6 +231,7 @@ def setup_training(
             max_memory_usage=0.8,
             enable_memory_tracking=True
         )
+        cache_manager.validate_cache_index()
         preprocessing_pipeline = PreprocessingPipeline(
             config=config,
             latent_preprocessor=latent_preprocessor,

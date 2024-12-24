@@ -217,7 +217,7 @@ class PreprocessingPipeline:
             return
 
         cache_index = self.cache_manager.cache_index.get("files", {})
-        for image_path_str in cache_index:
+        for image_path_str, file_info in cache_index.items():
             image_path = Path(image_path_str)
             caption_path = image_path.with_suffix('.txt')
 
@@ -226,13 +226,13 @@ class PreprocessingPipeline:
                 continue
 
             # Load text embeddings from cache
-            text_embeddings = self.cache_manager.load_text_embeddings(image_path)
-            if not text_embeddings:
+            text_data = self.cache_manager.load_text_embeddings(image_path)
+            if not text_data:
                 logger.warning(f"No text embeddings found for {image_path}. Skipping.")
                 continue
 
-            # Assume that the original caption is stored in the metadata
-            caption = text_embeddings.get("metadata", {}).get("caption", "")
+            # Extract caption from metadata
+            caption = text_data.get("metadata", {}).get("caption", "")
             if not caption:
                 logger.warning(f"No caption found in metadata for {image_path}. Skipping.")
                 continue
@@ -346,13 +346,22 @@ class PreprocessingPipeline:
         logger.info(f"Precomputing latents and embeddings for {len(image_paths)} items")
         to_process = []
 
-        # Get cache index if available
+        # Use the validated cache index
         cache_index = self.cache_manager.cache_index.get("files", {})
-        cached = set(cache_index.keys())
+        cached_files = set(cache_index.keys())
 
         for path in image_paths:
-            if path not in cached:
+            path_str = str(path)
+            cache_entry = cache_index.get(path_str)
+            if not cache_entry:
                 to_process.append(path)
+            else:
+                latent_path = Path(cache_entry.get("latent_path", ""))
+                text_path = Path(cache_entry.get("text_path", ""))
+                # Check if latent or text files are missing
+                if not latent_path.exists() or not text_path.exists():
+                    logger.warning(f"Missing cached files for {path_str}. Recomputing.")
+                    to_process.append(path)
 
         for i in range(0, len(to_process), batch_size):
             batch_paths = to_process[i:i+batch_size]
