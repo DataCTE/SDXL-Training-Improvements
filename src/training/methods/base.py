@@ -1,6 +1,7 @@
 """Base classes for SDXL training methods with extreme speedups."""
 from abc import ABC, ABCMeta, abstractmethod
 from typing import Dict, Optional, Type
+from src.core.history import TorchHistory
 import torch
 import torch.backends.cudnn
 import functools
@@ -54,6 +55,8 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
         self.unet = unet
         self.config = config
         self.training = True
+        self.history = TorchHistory(self.unet)
+        self.history.add_log_parameters_hook()
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=config.model.num_timesteps,
             prediction_type=config.training.prediction_type,

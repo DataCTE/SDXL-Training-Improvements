@@ -30,6 +30,7 @@ from src.core.memory import (
 )
 from typing import Dict, List, Optional, Union
 from src.core.types import DataType, ModelWeightDtypes
+from src.core.history import TorchHistory
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
 from src.training.methods.base import TrainingMethod
@@ -80,6 +81,10 @@ class SDXLTrainer:
         self.model = model
         self.unet = model.unet
         self.optimizer = optimizer
+        self.history = TorchHistory(self.model)
+        self.history.add_log_parameters_hook()
+        self.history = TorchHistory(self.model)
+        self.history.add_log_parameters_hook()
         self.train_dataloader = train_dataloader
         self.training_method = training_method
         self.device = device
@@ -220,6 +225,8 @@ class SDXLTrainer:
             self.save_checkpoint()
             if self.global_step >= self.max_steps:
                 break
+        self.history.remove_log_parameters_hook()
+        self.history.remove_log_parameters_hook()
         return metrics
 
     def _prepare_micro_batches(self, batch: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:

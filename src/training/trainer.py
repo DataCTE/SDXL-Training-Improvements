@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 
 import torch
 from src.core.logging import WandbLogger
+from src.core.history import TorchHistory
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
 from src.training.trainers.sdxl_trainer import SDXLTrainer

@@ -3,6 +3,7 @@ import logging
 import torch
 import torch.backends.cudnn
 from src.training.methods.base import make_picklable
+from src.core.history import TorchHistory
 import torch.nn.functional as F
 from typing import Dict, Optional
 from torch import Tensor
@@ -25,6 +26,8 @@ class DDPMTrainer(TrainingMethod):
             torch.set_float32_matmul_precision('medium')
 
         super().__init__(*args, **kwargs)
+        self.history = TorchHistory(self.unet)
+        self.history.add_log_parameters_hook()
         if hasattr(torch, "compile"):
             self._compiled_loss = torch.compile(
                 self._compute_loss_impl,
