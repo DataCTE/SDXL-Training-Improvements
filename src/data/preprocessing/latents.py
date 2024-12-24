@@ -74,6 +74,9 @@ class LatentPreprocessor:
     def encode_images(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
         try:
             with torch.no_grad():
+                # Ensure pixel_values has the same dtype as the VAE
+                vae_dtype = next(self.model.vae.parameters()).dtype
+                pixel_values = pixel_values.to(dtype=vae_dtype)
                 latents = self.model.vae.encode(pixel_values).latents
                 latents = latents * self.model.vae.config.scaling_factor
             return {"latent": latents}

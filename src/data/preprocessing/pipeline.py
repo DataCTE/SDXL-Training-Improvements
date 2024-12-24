@@ -280,8 +280,11 @@ class PreprocessingPipeline:
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
             if torch.cuda.is_available():
-                tensor = tensor.cuda(non_blocking=True).to(dtype=torch.float16)
+                tensor = tensor.cuda(non_blocking=True)
             if self.latent_preprocessor:
+                # Get the VAE data type from the latent_preprocessor
+                vae_dtype = next(self.latent_preprocessor.model.vae.parameters()).dtype
+                tensor = tensor.to(dtype=vae_dtype)
                 latent = self.latent_preprocessor.encode_images(tensor)
             else:
                 latent = tensor
