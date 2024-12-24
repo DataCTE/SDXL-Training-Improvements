@@ -39,7 +39,9 @@ class PipelineStats:
 class PreprocessingPipeline:
     def __init__(
         self,
-        config,
+        config: Config,
+        latent_preprocessor: Optional[LatentPreprocessor] = None,
+        cache_manager: Optional[CacheManager] = None,
         is_train=True,
         num_gpu_workers=1,
         num_cpu_workers=4,
