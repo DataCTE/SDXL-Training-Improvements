@@ -138,12 +138,24 @@ class PreprocessingPipeline:
         
         if not buckets:
             logger.warning("No valid images found for bucketing")
+            return {}
+            
+        # Store valid image paths for dataset access
+        self.valid_image_paths = []
+        for paths in buckets.values():
+            self.valid_image_paths.extend(paths)
             
         return buckets
 
     def assign_aspect_buckets(self, image_paths: List[Union[str, Path]], tolerance: float = 0.1) -> Dict[str, List[str]]:
         """Alias for get_aspect_buckets to maintain compatibility."""
         return self.get_aspect_buckets(image_paths, tolerance)
+        
+    def get_valid_image_paths(self) -> List[str]:
+        """Return list of valid image paths found during bucketing."""
+        if not hasattr(self, 'valid_image_paths'):
+            return []
+        return self.valid_image_paths
 
     def precompute_latents(self, image_paths, captions, latent_preprocessor, batch_size=1, proportion_empty_prompts=0.0):
         if not latent_preprocessor or not self.cache_manager or not self.is_train:
