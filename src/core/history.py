@@ -26,9 +26,17 @@ class TorchHistory:
             self.hook_handle.remove()
             self.hook_handle = None
 
-    def __enter__(self):
-        self.add_log_parameters_hook()
-        return self
+    def __getstate__(self):
+        """Return the state of the instance for pickling, excluding unpicklable attributes."""
+        state = self.__dict__.copy()
+        # Remove the hook_handle and module references, as they are not picklable
+        state.pop('hook_handle', None)
+        state.pop('module', None)
+        return state
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.remove_log_parameters_hook()
+    def __setstate__(self, state):
+        """Restore the state of the instance after unpickling."""
+        self.__dict__.update(state)
+        # Re-initialize attributes that were not pickled
+        self.hook_handle = None
+        self.module = None  # The module will need to be set manually after unpickling

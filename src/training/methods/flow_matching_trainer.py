@@ -35,7 +35,15 @@ class FlowMatchingTrainer(TrainingMethod):
                 fullgraph=False
             )
 
-    @make_picklable 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('history', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.history = TorchHistory(self.unet)
+        self.history.add_log_parameters_hook()
     @make_picklable 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
         """Compute training loss."""

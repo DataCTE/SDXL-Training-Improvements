@@ -35,7 +35,17 @@ class DDPMTrainer(TrainingMethod):
                 fullgraph=False
             )
 
-    @make_picklable
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Exclude the history attribute from pickling
+        state.pop('history', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Recreate the history instance and re-add the hook
+        self.history = TorchHistory(self.unet)
+        self.history.add_log_parameters_hook()
     @make_picklable
     def compute_loss(
         self,

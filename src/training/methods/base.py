@@ -10,12 +10,6 @@ from diffusers import DDPMScheduler
 from src.data.config import Config
 
 
-def make_picklable(func):
-    """Decorator to make functions picklable."""
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    return wrapper
 
 class TrainingMethodMeta(ABCMeta):
     _methods: Dict[str, Type['TrainingMethod']] = {}
