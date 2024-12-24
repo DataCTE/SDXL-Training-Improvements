@@ -1,4 +1,5 @@
 """High-performance cache management with extreme speedups."""
+import multiprocessing as mp
 import logging
 import multiprocessing as mp
 import traceback
@@ -91,7 +92,7 @@ class CacheManager:
             directory.mkdir(exist_ok=True)
         self.image_pool = ProcessPoolExecutor(
             max_workers=self.num_proc,
-            mp_context=mp.get_context('spawn')
+            mp_context=mp.get_context('spawn')  # Ensures 'spawn' start method
         )
         self.io_pool = ThreadPoolExecutor(
             max_workers=self.num_proc * 2,

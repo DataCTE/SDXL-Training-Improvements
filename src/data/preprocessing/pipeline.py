@@ -4,6 +4,7 @@ import time
 import torch
 import torch.backends.cudnn
 from pathlib import Path
+import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from queue import Queue
 from typing import Dict, List, Optional, Union, Any
@@ -76,7 +77,10 @@ class PreprocessingPipeline:
 
     def _init_pools(self):
         self.gpu_pool = (ThreadPoolExecutor(max_workers=self.num_gpu_workers) if torch.cuda.is_available() else None)
-        self.cpu_pool = ProcessPoolExecutor(max_workers=self.num_cpu_workers)
+        self.cpu_pool = ProcessPoolExecutor(
+            max_workers=self.num_cpu_workers,
+            mp_context=mp.get_context('spawn')  # Specify 'spawn' start method
+        )
         self.io_pool = ThreadPoolExecutor(max_workers=self.num_io_workers)
 
     def get_aspect_buckets(self, image_paths: Union[List[Union[str, Path]], str, Path, Config], tolerance: float = 0.1) -> Dict[str, List[str]]:
