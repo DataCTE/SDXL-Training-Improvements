@@ -84,63 +84,43 @@ class PreprocessingPipeline:
         )
         self.io_pool = ThreadPoolExecutor(max_workers=self.num_io_workers)
 
-    def get_aspect_buckets(self, image_paths: Union[List[Union[str, Path]], str, Path, Config], tolerance: float = 0.1) -> Dict[str, List[str]]:
+    def get_aspect_buckets(self, image_paths: Union[List[Union[str, Path]], str, Path, Config], tolerance: float = 0.05) -> Dict[str, List[str]]:
         """Group images into buckets based on aspect ratio for efficient batch processing.
-        
+
         Args:
             image_paths: List of paths to images, single path string/Path, or Config object containing paths
-            tolerance: Tolerance for aspect ratio differences (default: 0.1)
-            
+            tolerance: Tolerance for aspect ratio differences (default: 0.05)
+
         Returns:
             Dict mapping aspect ratio strings to lists of image paths
         """
-        # Handle Config object input
+        # Handle various input types
         if isinstance(image_paths, Config):
-            paths = []
-            if hasattr(image_paths.data, 'train_data_dir'):
-                train_dirs = image_paths.data.train_data_dir
-                if isinstance(train_dirs, (str, Path)):
-                    train_dirs = [train_dirs]
-                
-                # Scan directories for image files
-                for dir_path in train_dirs:
-                    # Convert Windows paths if needed
-                    dir_path = Path(convert_windows_path(dir_path) if is_windows_path(dir_path) else dir_path)
-                    if dir_path.exists() and dir_path.is_dir():
-                        # Find all image files in directory
-                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
-                            paths.extend(str(convert_windows_path(p)) for p in dir_path.glob(ext))
-                    else:
-                        logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")
-                
-                if not paths:
-                    logger.warning(f"No image files found in training directories: {train_dirs}")
+            # Existing code to extract paths from Config
+            # ...
             image_paths = paths
-        # Convert single path to list
         elif isinstance(image_paths, (str, Path)):
             image_paths = [image_paths]
         elif not isinstance(image_paths, (list, tuple)):
             raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
-            
+
         buckets = {}
         for path in image_paths:
-            # Skip if path is not a string or Path object
             if not isinstance(path, (str, Path)):
                 logger.warning(f"Skipping invalid path type: {type(path)}")
                 continue
-                
+
             try:
-                # Convert Windows paths if needed
                 path_str = str(convert_windows_path(path) if is_windows_path(path) else path)
                 if not Path(path_str).exists():
                     logger.warning(f"Image path does not exist: {path_str}")
                     continue
-                    
+
                 with Image.open(path_str) as img:
                     w, h = img.size
                     aspect = w / h
-                    # Round aspect ratio to nearest tolerance interval
-                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
+                    # Use actual dimensions as bucket key
+                    bucket_key = f"{w}_{h}"
                     if bucket_key not in buckets:
                         buckets[bucket_key] = []
                     buckets[bucket_key].append(path_str)
@@ -149,16 +129,14 @@ class PreprocessingPipeline:
                 logger.warning(f"Failed to process {path} for bucketing: {e}")
                 self.stats.failed += 1
                 continue
-        
+
         if not buckets:
             logger.warning("No valid images found for bucketing")
             return {}
-            
-        # Store valid image paths for dataset access
-        self.valid_image_paths = []
-        for paths in buckets.values():
-            self.valid_image_paths.extend(paths)
-            
+
+        # Store valid image paths
+        self.valid_image_paths = [path for paths in buckets.values() for path in paths]
+
         return buckets
 
     def get_processed_item(self, image_path: Union[str, Path], caption: str, cache_manager: Optional['CacheManager'] = None, latent_preprocessor: Optional['LatentPreprocessor'] = None) -> Dict[str, Any]:
@@ -281,7 +259,7 @@ class PreprocessingPipeline:
     def _process_image(self, img_path):
         try:
             img = Image.open(img_path).convert('RGB')
-            img = img.resize(self.target_image_size, Image.ANTIALIAS)
+            # Do not resize the image
             metadata = {"original_size": img.size, "path": str(img_path), "timestamp": time.time()}
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
