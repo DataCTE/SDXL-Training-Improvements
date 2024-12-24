@@ -214,7 +214,7 @@ def cleanup_logging() -> Dict[str, Any]:
             handler.close()
             root_logger.removeHandler(handler)
         except Exception as e:
-            print(f"{Fore.RED}Error closing handler: {str(e)}{Style.RESET_ALL}")
+            logger.error(f"Error closing handler: {str(e)}", exc_info=True, stack_info=True)
     
     # Log cleanup
     logging.info("Logging system cleanup complete")
