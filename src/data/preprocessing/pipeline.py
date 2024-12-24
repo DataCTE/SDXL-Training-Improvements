@@ -48,7 +48,7 @@ class PreprocessingPipeline:
         stream_timeout=10.0
     ):
         # Basic initialization
-        self.config = config if config is not None else {}
+        self.config = config if config is not None else Config()
         self.latent_preprocessor = latent_preprocessor
         self.cache_manager = cache_manager
         self.is_train = is_train
@@ -103,7 +103,12 @@ class PreprocessingPipeline:
             return
         logger.info(f"Precomputing {len(image_paths)} latents")
         to_process = []
-        cached = set(self.cache_manager.cache_index["files"].keys()) if self.cache_manager else set()
+        
+        # Get cache index if available
+        cache_index = {}
+        if self.cache_manager and hasattr(self.cache_manager, 'cache_index'):
+            cache_index = self.cache_manager.cache_index.get("files", {})
+        cached = set(cache_index.keys())
         for path in image_paths:
             if path not in cached: to_process.append(path)
             else: self.stats.cache_hits += 1
