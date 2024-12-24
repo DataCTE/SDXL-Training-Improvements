@@ -75,11 +75,11 @@ class PreprocessingPipeline:
         self.stream_timeout = stream_timeout
         self.stats = PipelineStats()
         self.target_image_size = (512, 512)  # Define your target dimensions
+        self.valid_image_paths = []
         # Disable torch.compile for now due to logging issues
 
 
     def _read_caption(self, img_path: Union[str, Path]) -> str:
-        base_name = Path(img_path).stem
         # Construct the path to the corresponding .txt file
         caption_path = Path(img_path).with_suffix('.txt')
         if not caption_path.exists():
