@@ -160,6 +160,8 @@ class PreprocessingPipeline:
             image_paths = [image_paths]
         elif not isinstance(image_paths, (list, tuple)):
             raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
+        buckets = {}
+        
         for path in image_paths:
             if not isinstance(path, (str, Path)):
                 logger.warning(f"Skipping invalid path type: {type(path)}")
