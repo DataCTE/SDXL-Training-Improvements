@@ -165,20 +165,71 @@ class CacheManager:
             'num_allocations': 0,
             'oom_events': 0
         }
+        # Setup directories
         self.text_dir = self.cache_dir / "text"
         self.image_dir = self.cache_dir / "image"
         for directory in [self.text_dir, self.image_dir]:
             directory.mkdir(exist_ok=True)
+            
         self.index_path = self.cache_dir / "cache_index.json"
-        self.cache_index = self._load_cache_index()
+        
+        # Load cache index with retry logic
+        max_retries = 3
+        retry_delay = 1.0  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                self.cache_index = self._load_cache_index()
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Cache index load attempt {attempt + 1} failed: {str(e)}, retrying...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("Failed to load cache index after all retries")
+                    self.cache_index = {"files": {}, "chunks": {}}
+
+        # Verify initialization
+        self.initialized = True
+        logger.info(f"Cache manager initialized on device {self.device}")
 
     def _load_cache_index(self) -> Dict:
-        """Load and validate the cache index, scanning for existing files if needed."""
+        """Load and validate cache index with enhanced error handling."""
         try:
-            index_data = {"files": {}, "chunks": {}}
-            
-            # First pass: Scan and process image files
-            image_files = {p.stem: p for p in self.image_dir.glob("*.pt")}
+            if not self.initialized:
+                logger.warning("Cache manager not fully initialized, creating fresh index")
+                return {"files": {}, "chunks": {}}
+                
+            # Wait for any pending device operations
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                
+            if self.index_path.exists():
+                try:
+                    with open(self.index_path, 'r') as f:
+                        index_data = json.load(f)
+                        
+                    # Validate index structure
+                    if not isinstance(index_data, dict) or "files" not in index_data:
+                        raise ValueError("Invalid cache index structure")
+                        
+                    # Verify file entries
+                    valid_files = {}
+                    for file_path, file_info in index_data.get("files", {}).items():
+                        if self._verify_cache_entry(file_path, file_info):
+                            valid_files[file_path] = file_info
+                            
+                    index_data["files"] = valid_files
+                    
+                    logger.info(f"Loaded cache index with {len(valid_files)} valid entries")
+                    return index_data
+                    
+                except json.JSONDecodeError:
+                    logger.warning("Corrupted cache index file, creating fresh index")
+                    return {"files": {}, "chunks": {}}
+            else:
+                logger.info("No existing cache index, creating fresh one")
+                return {"files": {}, "chunks": {}}
             
             # Try loading existing index
             if self.index_path.exists():
@@ -724,3 +775,36 @@ class CacheManager:
                 'error': str(e),
                 'stats': validation_stats
             })
+    def _verify_cache_entry(self, file_path: str, file_info: Dict) -> bool:
+        """Verify cache entry validity."""
+        try:
+            # Check required fields
+            if not all(k in file_info for k in ["base_name", "timestamp"]):
+                return False
+                
+            # Verify file existence
+            if "latent_path" in file_info:
+                latent_path = Path(file_info["latent_path"])
+                if not latent_path.exists():
+                    return False
+                    
+            if "text_path" in file_info:
+                text_path = Path(file_info["text_path"])
+                if not text_path.exists():
+                    return False
+                    
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Error verifying cache entry {file_path}: {str(e)}")
+            return False
+
+    def sync_device(self):
+        """Ensure all device operations are complete."""
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                if hasattr(self, 'stream') and self.stream is not None:
+                    self.stream.synchronize()
+        except Exception as e:
+            logger.error(f"Device synchronization failed: {str(e)}")
