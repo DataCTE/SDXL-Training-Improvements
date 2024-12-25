@@ -90,6 +90,9 @@ class AspectBucketDataset(Dataset):
             self.enable_memory_tracking = enable_memory_tracking
             self.max_memory_usage = max_memory_usage
             self.captions = captions
+            self.config = config
+            self.image_paths = image_paths
+            self.is_train = is_train
 
             # CUDA optimizations
             if torch.cuda.is_available():
@@ -105,16 +108,8 @@ class AspectBucketDataset(Dataset):
             torch.backends.cudnn.allow_tf32 = True
             torch.backends.cudnn.benchmark = True
 
-        self.config = config
-        self.image_paths = image_paths  # Store image paths first
-        self.latent_preprocessor = (preprocessing_pipeline.latent_preprocessor
-                                    if preprocessing_pipeline else None)
-        self.tag_weighter = tag_weighter or self._create_tag_weighter(config, self.image_paths)
-        self.is_train = is_train
-        self.preprocessing_pipeline = preprocessing_pipeline
-
-        # Setup cache manager if pipeline exists
-        if preprocessing_pipeline and preprocessing_pipeline.latent_preprocessor:
+        # Initialize preprocessing pipeline first if not provided
+        if preprocessing_pipeline is None:
             self.cache_manager = CacheManager(
                 cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
                 num_proc=config.global_config.cache.num_proc,
@@ -124,25 +119,38 @@ class AspectBucketDataset(Dataset):
                 max_memory_usage=max_memory_usage,
                 enable_memory_tracking=enable_memory_tracking
             )
+            self.preprocessing_pipeline = PreprocessingPipeline(
+                config=config,
+                latent_preprocessor=None,  # Will be set by pipeline
+                cache_manager=self.cache_manager,
+                is_train=self.is_train,
+                enable_memory_tracking=enable_memory_tracking
+            )
         else:
-            self.cache_manager = None
+            self.preprocessing_pipeline = preprocessing_pipeline
+            self.cache_manager = preprocessing_pipeline.cache_manager
 
-        # Reinitialize pipeline with local cache manager
-        self.preprocessing_pipeline = PreprocessingPipeline(
-            config=config,
-            latent_preprocessor=self.latent_preprocessor,
-            cache_manager=self.cache_manager,
-            is_train=self.is_train
-        )
+        self.latent_preprocessor = self.preprocessing_pipeline.latent_preprocessor
+        self.tag_weighter = tag_weighter or self._create_tag_weighter(config, self.image_paths)
 
         self._setup_image_config()
+
+        # Get buckets from preprocessing pipeline
+        self.buckets = self.preprocessing_pipeline.get_aspect_buckets(config)
+        
+        # Assign bucket indices using pipeline
+        self.bucket_indices = self.preprocessing_pipeline.assign_aspect_buckets(
+            self.image_paths
+        )
+
+        # Log bucket statistics
+        bucket_info = self.preprocessing_pipeline.get_bucket_info()
+        logger.info(f"Dataset bucket statistics: {bucket_info}")
 
         # Precompute latents if needed
         if self.latent_preprocessor and config.global_config.cache.use_cache:
             self._precompute_latents(image_paths, self.latent_preprocessor, config)
 
-        self.buckets = self._create_buckets()
-        self.bucket_indices = self._assign_buckets()
         self.transforms = self._setup_transforms()
 
     def _create_tag_weighter(self, config: Config, image_paths: List[str]) -> Optional[TagWeighter]:
@@ -214,17 +222,12 @@ class AspectBucketDataset(Dataset):
             raise
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
-        if not self.preprocessing_pipeline:
-            raise ValueError("Preprocessing pipeline not initialized")
+        """Use preprocessing pipeline's bucket creation."""
         return self.preprocessing_pipeline.get_aspect_buckets(self.config)
 
     def _assign_buckets(self) -> List[int]:
-        if not self.preprocessing_pipeline:
-            raise ValueError("Preprocessing pipeline not initialized")
-        return self.preprocessing_pipeline.assign_aspect_buckets(
-            self.image_paths,
-            tolerance=0.1  # Using default tolerance value
-        )
+        """Use preprocessing pipeline's bucket assignment."""
+        return self.preprocessing_pipeline.assign_aspect_buckets(self.image_paths)
 
     def __len__(self) -> int:
         return len(self.image_paths)
