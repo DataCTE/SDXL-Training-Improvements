@@ -139,9 +139,9 @@ class LatentPreprocessor:
                 max_length=self.text_encoder_1.config.max_position_embeddings,
                 truncation=True,
                 return_tensors="pt"
-            )
+            ).input_ids
             # Move input_ids to device before encoding
-            tokens_1 = tokens_1.input_ids.to(self.device)
+            tokens_1 = tokens_1.to(self.device)
             
             text_encoder_1_output, pooled_1 = encode_clip(
                 text_encoder=self.text_encoder_1,
@@ -149,16 +149,16 @@ class LatentPreprocessor:
                 add_pooled_output=True
             )
             
-            # Process with second text encoder using model's tokenizer_2
+            # Process with second text encoder using model's tokenizer_2  
             tokens_2 = self.model.tokenizer_2(
                 prompt_batch,
-                padding="max_length",
+                padding="max_length", 
                 max_length=self.text_encoder_2.config.max_position_embeddings,
                 truncation=True,
                 return_tensors="pt"
-            )
+            ).input_ids
             # Move input_ids to device before encoding
-            tokens_2 = tokens_2.input_ids.to(self.device)
+            tokens_2 = tokens_2.to(self.device)
             
             text_encoder_2_output, pooled_2 = encode_clip(
                 text_encoder=self.text_encoder_2,
@@ -166,11 +166,12 @@ class LatentPreprocessor:
                 add_pooled_output=True
             )
             
+            # Ensure all outputs are on the same device
             result = {
-                "prompt_embeds": text_encoder_1_output,
-                "pooled_prompt_embeds": pooled_1,
-                "prompt_embeds_2": text_encoder_2_output,
-                "pooled_prompt_embeds_2": pooled_2
+                "prompt_embeds": text_encoder_1_output.to(self.device),
+                "pooled_prompt_embeds": pooled_1.to(self.device),
+                "prompt_embeds_2": text_encoder_2_output.to(self.device),
+                "pooled_prompt_embeds_2": pooled_2.to(self.device)
             }
             
             logger.debug("Prompt encoding complete", extra={
