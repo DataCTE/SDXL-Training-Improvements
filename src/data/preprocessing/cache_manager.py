@@ -389,18 +389,43 @@ class CacheManager:
         return list(missing_text), list(missing_latents)
 
     def _save_cache_index(self, index_data: Optional[Dict] = None) -> None:
-        """Save the cache index to disk.
+        """Save the cache index while preserving existing entries.
         
         Args:
-            index_data: Optional index data to save, uses self.cache_index if None
+            index_data: Optional index data to merge with existing index
         """
         try:
-            data = index_data if index_data is not None else self.cache_index
-            with open(self.index_path, 'w') as f:
-                json.dump(data, f, indent=2)  # Pretty print for readability
-            logger.info(f"Cache index saved to {self.index_path} with {len(data.get('files', {}))} entries")
+            # Load existing index first
+            try:
+                with open(self.index_path, 'r') as f:
+                    existing_index = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                existing_index = {"files": {}, "chunks": {}}
+
+            # Merge new data if provided
+            if index_data is not None:
+                # Update files dict while preserving existing entries
+                existing_index["files"].update(index_data.get("files", {}))
+                # Update chunks dict while preserving existing entries 
+                existing_index["chunks"].update(index_data.get("chunks", {}))
+            else:
+                # Use current cache index
+                existing_index["files"].update(self.cache_index.get("files", {}))
+                existing_index["chunks"].update(self.cache_index.get("chunks", {}))
+
+            # Write merged index atomically
+            temp_path = self.index_path.with_suffix('.tmp')
+            with open(temp_path, 'w') as f:
+                json.dump(existing_index, f, indent=2)
+            temp_path.rename(self.index_path)
+
+            logger.info(f"Cache index saved with {len(existing_index['files'])} entries")
+
         except Exception as e:
             logger.error(f"Failed to save cache index: {str(e)}")
+            if 'temp_path' in locals() and temp_path.exists():
+                temp_path.unlink()
+            raise
 
     def save_cache_index(self, index_data: Optional[Dict] = None) -> None:
         """Public method to save cache index.
@@ -426,7 +451,7 @@ class CacheManager:
         file_path: Union[str, Path],
         caption: Optional[str] = None
     ) -> bool:
-        """Save preprocessed data with optimized parallel writes."""
+        """Save preprocessed data with proper index updates."""
         if image_latent is None and text_embeddings is None:
             logger.error(f"Both image_latent and text_embeddings are None for {file_path}")
             return False
@@ -438,17 +463,20 @@ class CacheManager:
             base_name = Path(file_path).stem
             str_path = str(file_path)
             
-            # Prepare metadata once
+            # Load existing file info if present
+            existing_info = self.cache_index["files"].get(str_path, {})
+            
+            # Prepare metadata
             metadata = metadata.copy()
             metadata["timestamp"] = time.time()
             if caption is not None:
                 metadata["caption"] = caption
 
-            # Prepare file info
+            # Prepare updated file info
             file_info = {
                 "base_name": base_name,
                 "timestamp": metadata["timestamp"],
-                **self.cache_index["files"].get(str_path, {})
+                **existing_info  # Preserve existing info
             }
 
             def save_tensor_file(data: Dict, path: Path, key: str) -> Optional[str]:
