@@ -91,8 +91,16 @@ class AspectBucketDataset(Dataset):
             self.max_memory_usage = max_memory_usage
             self.captions = captions
 
-        # CUDA optimizations
-        if torch.cuda.is_available():
+            # CUDA optimizations
+            if torch.cuda.is_available():
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                torch.backends.cudnn.benchmark = True
+        except Exception as e:
+            logger.error(f"Error initializing dataset: {str(e)}")
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Dataset initialization timed out")
+            raise
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
             torch.backends.cudnn.benchmark = True
