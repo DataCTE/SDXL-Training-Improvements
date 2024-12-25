@@ -334,11 +334,15 @@ class CacheManager:
                 }, text_path)
                 file_info["text_path"] = str(text_path)
                 file_info["text_type"] = "text"
+                # Update index with text info
+                self.cache_index["files"][str(file_path)] = file_info
+                self._save_cache_index()
 
-        # Update the cache index
-        self.cache_index["files"][str(file_path)] = file_info
-        self._save_cache_index()
-        return True
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save preprocessed data for {file_path}: {str(e)}")
+            return False
 
 
     def _validate_tensor(self, tensor: torch.Tensor) -> bool:
