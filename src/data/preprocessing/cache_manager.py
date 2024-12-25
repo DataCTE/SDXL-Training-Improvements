@@ -120,16 +120,28 @@ class CacheManager:
         enable_memory_tracking: bool = True,
         stream_buffer_size: int = 1024 * 1024,
         max_chunk_memory: float = 0.2,
-        model_dtypes: Optional[ModelWeightDtypes] = None
+        model_dtypes: Optional[ModelWeightDtypes] = None,
+        device: Optional[torch.device] = None
     ):
+        # Wait for any pending CUDA operations
         if torch.cuda.is_available():
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.set_float32_matmul_precision('medium')
+            torch.cuda.synchronize()
+            
+        # Get or default device
+        self.device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+        
+        # Track initialization state
+        self.initialized = False
+        
+        try:
+            if torch.cuda.is_available():
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                torch.set_float32_matmul_precision('medium')
 
-        self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
         if model_dtypes is None:
             self.model_dtypes = ModelWeightDtypes(
                 train_dtype=DataType.FLOAT_32,
