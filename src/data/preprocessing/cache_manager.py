@@ -132,28 +132,52 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to save cache index: {str(e)}")
 
-    def validate_cache_index(self) -> None:
-        """Validate cache index by ensuring all referenced files exist."""
+    def validate_cache_index(self) -> Tuple[List[str], List[str]]:
+        """Validate cache index by ensuring all referenced files exist.
+        
+        Returns:
+            Tuple containing:
+            - List of paths missing text embeddings
+            - List of paths missing latent files
+        """
         valid_files = {}
+        missing_text = []
+        missing_latents = []
+        
+        # First scan actual files on disk
+        latent_files = {p.stem: p for p in self.image_dir.glob("*.pt")}
+        text_files = {p.stem: p for p in self.text_dir.glob("*.pt")}
+        
+        # Validate each entry in the index
         for file_path, file_info in self.cache_index.get("files", {}).items():
-            latent_path = Path(file_info.get("latent_path", ""))
-            text_path = Path(file_info.get("text_path", ""))
-
-            latent_exists = latent_path.exists()
-            text_exists = text_path.exists()
-
-            if latent_exists and text_exists:
-                valid_files[file_path] = file_info
+            base_name = Path(file_path).stem
+            
+            # Check latent file
+            latent_path = latent_files.get(base_name)
+            if latent_path and latent_path.exists():
+                file_info["latent_path"] = str(latent_path)
             else:
-                if not latent_exists:
-                    logger.warning(f"Missing latent file: {latent_path}")
-                if not text_exists:
-                    logger.warning(f"Missing text embeddings file: {text_path}")
+                missing_latents.append(file_path)
+                logger.warning(f"Missing latent file for: {file_path}")
+                continue
+                
+            # Check text embeddings file  
+            text_path = text_files.get(base_name)
+            if text_path and text_path.exists():
+                file_info["text_path"] = str(text_path)
+            else:
+                missing_text.append(file_path)
+                logger.warning(f"Missing text embeddings file for: {file_path}")
+                
+            # Keep entry if at least latents exist
+            if latent_path:
+                valid_files[file_path] = file_info
 
-        # Update the cache index with only valid files
+        # Update index with validated entries
         self.cache_index["files"] = valid_files
-        # Save the updated cache index to disk
         self._save_cache_index()
+        
+        return missing_text, missing_latents
 
     def _init_memory_tracking(self):
         if not hasattr(self, 'memory_stats'):

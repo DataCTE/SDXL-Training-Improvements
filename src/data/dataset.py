@@ -154,12 +154,33 @@ class AspectBucketDataset(Dataset):
     def _precompute_latents(self, image_paths: List[str], latent_preprocessor: LatentPreprocessor, config: Config) -> None:
         if not self.preprocessing_pipeline:
             raise ValueError("Preprocessing pipeline not initialized")
-        self.preprocessing_pipeline.precompute_latents(
-            image_paths=image_paths,
-            latent_preprocessor=latent_preprocessor,
-            batch_size=config.training.batch_size,
-            proportion_empty_prompts=config.data.proportion_empty_prompts
-        )
+            
+        # First validate cache and get missing items
+        if self.cache_manager:
+            missing_text, missing_latents = self.cache_manager.validate_cache_index()
+            
+            # Combine all paths that need processing
+            to_process = set(missing_text + missing_latents)
+            logger.info(f"Found {len(missing_text)} missing text embeddings and {len(missing_latents)} missing latents")
+            
+            if to_process:
+                logger.info(f"Processing {len(to_process)} items with missing cache data")
+                self.preprocessing_pipeline.precompute_latents(
+                    image_paths=list(to_process),
+                    latent_preprocessor=latent_preprocessor,
+                    batch_size=config.training.batch_size,
+                    proportion_empty_prompts=config.data.proportion_empty_prompts
+                )
+            else:
+                logger.info("No missing cache items found")
+        else:
+            # No cache manager, process everything
+            self.preprocessing_pipeline.precompute_latents(
+                image_paths=image_paths,
+                latent_preprocessor=latent_preprocessor,
+                batch_size=config.training.batch_size,
+                proportion_empty_prompts=config.data.proportion_empty_prompts
+            )
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
         if not self.preprocessing_pipeline:
