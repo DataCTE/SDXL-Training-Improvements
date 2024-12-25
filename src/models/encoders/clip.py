@@ -1,12 +1,13 @@
 """CLIP encoder implementation with extreme speedups."""
 from typing import Dict, List, Optional, Tuple, Union
+import logging
 import torch
 from torch import Tensor
 from transformers import CLIPTextModel, CLIPTokenizer
 from src.core.logging.logging import setup_logging
 
 # Initialize logger with debug disabled by default
-logger = setup_logging(__name__, default_level="INFO")
+logger = setup_logging(__name__, level=logging.INFO)
 
 class CLIPEncoder:
     """Optimized CLIP encoder wrapper with extreme speedup."""
