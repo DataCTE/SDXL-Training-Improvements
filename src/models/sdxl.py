@@ -33,7 +33,7 @@ from src.core.memory.tensor import (
 from src.models.encoders.vae import VAEEncoder
 from src.core.types import DataType, ModelWeightDtypes
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
-from src.models.encoders.clip import encode_clip
+from src.models.encoders.clip import CLIPEncoder
 from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,10 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
         self.model_type = model_type
         self._dtype = DataType.FLOAT_32
+
+        # Optimized encoder wrappers
+        self.clip_encoder_1 = None
+        self.clip_encoder_2 = None
 
     @property
     def dtype(self) -> DataType:
@@ -204,6 +208,21 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 subfolder="scheduler"
             )
 
+            # After loading text encoders and tokenizers, initialize CLIP encoders
+            self.clip_encoder_1 = CLIPEncoder(
+                text_encoder=self.text_encoder_1,
+                tokenizer=self.tokenizer_1,
+                device=self.text_encoder_1.device,
+                dtype=model_dtypes.text_encoder.to_torch_dtype()
+            )
+            
+            self.clip_encoder_2 = CLIPEncoder(
+                text_encoder=self.text_encoder_2,
+                tokenizer=self.tokenizer_2,
+                device=self.text_encoder_2.device,
+                dtype=model_dtypes.text_encoder_2.to_torch_dtype()
+            )
+
             logger.info("Successfully loaded all model components.")
 
         except Exception as e:
@@ -251,7 +270,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
     def text_encoder_to(self, device: torch.device) -> None:
         """
-        Move both text encoders (and any LoRA modules) to the specified device.
+        Move both text encoders and their wrappers to the specified device.
         """
         if device.type == "cuda":
             if not torch.cuda.is_available():
@@ -260,11 +279,19 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             torch.cuda.set_device(device_idx)
 
         with create_stream_context(torch.cuda.current_stream()):
+            # Move base encoders
             for encoder in [self.text_encoder_1, self.text_encoder_2]:
                 if not device_equals(encoder.device, device):
                     tensors_to_device_(encoder.state_dict(), device, non_blocking=True)
                     tensors_record_stream(torch.cuda.current_stream(), encoder.state_dict())
+            
+            # Update CLIP encoder wrappers with new device
+            if self.clip_encoder_1:
+                self.clip_encoder_1.device = device
+            if self.clip_encoder_2:
+                self.clip_encoder_2.device = device
 
+            # Move LoRA if present
             for lora in [self.text_encoder_1_lora, self.text_encoder_2_lora]:
                 if lora is not None:
                     tensors_to_device_(lora.state_dict(), device, non_blocking=True)

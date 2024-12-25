@@ -80,8 +80,7 @@ class AspectBucketDataset(Dataset):
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True,
         enable_memory_tracking: bool = True,
-        max_memory_usage: float = 0.8,
-        timeout: float = 300  # 5 minute timeout
+        max_memory_usage: float = 0.8
     ):
         start_time = time.time()
         try:
@@ -94,39 +93,42 @@ class AspectBucketDataset(Dataset):
             self.image_paths = image_paths
             self.is_train = is_train
 
-            # CUDA optimizations
-            if torch.cuda.is_available():
-                torch.backends.cuda.matmul.allow_tf32 = True
-                torch.backends.cudnn.allow_tf32 = True
-                torch.backends.cudnn.benchmark = True
+            # Initialize preprocessing pipeline first if not provided
+            if preprocessing_pipeline is None:
+                self.cache_manager = CacheManager(
+                    cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
+                    num_proc=config.global_config.cache.num_proc,
+                    chunk_size=config.global_config.cache.chunk_size,
+                    compression=getattr(config.global_config.cache, 'compression', 'zstd'),
+                    verify_hashes=config.global_config.cache.verify_hashes,
+                    max_memory_usage=max_memory_usage,
+                    enable_memory_tracking=enable_memory_tracking
+                )
+                self.preprocessing_pipeline = PreprocessingPipeline(
+                    config=config,
+                    latent_preprocessor=None,  # Will be set by pipeline
+                    cache_manager=self.cache_manager,
+                    is_train=self.is_train,
+                    enable_memory_tracking=enable_memory_tracking
+                )
+            else:
+                self.preprocessing_pipeline = preprocessing_pipeline
+                self.cache_manager = preprocessing_pipeline.cache_manager
+
         except Exception as e:
             logger.error(f"Error initializing dataset: {str(e)}")
-            if time.time() - start_time > timeout:
-                raise TimeoutError("Dataset initialization timed out")
             raise
-          
 
-        # Initialize preprocessing pipeline first if not provided
-        if preprocessing_pipeline is None:
-            self.cache_manager = CacheManager(
-                cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
-                num_proc=config.global_config.cache.num_proc,
-                chunk_size=config.global_config.cache.chunk_size,
-                compression=getattr(config.global_config.cache, 'compression', 'zstd'),
-                verify_hashes=config.global_config.cache.verify_hashes,
-                max_memory_usage=max_memory_usage,
-                enable_memory_tracking=enable_memory_tracking
+        # Precompute latents if needed
+        if config.global_config.cache.use_cache:
+            self.preprocessing_pipeline.precompute_latents(
+                image_paths=image_paths,
+                batch_size=config.training.batch_size,
+                proportion_empty_prompts=config.data.proportion_empty_prompts,
+                process_latents=True,
+                process_text_embeddings=True,
+                separate_passes=True
             )
-            self.preprocessing_pipeline = PreprocessingPipeline(
-                config=config,
-                latent_preprocessor=None,  # Will be set by pipeline
-                cache_manager=self.cache_manager,
-                is_train=self.is_train,
-                enable_memory_tracking=enable_memory_tracking
-            )
-        else:
-            self.preprocessing_pipeline = preprocessing_pipeline
-            self.cache_manager = preprocessing_pipeline.cache_manager
 
         self.latent_preprocessor = self.preprocessing_pipeline.latent_preprocessor
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, self.image_paths)
@@ -136,18 +138,15 @@ class AspectBucketDataset(Dataset):
         # Get buckets from preprocessing pipeline
         self.buckets = self.preprocessing_pipeline.get_aspect_buckets(config)
         
-        # Assign bucket indices using pipeline
+        # Assign bucket indices using pipeline - simplified call
         self.bucket_indices = self.preprocessing_pipeline.assign_aspect_buckets(
-            self.image_paths
+            image_paths=self.image_paths,
+            config=self.config  # Pass config instead of individual parameters
         )
 
         # Log bucket statistics
         bucket_info = self.preprocessing_pipeline.get_bucket_info()
         logger.info(f"Dataset bucket statistics: {bucket_info}")
-
-        # Precompute latents if needed
-        if self.latent_preprocessor and config.global_config.cache.use_cache:
-            self._precompute_latents(image_paths, self.latent_preprocessor, config)
 
         self.transforms = self._setup_transforms()
 
@@ -163,13 +162,23 @@ class AspectBucketDataset(Dataset):
         self.bucket_step = int(self.config.global_config.image.bucket_step)
         self.max_aspect_ratio = float(self.config.global_config.image.max_aspect_ratio)
 
+        # Get buckets from preprocessing pipeline
+        self.buckets = self.preprocessing_pipeline.get_aspect_buckets(self.config)
+        
+        # Assign bucket indices using pipeline - simplified call
+        self.bucket_indices = self.preprocessing_pipeline.assign_aspect_buckets(
+            image_paths=self.image_paths,
+            config=self.config  # Pass config instead of individual parameters
+        )
+
     def _setup_transforms(self) -> transforms.Compose:
         return transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
         ])
 
-    def _precompute_latents(self, image_paths: List[str], latent_preprocessor: LatentPreprocessor, config: Config) -> None:
+    def _precompute_latents(self, image_paths: List[str], config: Config) -> None:
+        """Precompute latents using the preprocessing pipeline."""
         if not self.preprocessing_pipeline:
             raise ValueError("Preprocessing pipeline not initialized")
             
@@ -181,57 +190,16 @@ class AspectBucketDataset(Dataset):
             logger.info(f"Initial CUDA memory: {initial_memory/1024**2:.1f}MB")
         
         try:
-            # First validate cache and get missing items
-            if self.cache_manager:
-                logger.info("Validating cache index...")
-                missing_text, missing_latents = self.cache_manager.validate_cache_index()
-                
-                # Process all text embeddings first, regardless of missing_text list
-                # This ensures we compute text embeddings for all images
-                logger.info(f"Processing text embeddings for {len(image_paths)} images")
-                for path in tqdm(image_paths, desc="Computing text embeddings"):
-                    try:
-                        # Check if text embeddings already exist in cache
-                        cached_data = self.cache_manager.get_cached_item(path)
-                        if cached_data and "text_embeddings" in cached_data:
-                            continue
-                            
-                        caption = self._read_caption(path)
-                        embeddings = self.latent_preprocessor.encode_prompt([caption])
-                        
-                        # Save text embeddings to cache
-                        self.cache_manager.save_preprocessed_data(
-                            image_latent=None,
-                            text_embeddings=embeddings,
-                            metadata={"caption": caption, "timestamp": time.time()},
-                            file_path=path,
-                            caption=caption
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to process text embeddings for {path}: {e}")
-
-                # Then process missing image latents
-                if missing_latents:
-                    logger.info(f"Processing {len(missing_latents)} missing image latents")
-                    self.preprocessing_pipeline.precompute_latents(
-                        image_paths=missing_latents,
-                        batch_size=config.training.batch_size,
-                        proportion_empty_prompts=config.data.proportion_empty_prompts,
-                        process_latents=True,
-                        process_text_embeddings=False  # We've already processed text embeddings
-                    )
+            # Use the pipeline's precompute_latents method
+            self.preprocessing_pipeline.precompute_latents(
+                image_paths=image_paths,
+                batch_size=config.training.batch_size,
+                proportion_empty_prompts=config.data.proportion_empty_prompts,
+                process_latents=True,
+                process_text_embeddings=True,
+                separate_passes=True  # Process text and images separately
+            )
             
-            else:
-                # No cache manager, process everything
-                logger.info("No cache manager available, processing all items")
-                self.preprocessing_pipeline.precompute_latents(
-                    image_paths=image_paths,
-                    batch_size=config.training.batch_size,
-                    proportion_empty_prompts=config.data.proportion_empty_prompts,
-                    process_latents=True,
-                    process_text_embeddings=True
-                )
-                
             # Force CUDA sync
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -251,86 +219,8 @@ class AspectBucketDataset(Dataset):
         """Use preprocessing pipeline's bucket assignment."""
         return self.preprocessing_pipeline.assign_aspect_buckets(self.image_paths)
 
-    def _read_caption(self, img_path: Union[str, Path]) -> str:
-        """Read caption from corresponding text file.
-        
-        Args:
-            img_path: Path to image file
-            
-        Returns:
-            Caption string from text file or empty string if not found
-        """
-        try:
-            # Get caption from provided captions list if possible
-            img_idx = self.image_paths.index(str(img_path))
-            if img_idx >= 0 and img_idx < len(self.captions):
-                return self.captions[img_idx]
-                
-            # Fallback to reading from file
-            caption_path = Path(img_path).with_suffix('.txt')
-            if not caption_path.exists():
-                logger.warning(f"Caption file not found for image {img_path}. Using empty caption.")
-                return ""
-                
-            with open(caption_path, 'r', encoding='utf-8') as f:
-                caption = f.read().strip()
-            return caption
-            
-        except Exception as e:
-            logger.warning(f"Failed to read caption for {img_path}: {e}")
-            return ""
+    
 
-    def __len__(self) -> int:
-        return len(self.image_paths)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        try:
-            image_path = self.image_paths[idx]
-            caption = self.captions[idx]
-            
-            # Remove extra arguments - get_processed_item only takes image_path and caption
-            processed_data = self.preprocessing_pipeline.get_processed_item(
-                image_path=image_path,
-                caption=caption
-            )
-            
-            data_item = {}
-            if "image_latent" in processed_data:
-                latent_tensor = processed_data["image_latent"]
-                data_item["model_input"] = latent_tensor
-            if "text_embeddings" in processed_data:
-                data_item["text_embeddings"] = processed_data["text_embeddings"]
-            else:
-                # Process text embeddings on-the-fly if not cached
-                embeddings = self.latent_preprocessor.encode_prompt([caption])
-                data_item["text_embeddings"] = embeddings
-
-            data_item["text"] = caption
-            data_item["loss_weight"] = self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
-            return data_item
-            
-        except Exception as e:
-            logger.error(f"Error getting item {idx}: {e}")
-            raise
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        try:
-            if self.preprocessing_pipeline:
-                self.preprocessing_pipeline.__exit__(exc_type, exc_val, exc_tb)
-            if torch.cuda.is_available():
-                torch_sync()
-            logger.info(
-                f"Dataset shutdown: processed_images={self.stats.processed_images}, "
-                f"failed_images={self.stats.failed_images}, "
-                f"cache_hits={self.stats.cache_hits}, "
-                f"cache_misses={self.stats.cache_misses}"
-            )
-        except Exception as e:
-            logger.error(f"Error during dataset cleanup: {e}")
-            
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Collate function for batching dataset items.
@@ -373,6 +263,24 @@ class AspectBucketDataset(Dataset):
                 result[key] = [item[key] for item in batch]
                 
         return result
+
+    def __len__(self) -> int:
+        """Return the total number of items in the dataset."""
+        return len(self.image_paths)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Dataset is used only for initialization, not item retrieval."""
+        return self
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        return self
+            
+  
 
 def create_dataset(
     config: Config,

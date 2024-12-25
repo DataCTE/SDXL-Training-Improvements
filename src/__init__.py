@@ -35,7 +35,7 @@ from .models import (
     StableDiffusionXLModelEmbedding,
     LoRAModuleWrapper,
     AdditionalEmbeddingWrapper,
-    encode_clip
+    CLIPEncoder
 )
 
 from .training import (
@@ -90,7 +90,7 @@ __all__: List[str] = [
     "StableDiffusionXLModelEmbedding",
     "LoRAModuleWrapper",
     "AdditionalEmbeddingWrapper",
-    "encode_clip",
+    "CLIPEncoder",
 
     # Training components
     "SDXLTrainer",

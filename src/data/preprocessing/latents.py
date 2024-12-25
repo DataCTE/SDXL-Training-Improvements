@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.core.logging.logging import setup_logging
 from src.models.encoders.vae import VAEEncoder
-from src.models.encoders.clip import encode_clip
+from src.models.encoders.clip import CLIPEncoder
 from src.models import StableDiffusionXLModel
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
@@ -50,9 +50,20 @@ class LatentPreprocessor:
                 dtype=next(sdxl_model.vae.parameters()).dtype
             )
             
-            # Store CLIP text encoders for direct access
-            self.text_encoder_1 = sdxl_model.text_encoder_1
-            self.text_encoder_2 = sdxl_model.text_encoder_2
+            # Initialize CLIP encoders
+            self.clip_encoder_1 = CLIPEncoder(
+                text_encoder=sdxl_model.text_encoder_1,
+                tokenizer=sdxl_model.tokenizer_1,
+                device=self.device,
+                dtype=next(sdxl_model.text_encoder_1.parameters()).dtype
+            )
+            
+            self.clip_encoder_2 = CLIPEncoder(
+                text_encoder=sdxl_model.text_encoder_2,
+                tokenizer=sdxl_model.tokenizer_2,
+                device=self.device,
+                dtype=next(sdxl_model.text_encoder_2.parameters()).dtype
+            )
             
             self.max_retries = max_retries
             self.chunk_size = chunk_size
@@ -118,68 +129,19 @@ class LatentPreprocessor:
             self.use_cache = False
 
     def encode_prompt(self, prompt_batch: List[str]) -> Dict[str, torch.Tensor]:
-        """Encode text prompts using CLIP encoders.
-        
-        Args:
-            prompt_batch: List of text prompts to encode
-            
-        Returns:
-            Dictionary containing text embeddings
-        """
+        """Encode text prompts using both CLIP encoders."""
         try:
-            logger.debug("Starting prompt encoding", extra={
-                'batch_size': len(prompt_batch),
-                'device': str(self.device)
-            })
+            # Get embeddings from both encoders
+            encoder_1_output = self.clip_encoder_1.encode_prompt(prompt_batch)
+            encoder_2_output = self.clip_encoder_2.encode_prompt(prompt_batch)
             
-            # Process with first text encoder using model's tokenizer_1
-            tokens_1 = self.model.tokenizer_1(
-                prompt_batch,
-                padding="max_length",
-                max_length=self.text_encoder_1.config.max_position_embeddings,
-                truncation=True,
-                return_tensors="pt"
-            ).input_ids.to(self.device)  # Move tokens to device immediately
-            
-            text_encoder_1_output, pooled_1 = encode_clip(
-                text_encoder=self.text_encoder_1,
-                tokens=tokens_1,  # Already on correct device
-                add_pooled_output=True
-            )
-            
-            # Process with second text encoder using model's tokenizer_2  
-            tokens_2 = self.model.tokenizer_2(
-                prompt_batch,
-                padding="max_length", 
-                max_length=self.text_encoder_2.config.max_position_embeddings,
-                truncation=True,
-                return_tensors="pt"
-            ).input_ids.to(self.device)  # Move tokens to device immediately
-            
-            text_encoder_2_output, pooled_2 = encode_clip(
-                text_encoder=self.text_encoder_2,
-                tokens=tokens_2,  # Already on correct device
-                add_pooled_output=True
-            )
-            
-            # Ensure all outputs are on the same device
-            result = {
-                "prompt_embeds": text_encoder_1_output,  # Already on device
-                "pooled_prompt_embeds": pooled_1,  # Already on device
-                "prompt_embeds_2": text_encoder_2_output,  # Already on device
-                "pooled_prompt_embeds_2": pooled_2  # Already on device
+            # Combine results
+            return {
+                "prompt_embeds": encoder_1_output["text_embeds"],
+                "pooled_prompt_embeds": encoder_1_output["pooled_embeds"],
+                "prompt_embeds_2": encoder_2_output["text_embeds"],
+                "pooled_prompt_embeds_2": encoder_2_output["pooled_embeds"]
             }
-            
-            logger.debug("Prompt encoding complete", extra={
-                'output_shapes': {
-                    'prompt_embeds': tuple(text_encoder_1_output.shape),
-                    'pooled_embeds': tuple(pooled_1.shape),
-                    'prompt_embeds_2': tuple(text_encoder_2_output.shape),
-                    'pooled_embeds_2': tuple(pooled_2.shape)
-                }
-            })
-            
-            return result
             
         except Exception as e:
             logger.error("Failed to encode prompts", extra={

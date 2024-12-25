@@ -1,7 +1,7 @@
 from .base import BaseModel, BaseModelEmbedding, ModelType
 from .sdxl import StableDiffusionXLModel, StableDiffusionXLModelEmbedding
 from .adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
-from .encoders.clip import encode_clip
+from .encoders.clip import CLIPEncoder
 
 __all__ = [
     "BaseModel",
@@ -11,5 +11,5 @@ __all__ = [
     "StableDiffusionXLModelEmbedding",
     "LoRAModuleWrapper",
     "AdditionalEmbeddingWrapper",
-    "encode_clip"
+    "CLIPEncoder"
 ]

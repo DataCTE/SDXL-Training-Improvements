@@ -402,6 +402,21 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to save cache index: {str(e)}")
 
+    def save_cache_index(self, index_data: Optional[Dict] = None) -> None:
+        """Public method to save cache index.
+        
+        Args:
+            index_data: Optional dictionary containing cache index data
+        """
+        self._save_cache_index(index_data)
+        
+    def load_cache_index(self) -> Dict:
+        """Public method to load cache index.
+        
+        Returns:
+            Dictionary containing cache index data
+        """
+        return self._load_cache_index()
 
     def save_preprocessed_data(
         self,
