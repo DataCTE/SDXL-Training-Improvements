@@ -139,7 +139,9 @@ class LatentPreprocessor:
                 max_length=self.text_encoder_1.config.max_position_embeddings,
                 truncation=True,
                 return_tensors="pt"
-            ).input_ids.to(self.device)
+            )
+            # Move input_ids to device before encoding
+            tokens_1 = tokens_1.input_ids.to(self.device)
             
             text_encoder_1_output, pooled_1 = encode_clip(
                 text_encoder=self.text_encoder_1,
@@ -154,7 +156,9 @@ class LatentPreprocessor:
                 max_length=self.text_encoder_2.config.max_position_embeddings,
                 truncation=True,
                 return_tensors="pt"
-            ).input_ids.to(self.device)
+            )
+            # Move input_ids to device before encoding
+            tokens_2 = tokens_2.input_ids.to(self.device)
             
             text_encoder_2_output, pooled_2 = encode_clip(
                 text_encoder=self.text_encoder_2,
