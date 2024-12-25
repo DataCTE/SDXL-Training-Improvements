@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import yaml
 from src.core.logging.logging import setup_logging
 
-logger = setup_logging(__name__)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TransformsConfig:

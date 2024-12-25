@@ -1,7 +1,7 @@
 """Tag weighting system for SDXL training."""
 import json
 from collections import defaultdict
-from src.core.logging.logging import setup_logging
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
@@ -11,7 +11,7 @@ import torch
 if TYPE_CHECKING:
     from src.data.config import Config
 
-logger = setup_logging(__name__, level="INFO")
+logger = logging.getLogger(__name__)
 
 class TagWeighter:
     def __init__(

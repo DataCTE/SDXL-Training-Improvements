@@ -25,7 +25,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
-from src.core.logging.logging import setup_logging
+import logging
 from src.core.memory.tensor import (
     create_stream_context,
     tensors_record_stream,
@@ -42,7 +42,7 @@ from src.data.preprocessing import (
     CacheManager, PreprocessingPipeline
 )
 
-logger = setup_logging(__name__)
+logger = logging.getLogger(__name__)
 
 class DatasetError(Exception):
     def __init__(self, message: str, context: dict = None):
