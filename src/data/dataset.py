@@ -251,6 +251,35 @@ class AspectBucketDataset(Dataset):
         """Use preprocessing pipeline's bucket assignment."""
         return self.preprocessing_pipeline.assign_aspect_buckets(self.image_paths)
 
+    def _read_caption(self, img_path: Union[str, Path]) -> str:
+        """Read caption from corresponding text file.
+        
+        Args:
+            img_path: Path to image file
+            
+        Returns:
+            Caption string from text file or empty string if not found
+        """
+        try:
+            # Get caption from provided captions list if possible
+            img_idx = self.image_paths.index(str(img_path))
+            if img_idx >= 0 and img_idx < len(self.captions):
+                return self.captions[img_idx]
+                
+            # Fallback to reading from file
+            caption_path = Path(img_path).with_suffix('.txt')
+            if not caption_path.exists():
+                logger.warning(f"Caption file not found for image {img_path}. Using empty caption.")
+                return ""
+                
+            with open(caption_path, 'r', encoding='utf-8') as f:
+                caption = f.read().strip()
+            return caption
+            
+        except Exception as e:
+            logger.warning(f"Failed to read caption for {img_path}: {e}")
+            return ""
+
     def __len__(self) -> int:
         return len(self.image_paths)
 
