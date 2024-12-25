@@ -132,8 +132,8 @@ class LatentPreprocessor:
                 'device': str(self.device)
             })
             
-            # Process with first text encoder
-            tokens_1 = self.text_encoder_1.tokenizer(
+            # Process with first text encoder using model's tokenizer_1
+            tokens_1 = self.model.tokenizer_1(
                 prompt_batch,
                 padding="max_length",
                 max_length=self.text_encoder_1.config.max_position_embeddings,
@@ -147,8 +147,8 @@ class LatentPreprocessor:
                 add_pooled_output=True
             )
             
-            # Process with second text encoder
-            tokens_2 = self.text_encoder_2.tokenizer(
+            # Process with second text encoder using model's tokenizer_2
+            tokens_2 = self.model.tokenizer_2(
                 prompt_batch,
                 padding="max_length",
                 max_length=self.text_encoder_2.config.max_position_embeddings,
