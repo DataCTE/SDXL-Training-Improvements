@@ -45,17 +45,18 @@ class VAEEncoder:
                 
             # Move to device and cast to correct dtype
             pixel_values = pixel_values.to(device=self.device, dtype=self.dtype)
-        
-        with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
-            latents = self.vae.encode(pixel_values).latent_dist
-            latents = latents.sample() * self.vae.config.scaling_factor
-            logger.debug("VAE encoding complete", extra={
-                'output_shape': tuple(latents.shape),
-                'output_dtype': str(latents.dtype),
-                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-            })
             
-            return {"latent_dist": latents}
+            # Use context managers inside try block
+            with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
+                latents = self.vae.encode(pixel_values).latent_dist
+                latents = latents.sample() * self.vae.config.scaling_factor
+                logger.debug("VAE encoding complete", extra={
+                    'output_shape': tuple(latents.shape),
+                    'output_dtype': str(latents.dtype),
+                    'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                })
+                
+                return {"latent_dist": latents}
                 
         except Exception as e:
             logger.error("VAE encoding failed", extra={
