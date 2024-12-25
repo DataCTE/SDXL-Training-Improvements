@@ -56,6 +56,12 @@ class PreprocessingPipeline:
         enable_memory_tracking=True,
         stream_timeout=10.0
     ):
+        # Add performance tracking
+        self.performance_stats = {
+            'operation_times': {},
+            'memory_usage': {},
+            'errors': []
+        }
         self.logger = logger  # Use the module-level logger
         self.action_history = {}
         # Basic initialization
@@ -466,3 +472,38 @@ class PreprocessingPipeline:
         except Exception as e:
             logger.error(f"Failed to encode prompt: {e}")
             raise
+    @contextmanager
+    def track_memory_usage(self, operation: str):
+        """Context manager for tracking memory usage during operations."""
+        try:
+            start_time = time.time()
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+                start_memory = torch.cuda.memory_allocated()
+            
+            yield
+            
+        finally:
+            duration = time.time() - start_time
+            memory_stats = {}
+            
+            if torch.cuda.is_available():
+                end_memory = torch.cuda.memory_allocated()
+                peak_memory = torch.cuda.max_memory_allocated()
+                memory_stats.update({
+                    'start_memory': start_memory,
+                    'end_memory': end_memory,
+                    'peak_memory': peak_memory,
+                    'memory_change': end_memory - start_memory
+                })
+                
+            self._log_action(operation, {
+                'duration': duration,
+                'memory_stats': memory_stats
+            })
+
+    def _log_action(self, operation: str, stats: Dict[str, Any]):
+        """Log operation statistics."""
+        if operation not in self.performance_stats['operation_times']:
+            self.performance_stats['operation_times'][operation] = []
+        self.performance_stats['operation_times'][operation].append(stats)

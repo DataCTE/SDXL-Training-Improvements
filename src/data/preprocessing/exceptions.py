@@ -1,22 +1,41 @@
 """Custom exceptions for preprocessing pipeline with detailed error context."""
 from typing import Optional, Any, Dict
+from src.core.logging.logging import setup_logging
+
+logger = setup_logging(__name__)
 
 class PreprocessingError(Exception):
-    """Base exception for preprocessing errors with context tracking."""
+    """Base exception for preprocessing errors with enhanced context tracking."""
     
     def __init__(self, message: str, *, context: Optional[Dict[str, Any]] = None):
         """Initialize with message and optional context dictionary."""
         super().__init__(message)
         self.context = context or {}
         self.message = message
+        # Log error with context
+        logger.error(self.format_error())
+        
+    def format_error(self) -> str:
+        """Format error message with detailed context."""
+        base_msg = self.message
+        if self.context:
+            context_str = "\nContext:\n" + "\n".join(
+                f"  {k}: {v}" for k, v in self.context.items()
+            )
+            return f"{base_msg}{context_str}"
+        return base_msg
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert error to dictionary for logging."""
+        return {
+            'error_type': self.__class__.__name__,
+            'message': self.message,
+            'context': self.context
+        }
 
     def __str__(self) -> str:
         """Format error message with context if available."""
-        base_msg = self.message
-        if self.context:
-            context_str = "\nContext:\n" + "\n".join(f"  {k}: {v}" for k, v in self.context.items())
-            return f"{base_msg}{context_str}"
-        return base_msg
+        return self.format_error()
 
 class DataLoadError(PreprocessingError):
     """Raised when data loading fails.

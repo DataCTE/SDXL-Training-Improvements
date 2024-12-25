@@ -220,6 +220,19 @@ class PreprocessingConfig:
     dali_output_dtype: str = "float32"
     enable_async_loading: bool = True
 
+@dataclass 
+class LoggingConfig:
+    """Logging configuration settings."""
+    log_dir: str = "logs"
+    level: str = "INFO"
+    filename: Optional[str] = "training.log"
+    capture_warnings: bool = True
+    console_output: bool = True
+    file_output: bool = True
+    log_cuda_memory: bool = True
+    log_system_memory: bool = True
+    performance_logging: bool = True
+
 @dataclass
 class Config:
     """Complete training configuration."""
@@ -230,6 +243,7 @@ class Config:
     tag_weighting: TagWeightingConfig = field(default_factory=TagWeightingConfig)
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     transforms: TransformsConfig = field(default_factory=TransformsConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
     def __iter__(self):
         """Make Config iterable to access its sections."""
@@ -252,6 +266,9 @@ class Config:
         cache_dir = convert_windows_path(self.global_config.cache.cache_dir, make_absolute=True)
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Validate logging config
+        self.validate_logging_config()
 
         # Validate image sizes
         try:
@@ -324,3 +341,25 @@ class Config:
                 f"Failed to parse config from YAML ({path}): {str(e)}", exc_info=True
             )
             raise
+    def validate_logging_config(self):
+        """Validate logging configuration settings."""
+        try:
+            # Validate log directory
+            log_dir = Path(self.logging.log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Validate log level
+            valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+            if self.logging.level.upper() not in valid_levels:
+                raise ValueError(f"Invalid log level: {self.logging.level}")
+                
+            # Setup logging based on config
+            setup_logging(
+                log_dir=str(log_dir),
+                level=getattr(logging, self.logging.level.upper()),
+                filename=self.logging.filename,
+                capture_warnings=self.logging.capture_warnings
+            )
+            
+        except Exception as e:
+            raise ValueError(f"Invalid logging configuration: {str(e)}")

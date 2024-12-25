@@ -595,3 +595,63 @@ class CacheManager:
                 current_chunk[key] = value
         if current_chunk:
             yield current_chunk
+    def validate_cache_integrity(self) -> Dict[str, Any]:
+        """Perform comprehensive cache validation with detailed reporting."""
+        validation_stats = {
+            'total_entries': 0,
+            'valid_entries': 0,
+            'corrupted_files': 0,
+            'missing_files': 0,
+            'invalid_metadata': 0,
+            'errors': []
+        }
+        
+        try:
+            for file_path, file_info in self.cache_index.get("files", {}).items():
+                validation_stats['total_entries'] += 1
+                
+                try:
+                    # Validate latent file
+                    if "latent_path" in file_info:
+                        latent_path = Path(file_info["latent_path"])
+                        if not latent_path.exists():
+                            validation_stats['missing_files'] += 1
+                            continue
+                            
+                        # Quick validation of tensor file
+                        try:
+                            data = torch.load(latent_path, map_location='cpu')
+                            if not isinstance(data, dict) or "latent" not in data:
+                                validation_stats['corrupted_files'] += 1
+                                continue
+                        except Exception as e:
+                            validation_stats['corrupted_files'] += 1
+                            validation_stats['errors'].append({
+                                'file': str(latent_path),
+                                'error': str(e)
+                            })
+                            continue
+                            
+                    # Validate metadata
+                    if "metadata" not in data:
+                        validation_stats['invalid_metadata'] += 1
+                        continue
+                        
+                    validation_stats['valid_entries'] += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error validating {file_path}: {str(e)}")
+                    validation_stats['errors'].append({
+                        'file': file_path,
+                        'error': str(e)
+                    })
+                    
+            logger.info(f"Cache validation complete: {validation_stats}")
+            return validation_stats
+            
+        except Exception as e:
+            logger.error(f"Cache validation failed: {str(e)}")
+            raise PreprocessingError("Cache validation failed", context={
+                'error': str(e),
+                'stats': validation_stats
+            })
