@@ -240,13 +240,42 @@ class CacheManager:
         )
 
     def has_cached_item(self, file_path: Union[str, Path]) -> bool:
-        try:
-            str_path = str(file_path)
-            return str_path in self.cache_index["files"]
-        except Exception as e:
-            logger.error(f"Error checking cache status: {str(e)}")
-            return False
+        str_path = str(file_path)
+        file_info = self.cache_index["files"].get(str_path)
+        if not file_info:
+            return None
 
+        result = {}
+        metadata = {}
+
+        # Load latent data
+        if "latent_path" in file_info:
+            latent_path = Path(file_info["latent_path"])
+            if latent_path.exists():
+                latent_data = torch.load(latent_path, map_location='cpu')
+                result["latent"] = latent_data["latent"]
+                metadata.update(latent_data["metadata"])
+            else:
+                logger.warning(f"Latent file {latent_path} does not exist.")
+                return None
+
+        # Load text embeddings
+        if "text_path" in file_info:
+            text_path = Path(file_info["text_path"])
+            if text_path.exists():
+                text_data = torch.load(text_path, map_location='cpu')
+                result["text_embeddings"] = text_data["embeddings"]
+                metadata.update(text_data["metadata"])
+            else:
+                logger.warning(f"Text embeddings file {text_path} does not exist.")
+                return None
+
+        if not result:
+            return None
+
+        result["metadata"] = metadata
+        return result
+    
     def get_cached_item(
         self,
         file_path: Union[str, Path],
