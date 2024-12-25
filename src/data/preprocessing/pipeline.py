@@ -121,14 +121,13 @@ class PreprocessingPipeline:
         self.bucket_indices = []  # Will be populated when processing images
 
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        """
-        Generate aspect buckets based on the image configurations.
-
+        """Get list of supported bucket dimensions from config.
+        
         Args:
-            config: Configuration object containing image settings.
-
+            config: Configuration object containing image settings
+            
         Returns:
-            List of tuples representing the bucket dimensions (height, width).
+            List of (height, width) tuples for each bucket
         """
         return config.global_config.image.supported_dims
 
@@ -202,11 +201,11 @@ class PreprocessingPipeline:
             'bucket_dimensions': self.buckets,
             'bucket_counts': {},
             'aspect_ratios': {},
-            'total_images': len(self.bucket_indices) if self.bucket_indices else 0
+            'total_images': len(self.bucket_indices) if hasattr(self, 'bucket_indices') else 0
         }
         
         # Calculate statistics if we have bucket assignments
-        if self.bucket_indices:
+        if hasattr(self, 'bucket_indices') and self.bucket_indices:
             for idx in self.bucket_indices:
                 bucket_stats['bucket_counts'][idx] = bucket_stats['bucket_counts'].get(idx, 0) + 1
                 h, w = self.buckets[idx]
