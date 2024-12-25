@@ -1,18 +1,24 @@
-import logging
-from pathlib import Path 
-from typing import Dict, List, Optional, Tuple, Union
-from src.data.utils.paths import convert_windows_path
+"""High-level latent preprocessing with optimized orchestration."""
+from typing import Dict, List, Optional, Union
 import torch
+from pathlib import Path
+
+from src.core.logging.logging import setup_logging
+from src.models.encoders.vae import VAEEncoder
+from src.models.encoders.clip import encode_clip
 from src.models import StableDiffusionXLModel
 from src.data.config import Config
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.types import DataType, ModelWeightDtypes
+from src.data.utils.paths import convert_windows_path
 
-
-logger = logging.getLogger(__name__)
+# Initialize logger with core logging system
+logger = setup_logging(__name__)
 
 
 class LatentPreprocessor:
+    """High-level orchestrator for latent preprocessing using optimized encoders."""
+    
     def __init__(
         self,
         config: Config,
@@ -22,37 +28,58 @@ class LatentPreprocessor:
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
     ):
-        # Enable inference optimizations
-        if torch.cuda.is_available():
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.set_float32_matmul_precision('high')  # Use high precision for inference
+        """Initialize preprocessor with model and encoders.
+        
+        Args:
+            config: Configuration object
+            sdxl_model: SDXL model instance
+            device: Target device
+            max_retries: Maximum retry attempts
+            chunk_size: Processing chunk size
+            max_memory_usage: Maximum memory usage fraction
+        """
+        try:
+            self.config = config
+            self.model = sdxl_model
+            self.device = torch.device(device) if isinstance(device, str) else device
             
-            # Set memory format for faster inference
-            torch.backends.cuda.preferred_linalg_library('cusolver')
+            # Initialize VAE encoder
+            self.vae_encoder = VAEEncoder(
+                vae=sdxl_model.vae,
+                device=self.device,
+                dtype=next(sdxl_model.vae.parameters()).dtype
+            )
             
-        self.config = config
-        self.model = sdxl_model
-        self.device = torch.device(device) if isinstance(device, str) else device
-        
-        # Put model in eval mode for inference
-        self.model.eval()
-        self.model.to(self.device)
-        
-        # Cache text encoder parameters for faster inference
-        with torch.inference_mode():
-            for module in self.model.modules():
-                if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-                    # Only apply channels_last to 4D tensors (conv layers)
-                    if module.weight.dim() == 4:
-                        weight_tensor = module.weight.data.to(memory_format=torch.channels_last)
-                        module.weight = torch.nn.Parameter(weight_tensor)
-        
-        self.max_retries = max_retries
-        self.chunk_size = chunk_size
-        self.max_memory_usage = max_memory_usage
-        self._setup_cache(config)
+            # Store CLIP text encoders for direct access
+            self.text_encoder_1 = sdxl_model.text_encoder_1
+            self.text_encoder_2 = sdxl_model.text_encoder_2
+            
+            self.max_retries = max_retries
+            self.chunk_size = chunk_size
+            self.max_memory_usage = max_memory_usage
+            
+            # Setup cache if enabled
+            self._setup_cache(config)
+            
+            logger.info("Latent preprocessor initialized", extra={
+                'device': str(self.device),
+                'model_type': type(self.model).__name__,
+                'config': {
+                    'dtype': config.model.dtype,
+                    'cache_enabled': config.global_config.cache.use_cache,
+                    'max_retries': max_retries,
+                    'chunk_size': chunk_size
+                }
+            })
+            
+        except Exception as e:
+            logger.error("Failed to initialize latent preprocessor", extra={
+                'error_type': type(e).__name__,
+                'error': str(e),
+                'device': str(device),
+                'stack_trace': True
+            })
+            raise
 
     def _setup_cache(self, config: Config) -> None:
         self.use_cache = config.global_config.cache.use_cache
@@ -91,7 +118,7 @@ class LatentPreprocessor:
             self.use_cache = False
 
     def encode_prompt(self, prompt_batch: List[str]) -> Dict[str, torch.Tensor]:
-        """Encode text prompts into embeddings with optimized inference mode.
+        """Encode text prompts using CLIP encoders.
         
         Args:
             prompt_batch: List of text prompts to encode
@@ -100,50 +127,54 @@ class LatentPreprocessor:
             Dictionary containing text embeddings
         """
         try:
-            # Ensure model is on correct device
-            if not self.model.device == self.device:
-                self.model.to(self.device)
-                
-            # Create CUDA stream for async processing if available
-            stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            logger.debug("Starting prompt encoding", extra={
+                'batch_size': len(prompt_batch),
+                'device': str(self.device)
+            })
             
-            # Use inference_mode for maximum speed
-            with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
-                if stream:
-                    with torch.cuda.stream(stream):
-                        txt_out, pooled_out = self.model.encode_text(
-                            train_device=self.device,
-                            batch_size=len(prompt_batch),
-                            text=prompt_batch,
-                            text_encoder_1_layer_skip=0,
-                            text_encoder_2_layer_skip=0
-                        )
-                        # Ensure computation is complete
-                        stream.synchronize()
-                else:
-                    txt_out, pooled_out = self.model.encode_text(
-                        train_device=self.device,
-                        batch_size=len(prompt_batch),
-                        text=prompt_batch,
-                        text_encoder_1_layer_skip=0,
-                        text_encoder_2_layer_skip=0
-                    )
-
-            # Ensure tensors are on correct device and contiguous for speed
-            txt_out = txt_out.to(self.device, non_blocking=True).contiguous()
-            pooled_out = pooled_out.to(self.device, non_blocking=True).contiguous()
+            # Process with first text encoder
+            text_encoder_1_output, pooled_1 = encode_clip(
+                text_encoder=self.text_encoder_1,
+                tokens=self.model.tokenize_1(prompt_batch),
+                add_pooled_output=True
+            )
             
-            return {
-                "prompt_embeds": txt_out,
-                "pooled_prompt_embeds": pooled_out
+            # Process with second text encoder
+            text_encoder_2_output, pooled_2 = encode_clip(
+                text_encoder=self.text_encoder_2,
+                tokens=self.model.tokenize_2(prompt_batch),
+                add_pooled_output=True
+            )
+            
+            result = {
+                "prompt_embeds": text_encoder_1_output,
+                "pooled_prompt_embeds": pooled_1,
+                "prompt_embeds_2": text_encoder_2_output,
+                "pooled_prompt_embeds_2": pooled_2
             }
             
+            logger.debug("Prompt encoding complete", extra={
+                'output_shapes': {
+                    'prompt_embeds': tuple(text_encoder_1_output.shape),
+                    'pooled_embeds': tuple(pooled_1.shape),
+                    'prompt_embeds_2': tuple(text_encoder_2_output.shape),
+                    'pooled_embeds_2': tuple(pooled_2.shape)
+                }
+            })
+            
+            return result
+            
         except Exception as e:
-            logger.error(f"Failed to encode prompts: {str(e)}")
-            raise RuntimeError(f"Text encoding failed: {str(e)}")
+            logger.error("Failed to encode prompts", extra={
+                'error_type': type(e).__name__,
+                'error': str(e),
+                'batch_size': len(prompt_batch),
+                'stack_trace': True
+            })
+            raise
 
     def encode_images(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Encode images to latents with optimized inference.
+        """Encode images using VAE encoder.
         
         Args:
             pixel_values: Image tensor of shape (B, C, H, W)
@@ -152,49 +183,25 @@ class LatentPreprocessor:
             Dictionary containing encoded latents
         """
         try:
-            # Create CUDA stream for async processing if available
-            stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            logger.debug("Starting image encoding", extra={
+                'input_shape': tuple(pixel_values.shape),
+                'device': str(self.device)
+            })
             
-            # Use inference mode with mixed precision
-            with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
-                if stream:
-                    with torch.cuda.stream(stream):
-                        # Ensure input is on correct device and dtype
-                        vae_dtype = next(self.model.vae.parameters()).dtype
-                        pixel_values = pixel_values.to(
-                            device=self.device,
-                            dtype=vae_dtype,
-                            memory_format=torch.channels_last,
-                            non_blocking=True
-                        )
-                        
-                        # Encode with VAE
-                        latents = self.model.vae.encode(pixel_values).latents
-                        latents = latents * self.model.vae.config.scaling_factor
-                        
-                        # Ensure computation is complete
-                        stream.synchronize()
-                        
-                        # Record stream for tensor memory management
-                        if hasattr(latents, 'record_stream'):
-                            latents.record_stream(stream)
-                else:
-                    # Non-stream processing path
-                    vae_dtype = next(self.model.vae.parameters()).dtype
-                    pixel_values = pixel_values.to(
-                        device=self.device,
-                        dtype=vae_dtype,
-                        memory_format=torch.channels_last,
-                        non_blocking=True
-                    )
-                    latents = self.model.vae.encode(pixel_values).latents
-                    latents = latents * self.model.vae.config.scaling_factor
-                
-                # Ensure output is contiguous and properly formatted
-                latents = latents.contiguous()
-                
-                return {"image_latent": latents}
-                
+            # Use VAE encoder implementation
+            result = self.vae_encoder.encode(pixel_values)
+            
+            logger.debug("Image encoding complete", extra={
+                'output_shape': tuple(result["latent_dist"].shape)
+            })
+            
+            return {"image_latent": result["latent_dist"]}
+            
         except Exception as e:
-            logger.error(f"Failed to encode images: {str(e)}")
-            raise RuntimeError(f"Image encoding failed: {str(e)}")
+            logger.error("Failed to encode images", extra={
+                'error_type': type(e).__name__,
+                'error': str(e),
+                'input_shape': tuple(pixel_values.shape) if isinstance(pixel_values, torch.Tensor) else None,
+                'stack_trace': True
+            })
+            raise
