@@ -285,20 +285,36 @@ class AspectBucketDataset(Dataset):
                 
             self.stats.cache_hits += 1
             
-            # Ensure latent data is properly formatted
-            latent = cached_data.get("latent")
+            # Handle different latent data formats
+            latent = None
+            if "latent_dist" in cached_data:
+                latent = cached_data["latent_dist"]
+            elif "latent" in cached_data:
+                # Convert to expected format if needed
+                latent = {
+                    "sample": cached_data["latent"],
+                    "mean": cached_data["latent"],
+                    "std": torch.ones_like(cached_data["latent"])
+                }
+            
             if latent is None:
-                raise ValueError(f"No latent data found in cache for {image_path}")
+                raise ValueError(f"No valid latent data found in cache for {image_path}")
+            
+            # Get metadata for size information
+            metadata = cached_data.get("metadata", {})
+            original_size = metadata.get("original_size", (1024, 1024))
+            crop_top_left = metadata.get("crop_top_left", (0, 0))
+            target_size = metadata.get("target_size", (1024, 1024))
             
             # Create result with required fields
             result = {
-                "model_input": latent,
+                "latent_dist": latent,  # Use latent_dist instead of model_input
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
-                "original_sizes": [(1024, 1024)],
-                "crop_top_lefts": [(0, 0)],
-                "target_sizes": [(1024, 1024)]
+                "original_sizes": [original_size],
+                "crop_top_lefts": [crop_top_left],
+                "target_sizes": [target_size]
             }
             
             # Add text embeddings if available
