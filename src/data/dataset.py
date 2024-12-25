@@ -288,10 +288,13 @@ class AspectBucketDataset(Dataset):
                 if cached_data:
                     self.stats.cache_hits += 1
                     result = {
-                        "model_input": cached_data["latent"],
+                        "model_input": cached_data["latent"],  # Ensure this is the actual latent tensor
                         "text": caption,
                         "bucket_idx": bucket_idx,
-                        "image_path": image_path
+                        "image_path": image_path,
+                        "original_sizes": [(1024, 1024)],  # Add required metadata
+                        "crop_top_lefts": [(0, 0)],
+                        "target_sizes": [(1024, 1024)]
                     }
                     
                     # Add text embeddings if available in cache
