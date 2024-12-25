@@ -186,18 +186,36 @@ class AspectBucketDataset(Dataset):
                 logger.info("Validating cache index...")
                 missing_text, missing_latents = self.cache_manager.validate_cache_index()
                 
-                # Combine all paths that need processing
-                to_process = set(missing_text + missing_latents)
-                logger.info(f"Found {len(missing_text)} missing text embeddings and {len(missing_latents)} missing latents")
-                
-                if to_process:
-                    logger.info(f"Processing {len(to_process)} items with missing cache data")
+                # Process missing text embeddings first
+                if missing_text:
+                    logger.info(f"Processing {len(missing_text)} missing text embeddings")
+                    for path in tqdm(missing_text, desc="Computing text embeddings"):
+                        try:
+                            caption = self._read_caption(path)
+                            embeddings = self.latent_preprocessor.encode_prompt([caption])
+                            # Save text embeddings to cache
+                            self.cache_manager.save_preprocessed_data(
+                                latent_data=None,
+                                text_embeddings=embeddings,
+                                metadata={"caption": caption, "timestamp": time.time()},
+                                file_path=path,
+                                caption=caption
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to process text embeddings for {path}: {e}")
+
+                # Then process missing latents
+                if missing_latents:
+                    logger.info(f"Processing {len(missing_latents)} missing latents")
                     self.preprocessing_pipeline.precompute_latents(
-                        image_paths=list(to_process),
+                        image_paths=missing_latents,
                         batch_size=config.training.batch_size,
-                        proportion_empty_prompts=config.data.proportion_empty_prompts
+                        proportion_empty_prompts=config.data.proportion_empty_prompts,
+                        process_latents=True,
+                        process_text_embeddings=True  # Ensure text embeddings are processed
                     )
-                else:
+                
+                if not missing_text and not missing_latents:
                     logger.info("No missing cache items found")
             else:
                 # No cache manager, process everything
@@ -205,7 +223,9 @@ class AspectBucketDataset(Dataset):
                 self.preprocessing_pipeline.precompute_latents(
                     image_paths=image_paths,
                     batch_size=config.training.batch_size,
-                    proportion_empty_prompts=config.data.proportion_empty_prompts
+                    proportion_empty_prompts=config.data.proportion_empty_prompts,
+                    process_latents=True,
+                    process_text_embeddings=True  # Ensure text embeddings are processed
                 )
                 
             # Force CUDA sync

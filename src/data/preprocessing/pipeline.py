@@ -490,11 +490,17 @@ class PreprocessingPipeline:
                 continue
 
             # Verify cached files exist
-            latent_path = Path(file_info.get("latent_path", ""))
-            text_path = Path(file_info.get("text_path", ""))
-            
-            if not latent_path.exists() or not text_path.exists():
-                to_process.append(path)
+            if process_latents:
+                latent_path = Path(file_info.get("latent_path", ""))
+                if not latent_path.exists():
+                    to_process.append(path)
+                    continue
+                    
+            if process_text_embeddings:
+                text_path = Path(file_info.get("text_path", ""))
+                if not text_path.exists():
+                    to_process.append(path)
+                    continue
 
         if not to_process:
             logger.info("All items already cached")
@@ -529,6 +535,7 @@ class PreprocessingPipeline:
                             caption = self._read_caption(img_path)
                             embeddings = self.latent_preprocessor.encode_prompt([caption])
                             text_embeddings = embeddings
+                            metadata["caption"] = caption
 
                         # Save to cache
                         if latent_data or text_embeddings:
@@ -536,7 +543,8 @@ class PreprocessingPipeline:
                                 latent_data=latent_data,
                                 text_embeddings=text_embeddings,
                                 metadata=metadata,
-                                file_path=img_path
+                                file_path=img_path,
+                                caption=caption if process_text_embeddings else None
                             )
                             self.stats.successful += 1
                     except Exception as e:
