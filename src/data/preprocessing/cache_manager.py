@@ -16,7 +16,9 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
 from src.data.preprocessing.exceptions import PreprocessingError
+from src.core.logging.logging import setup_logging
 
+logger = setup_logging(__name__)
 
 from tqdm.auto import tqdm
 from contextlib import nullcontext
