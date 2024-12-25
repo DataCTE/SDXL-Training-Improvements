@@ -285,15 +285,25 @@ class AspectBucketDataset(Dataset):
                 
             self.stats.cache_hits += 1
             
-            # Handle latent data
+            # Debug logging
+            logger.debug(f"Cached data keys: {cached_data.keys()}")
+            
+            # Handle latent data with explicit type checking
+            latent_tensor = None
             if "latent" in cached_data:
                 latent_tensor = cached_data["latent"]
-                # Create latent distribution with proper tensor handling
+                if not isinstance(latent_tensor, torch.Tensor):
+                    raise TypeError(f"Expected latent to be tensor, got {type(latent_tensor)}")
+                    
+                logger.debug(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
+                
+                # Create latent distribution with explicit tensor creation
                 latent_dist = {
                     "sample": latent_tensor,
-                    "mean": latent_tensor,
-                    # Create ones_like using the tensor, not the dict
-                    "std": torch.ones_like(latent_tensor)
+                    "mean": latent_tensor.clone(),  # Use clone to ensure independent tensor
+                    "std": torch.ones(latent_tensor.shape, 
+                                    dtype=latent_tensor.dtype,
+                                    device=latent_tensor.device)
                 }
             else:
                 raise ValueError(f"No latent data found in cache for {image_path}")
@@ -307,7 +317,7 @@ class AspectBucketDataset(Dataset):
             # Create result with required fields
             result = {
                 "latent_dist": latent_dist,
-                "model_input": latent_tensor,  # Also provide direct tensor access
+                "model_input": latent_tensor,
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
@@ -332,6 +342,12 @@ class AspectBucketDataset(Dataset):
 
         except Exception as e:
             logger.error(f"Error getting dataset item {idx}: {str(e)}")
+            # Add more context to the error
+            logger.error(f"Image path: {image_path}")
+            if 'cached_data' in locals():
+                logger.error(f"Cached data keys: {cached_data.keys()}")
+            if 'latent_tensor' in locals() and latent_tensor is not None:
+                logger.error(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
             raise
 
     def __enter__(self):
