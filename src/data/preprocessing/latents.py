@@ -139,13 +139,11 @@ class LatentPreprocessor:
                 max_length=self.text_encoder_1.config.max_position_embeddings,
                 truncation=True,
                 return_tensors="pt"
-            ).input_ids
-            # Move input_ids to device before encoding
-            tokens_1 = tokens_1.to(self.device)
+            ).input_ids.to(self.device)  # Move tokens to device immediately
             
             text_encoder_1_output, pooled_1 = encode_clip(
                 text_encoder=self.text_encoder_1,
-                tokens=tokens_1,
+                tokens=tokens_1,  # Already on correct device
                 add_pooled_output=True
             )
             
@@ -156,22 +154,20 @@ class LatentPreprocessor:
                 max_length=self.text_encoder_2.config.max_position_embeddings,
                 truncation=True,
                 return_tensors="pt"
-            ).input_ids
-            # Move input_ids to device before encoding
-            tokens_2 = tokens_2.to(self.device)
+            ).input_ids.to(self.device)  # Move tokens to device immediately
             
             text_encoder_2_output, pooled_2 = encode_clip(
                 text_encoder=self.text_encoder_2,
-                tokens=tokens_2,
+                tokens=tokens_2,  # Already on correct device
                 add_pooled_output=True
             )
             
             # Ensure all outputs are on the same device
             result = {
-                "prompt_embeds": text_encoder_1_output.to(self.device),
-                "pooled_prompt_embeds": pooled_1.to(self.device),
-                "prompt_embeds_2": text_encoder_2_output.to(self.device),
-                "pooled_prompt_embeds_2": pooled_2.to(self.device)
+                "prompt_embeds": text_encoder_1_output,  # Already on device
+                "pooled_prompt_embeds": pooled_1,  # Already on device
+                "prompt_embeds_2": text_encoder_2_output,  # Already on device
+                "pooled_prompt_embeds_2": pooled_2  # Already on device
             }
             
             logger.debug("Prompt encoding complete", extra={
