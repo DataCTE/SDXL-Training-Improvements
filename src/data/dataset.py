@@ -104,9 +104,7 @@ class AspectBucketDataset(Dataset):
             if time.time() - start_time > timeout:
                 raise TimeoutError("Dataset initialization timed out")
             raise
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.backends.cudnn.benchmark = True
+          
 
         # Initialize preprocessing pipeline first if not provided
         if preprocessing_pipeline is None:
