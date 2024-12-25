@@ -186,37 +186,41 @@ class AspectBucketDataset(Dataset):
                 logger.info("Validating cache index...")
                 missing_text, missing_latents = self.cache_manager.validate_cache_index()
                 
-                # Process missing text embeddings first
-                if missing_text:
-                    logger.info(f"Processing {len(missing_text)} missing text embeddings")
-                    for path in tqdm(missing_text, desc="Computing text embeddings"):
-                        try:
-                            caption = self._read_caption(path)
-                            embeddings = self.latent_preprocessor.encode_prompt([caption])
-                            # Save text embeddings to cache
-                            self.cache_manager.save_preprocessed_data(
-                                latent_data=None,
-                                text_embeddings=embeddings,
-                                metadata={"caption": caption, "timestamp": time.time()},
-                                file_path=path,
-                                caption=caption
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to process text embeddings for {path}: {e}")
+                # Process all text embeddings first, regardless of missing_text list
+                # This ensures we compute text embeddings for all images
+                logger.info(f"Processing text embeddings for {len(image_paths)} images")
+                for path in tqdm(image_paths, desc="Computing text embeddings"):
+                    try:
+                        # Check if text embeddings already exist in cache
+                        cached_data = self.cache_manager.get_cached_item(path)
+                        if cached_data and "text_embeddings" in cached_data:
+                            continue
+                            
+                        caption = self._read_caption(path)
+                        embeddings = self.latent_preprocessor.encode_prompt([caption])
+                        
+                        # Save text embeddings to cache
+                        self.cache_manager.save_preprocessed_data(
+                            image_latent=None,
+                            text_embeddings=embeddings,
+                            metadata={"caption": caption, "timestamp": time.time()},
+                            file_path=path,
+                            caption=caption
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to process text embeddings for {path}: {e}")
 
-                # Then process missing latents
+                # Then process missing image latents
                 if missing_latents:
-                    logger.info(f"Processing {len(missing_latents)} missing latents")
+                    logger.info(f"Processing {len(missing_latents)} missing image latents")
                     self.preprocessing_pipeline.precompute_latents(
                         image_paths=missing_latents,
                         batch_size=config.training.batch_size,
                         proportion_empty_prompts=config.data.proportion_empty_prompts,
                         process_latents=True,
-                        process_text_embeddings=True  # Ensure text embeddings are processed
+                        process_text_embeddings=False  # We've already processed text embeddings
                     )
-                
-                if not missing_text and not missing_latents:
-                    logger.info("No missing cache items found")
+            
             else:
                 # No cache manager, process everything
                 logger.info("No cache manager available, processing all items")
@@ -225,7 +229,7 @@ class AspectBucketDataset(Dataset):
                     batch_size=config.training.batch_size,
                     proportion_empty_prompts=config.data.proportion_empty_prompts,
                     process_latents=True,
-                    process_text_embeddings=True  # Ensure text embeddings are processed
+                    process_text_embeddings=True
                 )
                 
             # Force CUDA sync
