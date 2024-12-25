@@ -119,7 +119,7 @@ class CacheManager:
             index_data = {"files": {}, "chunks": {}}
             
             # First pass: Scan and process image files
-            image_files = {p.stem.replace("__image", ""): p for p in self.image_dir.glob("*.pt")}
+            image_files = {p.stem: p for p in self.image_dir.glob("*.pt")}
             
             # Try loading existing index
             if self.index_path.exists():
@@ -158,7 +158,7 @@ class CacheManager:
                     valid_files[str(image_path)] = file_info
             
             # Second pass: Process text files
-            text_files = {p.stem.replace("__text", ""): p for p in self.text_dir.glob("*.pt")}
+            text_files = {p.stem: p for p in self.text_dir.glob("*.pt")}
             
             # Update existing entries with text information
             for file_path, file_info in valid_files.items():
@@ -171,11 +171,11 @@ class CacheManager:
             # Add any files found on disk but not in index
             for base_name, latent_path in image_files.items():
                 matching_entries = [p for p, info in valid_files.items() 
-                                 if Path(info.get("latent_path", "")).stem.replace("__image", "") == base_name]
+                                 if Path(info.get("latent_path", "")).stem == base_name]
                 if not matching_entries:
                     text_path = text_files.get(base_name)
                     # Reconstruct original path from base name
-                    original_path = str(latent_path).replace("__image.pt", ".jpg")  # Assume .jpg as default
+                    original_path = str(latent_path).replace(".pt", ".jpg")  # Assume .jpg as default
                     file_info = {
                         "base_name": base_name,
                         "latent_path": str(latent_path),
@@ -319,7 +319,7 @@ class CacheManager:
         try:
             # First handle image data if present
             if latent_data is not None:
-                latent_path = self.image_dir / f"{base_name}__image.pt"
+                latent_path = self.image_dir / f"{base_name}.pt"
                 torch.save({
                     "latent": latent_data,
                     "metadata": metadata
@@ -332,7 +332,7 @@ class CacheManager:
 
             # Then handle text data if present
             if text_embeddings is not None:
-                text_path = self.text_dir / f"{base_name}__text.pt"
+                text_path = self.text_dir / f"{base_name}.pt"
                 torch.save({
                     "embeddings": text_embeddings,
                     "metadata": metadata
