@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 from PIL import Image
 from dataclasses import dataclass
 from pathlib import Path
+from tqdm.auto import tqdm
 from src.data.utils.paths import convert_windows_path, is_windows_path
 from contextlib import nullcontext
 from src.data.preprocessing.cache_manager import CacheManager

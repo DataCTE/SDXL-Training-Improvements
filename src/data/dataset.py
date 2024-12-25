@@ -86,7 +86,7 @@ class AspectBucketDataset(Dataset):
         start_time = time.time()
         try:
             super().__init__()
-        self.stats = DatasetStats()
+            self.stats = DatasetStats()
         self.enable_memory_tracking = enable_memory_tracking
         self.max_memory_usage = max_memory_usage
         self.captions = captions
