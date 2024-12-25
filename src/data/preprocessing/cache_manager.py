@@ -663,6 +663,7 @@ class CacheManager:
                 current_chunk[key] = value
         if current_chunk:
             yield current_chunk
+    
     def validate_cache_integrity(self) -> Dict[str, Any]:
         """Perform comprehensive cache validation with detailed reporting."""
         validation_stats = {
