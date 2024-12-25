@@ -144,16 +144,16 @@ class CacheManager:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             
             if model_dtypes is None:
-            self.model_dtypes = ModelWeightDtypes(
-                train_dtype=DataType.FLOAT_32,
-                fallback_train_dtype=DataType.FLOAT_32,
-                unet=DataType.FLOAT_32,
-                prior=DataType.FLOAT_32,
-                text_encoder=DataType.FLOAT_32,
-                text_encoder_2=DataType.FLOAT_32,
-                vae=DataType.FLOAT_32,
-                effnet_encoder=DataType.FLOAT_32,
-                decoder=DataType.FLOAT_32,
+                self.model_dtypes = ModelWeightDtypes(
+                    train_dtype=DataType.FLOAT_32,
+                    fallback_train_dtype=DataType.FLOAT_32,
+                    unet=DataType.FLOAT_32,
+                    prior=DataType.FLOAT_32,
+                    text_encoder=DataType.FLOAT_32,
+                    text_encoder_2=DataType.FLOAT_32,
+                    vae=DataType.FLOAT_32,
+                    effnet_encoder=DataType.FLOAT_32,
+                    decoder=DataType.FLOAT_32,
                 decoder_text_encoder=DataType.FLOAT_32,
                 decoder_vqgan=DataType.FLOAT_32,
                 lora=DataType.FLOAT_32,
