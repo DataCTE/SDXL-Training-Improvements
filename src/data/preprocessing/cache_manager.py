@@ -1,7 +1,6 @@
 """High-performance cache management with extreme speedups."""
 import multiprocessing as mp
 import logging
-import multiprocessing as mp
 import traceback
 import time
 import hashlib
@@ -18,6 +17,7 @@ from PIL import Image
 from src.data.preprocessing.exceptions import PreprocessingError
 from src.core.logging.logging import setup_logging
 
+# Initialize logger with core logging system
 logger = setup_logging(__name__)
 
 from tqdm.auto import tqdm
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CacheStats:
+    """Enhanced cache statistics with detailed tracking."""
     total_items: int = 0
     processed_items: int = 0
     failed_items: int = 0
@@ -56,6 +57,58 @@ class CacheStats:
 class CacheManager:
     """Manages high-throughput caching with extreme memory and speed optimizations."""
     
+    def _log_action(self, operation: str, context: Dict[str, Any] = None):
+        """Log operation with detailed context using core logging."""
+        timestamp = time.time()
+        
+        # Track memory if available
+        memory_info = {}
+        if torch.cuda.is_available():
+            memory_info.update({
+                'cuda_memory_allocated': torch.cuda.memory_allocated(),
+                'cuda_memory_reserved': torch.cuda.memory_reserved(),
+                'cuda_max_memory': torch.cuda.max_memory_allocated()
+            })
+        
+        # Add operation to history
+        action_id = f"{operation}_{timestamp}"
+        self.action_history[action_id] = {
+            'operation': operation,
+            'timestamp': timestamp,
+            'memory': memory_info,
+            'context': context or {}
+        }
+        
+        # Log with enhanced context
+        self.logger.debug(f"Cache operation: {operation}", extra={
+            'operation': operation,
+            'memory_stats': memory_info,
+            'context': context
+        })
+
+    def _handle_error(self, operation: str, error: Exception, context: Dict[str, Any] = None):
+        """Handle errors with detailed logging."""
+        error_context = {
+            'operation': operation,
+            'error_type': type(error).__name__,
+            'error_message': str(error),
+            'stack_trace': traceback.format_exc()
+        }
+        if context:
+            error_context.update(context)
+            
+        self.logger.error(f"Cache operation failed: {operation}", extra=error_context)
+        
+        # Track error in history
+        self._log_action(f"error_{operation}", error_context)
+        
+        # Update relevant stats
+        self.stats.failed_items += 1
+        if isinstance(error, torch.cuda.OutOfMemoryError):
+            self.stats.gpu_oom_events += 1
+        elif isinstance(error, IOError):
+            self.stats.io_errors += 1
+
     def __init__(
         self,
         cache_dir: Union[str, Path],
@@ -104,6 +157,8 @@ class CacheManager:
         self.stream_buffer_size = stream_buffer_size
         self.max_chunk_memory = max_chunk_memory
         self.stats = CacheStats()
+        self.action_history = {}
+        self.logger = logger
         self.memory_stats = {
             'peak_allocated': 0,
             'total_allocated': 0,
@@ -415,6 +470,10 @@ class CacheManager:
         device: Optional[torch.device] = None
     ) -> Optional[Dict[str, torch.Tensor]]:
         try:
+            self._log_action("get_cached_item_start", {
+                'file_path': str(file_path),
+                'target_device': str(device) if device else 'cpu'
+            })
             if self.enable_memory_tracking:
                 self._track_memory("cache_fetch_start")
             file_info = self.cache_index["files"].get(str(file_path))
@@ -468,9 +527,16 @@ class CacheManager:
                     return None
 
             if not result:
+                self._log_action("get_cached_item_miss", {
+                    'file_path': str(file_path)
+                })
                 self.stats.cache_misses += 1
                 return None
 
+            self._log_action("get_cached_item_hit", {
+                'file_path': str(file_path),
+                'components': list(result.keys())
+            })
             self.stats.cache_hits += 1
             result["metadata"] = metadata
             return result
