@@ -132,6 +132,130 @@ class PreprocessingPipeline:
         """
         return config.global_config.image.supported_dims
 
+    def get_bucket_info(self) -> Dict[str, Any]:
+        """Get information about current bucket configuration.
+        
+        Returns:
+            Dictionary containing bucket statistics and configuration
+        """
+        bucket_stats = {
+            'total_buckets': len(self.buckets),
+            'bucket_dimensions': self.buckets,
+            'bucket_counts': {},
+            'aspect_ratios': {},
+            'total_images': len(self.bucket_indices) if self.bucket_indices else 0
+        }
+        
+        # Calculate statistics if we have bucket assignments
+        if self.bucket_indices:
+            for idx in self.bucket_indices:
+                bucket_stats['bucket_counts'][idx] = bucket_stats['bucket_counts'].get(idx, 0) + 1
+                h, w = self.buckets[idx]
+                bucket_stats['aspect_ratios'][idx] = w / h
+                
+        return bucket_stats
+
+    def validate_image_size(
+        self,
+        size: Tuple[int, int],
+        min_size: Optional[Tuple[int, int]] = None,
+        max_size: Optional[Tuple[int, int]] = None
+    ) -> bool:
+        """Validate image dimensions against configuration.
+        
+        Args:
+            size: Tuple of (height, width)
+            min_size: Optional minimum dimensions
+            max_size: Optional maximum dimensions
+            
+        Returns:
+            bool indicating if size is valid
+        """
+        min_size = min_size or self.config.global_config.image.min_size
+        max_size = max_size or self.config.global_config.image.max_size
+        
+        h, w = size
+        min_h, min_w = min_size
+        max_h, max_w = max_size
+        
+        # Check absolute dimensions
+        if h < min_h or w < min_w:
+            return False
+        if h > max_h or w > max_w:
+            return False
+            
+        # Check aspect ratio
+        aspect = w / h
+        if aspect < 1/self.config.global_config.image.max_aspect_ratio:
+            return False
+        if aspect > self.config.global_config.image.max_aspect_ratio:
+            return False
+            
+        return True
+
+    def get_optimal_bucket_size(
+        self,
+        original_size: Tuple[int, int],
+        target_bucket_idx: Optional[int] = None
+    ) -> Tuple[int, int]:
+        """Get optimal bucket dimensions for an image.
+        
+        Args:
+            original_size: Original image dimensions (height, width)
+            target_bucket_idx: Optional specific bucket index to use
+            
+        Returns:
+            Tuple of target dimensions (height, width)
+        """
+        if target_bucket_idx is not None and target_bucket_idx < len(self.buckets):
+            return self.buckets[target_bucket_idx]
+            
+        # Find best matching bucket
+        orig_h, orig_w = original_size
+        orig_aspect = orig_w / orig_h
+        
+        best_bucket = None
+        min_diff = float('inf')
+        
+        for bucket in self.buckets:
+            bucket_h, bucket_w = bucket
+            bucket_aspect = bucket_w / bucket_h
+            
+            # Calculate difference score based on aspect ratio and area
+            aspect_diff = abs(bucket_aspect - orig_aspect)
+            area_diff = abs(bucket_h * bucket_w - orig_h * orig_w)
+            
+            # Weighted score (can be tuned)
+            diff_score = aspect_diff * 2.0 + area_diff / (1536 * 1536)
+            
+            if diff_score < min_diff:
+                min_diff = diff_score
+                best_bucket = bucket
+                
+        return best_bucket or self.buckets[0]
+
+    def resize_to_bucket(
+        self,
+        img: Image.Image,
+        bucket_idx: Optional[int] = None
+    ) -> Tuple[Image.Image, int]:
+        """Resize image to fit target bucket dimensions.
+        
+        Args:
+            img: PIL Image to resize
+            bucket_idx: Optional specific bucket index to use
+            
+        Returns:
+            Tuple of (resized image, used bucket index)
+        """
+        if bucket_idx is None:
+            bucket_idx = self._assign_single_bucket(img, self.buckets, self.config.global_config.image.max_aspect_ratio)
+            
+        target_size = self.buckets[bucket_idx]
+        resized_img = img.resize(target_size, Image.LANCZOS)
+        
+        return resized_img, bucket_idx
+
 
     def _read_caption(self, img_path: Union[str, Path]) -> str:
         # Construct the path to the corresponding .txt file
@@ -470,23 +594,23 @@ class PreprocessingPipeline:
                 tensor = tensor.to(dtype=vae_dtype)
                 return self.latent_preprocessor.encode_images(tensor)
 
-            # Get bucket dimensions for this image
-            bucket_idx = self._assign_single_bucket(img_path, self.buckets, self.config.global_config.image.max_aspect_ratio)
-            target_size = self.buckets[bucket_idx]
-
             img = Image.open(img_path).convert('RGB')
-            # Use bucket dimensions instead of hardcoded size
-            img = img.resize(target_size, Image.LANCZOS)
-            tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+            
+            # Use centralized functions
+            if not self.validate_image_size(img.size):
+                raise ValueError(f"Invalid image size: {img.size}")
+                
+            resized_img, bucket_idx = self.resize_to_bucket(img)
+            
+            tensor = torch.from_numpy(np.array(resized_img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
             
-            # Process on GPU with proper stream management
             latent_output = self._process_on_gpu(gpu_process, tensor)
             
             metadata = {
                 "original_size": img.size,
-                "bucket_size": target_size,  # Add bucket size to metadata
-                "bucket_index": bucket_idx,  # Add bucket index to metadata
+                "bucket_size": self.buckets[bucket_idx],
+                "bucket_index": bucket_idx,
                 "path": str(img_path),
                 "timestamp": time.time(),
                 "device_id": self.device_id if torch.cuda.is_available() else None
