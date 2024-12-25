@@ -251,28 +251,45 @@ class PreprocessingPipeline:
             return False
             
         return True
-
-    def resize_to_bucket(
-        self,
-        img: Image.Image,
-        bucket_idx: Optional[int] = None
-    ) -> Tuple[Image.Image, int]:
-        """Resize image to fit target bucket dimensions.
+    
+    def assign_aspect_buckets(self, image_paths: Union[str, Path, Config], tolerance: float = 0.1) -> List[int]:
+        """Assign images to aspect ratio buckets.
         
         Args:
-            img: PIL Image to resize
-            bucket_idx: Optional specific bucket index to use
+            image_paths: List of paths to images
+            tolerance: Tolerance for aspect ratio differences (default: 0.1)
             
         Returns:
-            Tuple of (resized image, used bucket index)
+            List of bucket indices for each image
         """
-        if bucket_idx is None:
-            bucket_idx, _ = self._assign_single_bucket(img)
-            
-        target_h, target_w = self.buckets[bucket_idx]
-        resized_img = img.resize((target_w, target_h), Image.LANCZOS)
+        buckets = {}
+        bucket_indices = []
         
-        return resized_img, bucket_idx
+        for path in image_paths:
+            try:
+                path_str = str(convert_windows_path(path) if is_windows_path(path) else path)
+                if not Path(path_str).exists():
+                    logger.warning(f"Image path does not exist: {path_str}")
+                    bucket_indices.append(0)  # Default to first bucket
+                    continue
+                    
+                with Image.open(path_str) as img:
+                    w, h = img.size
+                    aspect = w / h
+                    # Round aspect ratio to nearest tolerance interval
+                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
+                    if bucket_key not in buckets:
+                        buckets[bucket_key] = len(buckets)
+                    bucket_indices.append(buckets[bucket_key])
+                    
+            except Exception as e:
+                logger.warning(f"Failed to process {path} for bucketing: {e}")
+                bucket_indices.append(0)  # Default to first bucket
+                continue
+                
+        return bucket_indices
+        
+
 
     def resize_to_bucket(
         self,
@@ -296,31 +313,6 @@ class PreprocessingPipeline:
         
         return resized_img, bucket_idx
 
-    def assign_aspect_buckets(
-        self,
-        image_paths: List[Union[str, Path]],
-        tolerance: float = 0.1
-    ) -> List[int]:
-        """Assign multiple images to aspect ratio buckets.
-        
-        Args:
-            image_paths: List of image paths
-            tolerance: Tolerance for aspect ratio differences
-            
-        Returns:
-            List of bucket indices for each image
-        """
-        bucket_indices = []
-        
-        for path in image_paths:
-            try:
-                bucket_idx, _ = self._assign_single_bucket(path)
-                bucket_indices.append(bucket_idx)
-            except Exception as e:
-                logger.warning(f"Failed to assign bucket for {path}: {e}")
-                bucket_indices.append(0)  # Default to first bucket
-                
-        return bucket_indices
 
     def generate_missing_captions_from_cache(self):
         """Generate missing caption files from cache index."""
@@ -416,43 +408,7 @@ class PreprocessingPipeline:
             logger.error(f"Error processing item {image_path}: {e}")
             raise
 
-    def assign_aspect_buckets(self, image_paths: Union[str, Path, Config], tolerance: float = 0.1) -> List[int]:
-        """Assign images to aspect ratio buckets.
-        
-        Args:
-            image_paths: List of paths to images
-            tolerance: Tolerance for aspect ratio differences (default: 0.1)
-            
-        Returns:
-            List of bucket indices for each image
-        """
-        buckets = {}
-        bucket_indices = []
-        
-        for path in image_paths:
-            try:
-                path_str = str(convert_windows_path(path) if is_windows_path(path) else path)
-                if not Path(path_str).exists():
-                    logger.warning(f"Image path does not exist: {path_str}")
-                    bucket_indices.append(0)  # Default to first bucket
-                    continue
-                    
-                with Image.open(path_str) as img:
-                    w, h = img.size
-                    aspect = w / h
-                    # Round aspect ratio to nearest tolerance interval
-                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
-                    if bucket_key not in buckets:
-                        buckets[bucket_key] = len(buckets)
-                    bucket_indices.append(buckets[bucket_key])
-                    
-            except Exception as e:
-                logger.warning(f"Failed to process {path} for bucketing: {e}")
-                bucket_indices.append(0)  # Default to first bucket
-                continue
-                
-        return bucket_indices
-        
+
     def get_valid_image_paths(self) -> List[str]:
         """Return list of valid image paths found during bucketing."""
         if not hasattr(self, 'valid_image_paths'):
