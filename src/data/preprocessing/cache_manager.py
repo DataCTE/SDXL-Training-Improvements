@@ -231,34 +231,6 @@ class CacheManager:
             except Exception as e:
                 logger.error(f"Memory tracking error in {context}: {str(e)}")
 
-    def _assign_single_bucket(
-        self,
-        img_path: str,
-        buckets: List[Tuple[int, int]],
-        max_aspect_ratio: float
-    ) -> int:
-        try:
-            # Support more image formats
-            img = Image.open(img_path).convert('RGB')  # Convert to RGB to ensure compatibility
-            w, h = img.size
-            aspect_ratio = w / h
-            img_area = w * h
-            min_diff = float('inf')
-            best_idx = 0
-            for idx, (bucket_h, bucket_w) in enumerate(buckets):
-                bucket_ratio = bucket_w / bucket_h
-                if bucket_ratio > max_aspect_ratio:
-                    continue
-                ratio_diff = abs(aspect_ratio - bucket_ratio)
-                area_diff = abs(img_area - (bucket_w * bucket_h))
-                total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
-                if total_diff < min_diff:
-                    min_diff = total_diff
-                    best_idx = idx
-            return best_idx
-        except Exception as e:
-            logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
-            return 0
 
     def _load_cache_index(self) -> Dict:
         """Load and validate cache index with optimized performance."""

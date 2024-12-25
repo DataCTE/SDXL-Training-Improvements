@@ -132,6 +132,64 @@ class PreprocessingPipeline:
         """
         return config.global_config.image.supported_dims
 
+    def _assign_single_bucket(
+        self,
+        img_path: Union[str, Path, Image.Image],
+        buckets: List[Tuple[int, int]],
+        max_aspect_ratio: float
+    ) -> int:
+        """Assign a single image to the optimal bucket based on aspect ratio and size.
+        
+        Args:
+            img_path: Path to image or PIL Image object
+            buckets: List of available bucket dimensions (height, width)
+            max_aspect_ratio: Maximum allowed aspect ratio
+            
+        Returns:
+            Index of the assigned bucket
+            
+        Raises:
+            ValueError: If image cannot be opened or processed
+        """
+        try:
+            # Handle both PIL Image and path inputs
+            if isinstance(img_path, Image.Image):
+                img = img_path
+            else:
+                img = Image.open(img_path).convert('RGB')
+                
+            w, h = img.size
+            aspect_ratio = w / h
+            img_area = w * h
+            
+            min_diff = float('inf')
+            best_idx = 0
+            
+            for idx, (bucket_h, bucket_w) in enumerate(buckets):
+                bucket_ratio = bucket_w / bucket_h
+                
+                # Skip buckets exceeding max aspect ratio
+                if bucket_ratio > max_aspect_ratio:
+                    continue
+                    
+                # Calculate weighted difference score
+                ratio_diff = abs(aspect_ratio - bucket_ratio)
+                area_diff = abs(img_area - (bucket_w * bucket_h))
+                
+                # Combined score favoring aspect ratio match
+                total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
+                
+                if total_diff < min_diff:
+                    min_diff = total_diff
+                    best_idx = idx
+                    
+            return best_idx
+            
+        except Exception as e:
+            logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
+            # Return default bucket index (0) on error
+            return 0
+
     def get_bucket_info(self) -> Dict[str, Any]:
         """Get information about current bucket configuration.
         
