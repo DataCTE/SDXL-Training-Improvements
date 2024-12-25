@@ -1,6 +1,7 @@
 """High-performance preprocessing pipeline with extreme speedups."""
 import time
 import torch
+import logging
 from src.core.logging.logging import setup_logging
 
 logger = setup_logging(__name__, level=logging.INFO)
@@ -26,7 +27,7 @@ class ProcessingError(Exception):
     pass
 
 
-logger = logging.getLogger(__name__)
+# Use the logger already initialized above
 
 @dataclass
 class PipelineStats:
@@ -55,7 +56,7 @@ class PreprocessingPipeline:
         enable_memory_tracking=True,
         stream_timeout=10.0
     ):
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger  # Use the module-level logger
         self.action_history = {}
         # Basic initialization
         if torch.cuda.is_available():
