@@ -68,6 +68,8 @@ class DDPMTrainer(TrainingMethod):
             latents = batch["model_input"]
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+            
+            # Get noise and timesteps
             noise = torch.randn(
                 latents.shape,
                 device=latents.device,
@@ -80,14 +82,20 @@ class DDPMTrainer(TrainingMethod):
                 (latents.shape[0],),
                 device=latents.device
             )
+            
+            # Add noise to latents
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+            
+            # Get time embeddings
             add_time_ids = get_add_time_ids(
                 batch["original_sizes"],
-                batch["crop_top_lefts"],
+                batch["crop_top_lefts"], 
                 batch["target_sizes"],
                 dtype=prompt_embeds.dtype,
                 device=latents.device
             )
+
+            # Get model prediction
             noise_pred = self.unet(
                 noisy_latents,
                 timesteps,
@@ -97,6 +105,8 @@ class DDPMTrainer(TrainingMethod):
                     "time_ids": add_time_ids
                 }
             ).sample
+
+            # Compute loss
             if self.config.training.prediction_type == "epsilon":
                 target = noise
             elif self.config.training.prediction_type == "v_prediction":
@@ -108,8 +118,10 @@ class DDPMTrainer(TrainingMethod):
             if "loss_weights" in batch:
                 loss = loss * batch["loss_weights"]
             loss = loss.mean()
+            
             torch_sync()
             return {"loss": loss}
+            
         except Exception as e:
             logger.error(f"Error computing DDPM loss: {str(e)}", exc_info=True)
             torch_sync()

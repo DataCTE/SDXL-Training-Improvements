@@ -236,17 +236,34 @@ class SDXLTrainer:
     def _prepare_micro_batches(self, batch: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:
         if self.gradient_accumulation_steps == 1:
             return [batch]
+            
         micro_batches = []
         batch_size = batch["model_input"].shape[0]
         micro_batch_size = batch_size // self.gradient_accumulation_steps
+        
+        tensor_keys = [
+            "model_input", 
+            "prompt_embeds",
+            "pooled_prompt_embeds",
+            "prompt_embeds_2",
+            "pooled_prompt_embeds_2"
+        ]
+        
         for i in range(self.gradient_accumulation_steps):
             start_idx = i * micro_batch_size
             end_idx = start_idx + micro_batch_size
-            micro_batch = {
-                k: v[start_idx:end_idx] if torch.is_tensor(v) else v
-                for k, v in batch.items()
-            }
+            
+            micro_batch = {}
+            for k, v in batch.items():
+                if k in tensor_keys:
+                    micro_batch[k] = v[start_idx:end_idx]
+                elif isinstance(v, list):
+                    micro_batch[k] = v[start_idx:end_idx]
+                else:
+                    micro_batch[k] = v
+                    
             micro_batches.append(micro_batch)
+            
         return micro_batches
 
     def _setup_memory_management(self, batch_size: Optional[int] = None, micro_batch_size: Optional[int] = None) -> None:

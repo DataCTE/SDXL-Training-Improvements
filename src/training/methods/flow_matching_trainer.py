@@ -55,8 +55,10 @@ class FlowMatchingTrainer(TrainingMethod):
         x1 = batch["model_input"]
         prompt_embeds = batch["prompt_embeds"]
         pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+        
         t = self.sample_logit_normal((x1.shape[0],), x1.device, x1.dtype, generator=generator)
         x0 = torch.randn_like(x1)
+        
         add_time_ids = get_add_time_ids(
             batch["original_sizes"],
             batch["crop_top_lefts"],
@@ -64,14 +66,20 @@ class FlowMatchingTrainer(TrainingMethod):
             dtype=prompt_embeds.dtype,
             device=x1.device
         )
+        
         cond_emb = {
             "prompt_embeds": prompt_embeds,
-            "added_cond_kwargs": {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+            "added_cond_kwargs": {
+                "text_embeds": pooled_prompt_embeds,
+                "time_ids": add_time_ids
+            }
         }
+        
         loss = self.compute_flow_matching_loss(self.unet, x0, x1, t, cond_emb)
         if "loss_weights" in batch:
             loss = loss * batch["loss_weights"]
         loss = loss.mean()
+        
         torch_sync()
         return {"loss": loss}
 
