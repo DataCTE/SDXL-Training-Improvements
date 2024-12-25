@@ -142,7 +142,8 @@ class CacheManager:
 
             self.cache_dir = Path(convert_windows_path(cache_dir, make_absolute=True))
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-        if model_dtypes is None:
+            
+            if model_dtypes is None:
             self.model_dtypes = ModelWeightDtypes(
                 train_dtype=DataType.FLOAT_32,
                 fallback_train_dtype=DataType.FLOAT_32,
