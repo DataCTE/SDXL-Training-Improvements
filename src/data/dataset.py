@@ -288,10 +288,11 @@ class AspectBucketDataset(Dataset):
             # Handle latent data
             if "latent" in cached_data:
                 latent_tensor = cached_data["latent"]
-                # Create latent distribution dict
+                # Create latent distribution with proper tensor handling
                 latent_dist = {
                     "sample": latent_tensor,
                     "mean": latent_tensor,
+                    # Create ones_like using the tensor, not the dict
                     "std": torch.ones_like(latent_tensor)
                 }
             else:
