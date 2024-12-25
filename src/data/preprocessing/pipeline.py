@@ -49,15 +49,27 @@ class PreprocessingPipeline:
         latent_preprocessor: Optional[LatentPreprocessor] = None,
         cache_manager: Optional[CacheManager] = None,
         is_train=True,
-        num_gpu_workers=1,  # Keep this at 1 to prevent issues
         num_cpu_workers=4,
         num_io_workers=2,
         prefetch_factor=2,
-        device_ids=None,  # This needs fixing
         use_pinned_memory=True,
         enable_memory_tracking=True,
         stream_timeout=10.0
     ):
+        """Initialize preprocessing pipeline.
+        
+        Args:
+            config: Configuration object
+            latent_preprocessor: Optional latent preprocessor
+            cache_manager: Optional cache manager
+            is_train: Whether this is for training
+            num_cpu_workers: Number of CPU workers for preprocessing
+            num_io_workers: Number of IO workers for data loading
+            prefetch_factor: Prefetch factor for data loading
+            use_pinned_memory: Whether to use pinned memory
+            enable_memory_tracking: Whether to track memory usage
+            stream_timeout: Timeout for CUDA stream operations
+        """
         # Add performance tracking
         self.performance_stats = {
             'operation_times': {},
@@ -66,12 +78,14 @@ class PreprocessingPipeline:
         }
         self.logger = logger  # Use the module-level logger
         self.action_history = {}
+
         # Basic initialization
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
             torch.set_float32_matmul_precision('medium')
+            
             # Force single GPU usage
             self.device_id = 0  # Always use first GPU
             self.device = torch.device(f'cuda:{self.device_id}')
@@ -87,15 +101,13 @@ class PreprocessingPipeline:
             self.latent_preprocessor.device = self.device
         self.cache_manager = cache_manager
         self.is_train = is_train
-        # Update num_gpu_workers to always be 1
-        self.num_gpu_workers = 1
+        
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         
         # Create dedicated CUDA stream for this pipeline
         self.stream = torch.cuda.Stream(device=self.device_id) if torch.cuda.is_available() else None
         self.prefetch_factor = prefetch_factor
-        self.device_ids = device_ids
         self.use_pinned_memory = use_pinned_memory
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
