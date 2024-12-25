@@ -343,12 +343,10 @@ class PreprocessingPipeline:
             logger.info(f"Initial CUDA memory: {initial_memory/1024**2:.1f}MB")
 
         # Validate cache and identify items needing processing
-        cache_index = self.cache_manager.cache_index.get("files", {})
         to_process = []
         missing_captions = []
 
         for path in tqdm(image_paths, desc="Analyzing items"):
-            path_str = str(path)
             caption_path = Path(path).with_suffix('.txt')
             cached_data = self.cache_manager.get_cached_item(path)
 
@@ -536,6 +534,7 @@ class PreprocessingPipeline:
         except Exception as e:
             logger.error(f"Failed to encode prompt: {e}")
             raise
+    
     @contextmanager
     def track_memory_usage(self, operation: str):
         """Context manager for tracking memory usage during operations."""
