@@ -133,16 +133,32 @@ class LatentPreprocessor:
             })
             
             # Process with first text encoder
+            tokens_1 = self.text_encoder_1.tokenizer(
+                prompt_batch,
+                padding="max_length",
+                max_length=self.text_encoder_1.config.max_position_embeddings,
+                truncation=True,
+                return_tensors="pt"
+            ).input_ids.to(self.device)
+            
             text_encoder_1_output, pooled_1 = encode_clip(
                 text_encoder=self.text_encoder_1,
-                tokens=self.model.tokenize_1(prompt_batch),
+                tokens=tokens_1,
                 add_pooled_output=True
             )
             
             # Process with second text encoder
+            tokens_2 = self.text_encoder_2.tokenizer(
+                prompt_batch,
+                padding="max_length",
+                max_length=self.text_encoder_2.config.max_position_embeddings,
+                truncation=True,
+                return_tensors="pt"
+            ).input_ids.to(self.device)
+            
             text_encoder_2_output, pooled_2 = encode_clip(
                 text_encoder=self.text_encoder_2,
-                tokens=self.model.tokenize_2(prompt_batch),
+                tokens=tokens_2,
                 add_pooled_output=True
             )
             
