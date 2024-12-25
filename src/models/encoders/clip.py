@@ -1,11 +1,12 @@
 """CLIP model encoding utilities with extreme speedups."""
-import logging
 import torch
 from torch import Tensor
 from transformers import CLIPTextModel
 from typing import Optional, Tuple
+from src.core.logging.logging import setup_logging
 
-logger = logging.getLogger(__name__)
+# Initialize logger with core logging system
+logger = setup_logging(__name__)
 
 def encode_clip(
     text_encoder: CLIPTextModel,
@@ -19,7 +20,15 @@ def encode_clip(
     add_layer_norm: bool = False
 ) -> Tuple[Tensor, Optional[Tensor]]:
     """Optimized CLIP encoding with caching support."""
-    if text_encoder_output is None:
+    try:
+        logger.debug("Starting CLIP encoding", extra={
+            'tokens_shape': tuple(tokens.shape),
+            'default_layer': default_layer,
+            'layer_skip': layer_skip,
+            'use_attention_mask': use_attention_mask
+        })
+
+        if text_encoder_output is None:
         attention_mask = None
         if use_attention_mask:
             attention_mask = tokens.ne(text_encoder.config.pad_token_id).long()
