@@ -327,6 +327,11 @@ def create_dataset(
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
 ) -> AspectBucketDataset:
+    if preprocessing_pipeline and torch.cuda.is_available():
+        # Ensure single GPU usage
+        torch.cuda.set_device(0)
+        logger.info(f"Using GPU device 0: {torch.cuda.get_device_name(0)}")
+        
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,

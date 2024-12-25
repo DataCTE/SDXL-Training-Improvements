@@ -48,11 +48,11 @@ class PreprocessingPipeline:
         latent_preprocessor: Optional[LatentPreprocessor] = None,
         cache_manager: Optional[CacheManager] = None,
         is_train=True,
-        num_gpu_workers=1,
+        num_gpu_workers=1,  # Keep this at 1 to prevent issues
         num_cpu_workers=4,
         num_io_workers=2,
         prefetch_factor=2,
-        device_ids=None,
+        device_ids=None,  # This needs fixing
         use_pinned_memory=True,
         enable_memory_tracking=True,
         stream_timeout=10.0
@@ -71,17 +71,28 @@ class PreprocessingPipeline:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
             torch.set_float32_matmul_precision('medium')
+            # Force single GPU usage
+            self.device_id = 0  # Always use first GPU
+            self.device = torch.device(f'cuda:{self.device_id}')
+            # Set this device as default
+            torch.cuda.set_device(self.device_id)
+        else:
+            self.device_id = None
+            self.device = torch.device('cpu')
+            
         self.config = config if config is not None else Config()
         self.latent_preprocessor = latent_preprocessor
         if self.latent_preprocessor:
-            self.device = self.latent_preprocessor.device
-        else:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            self.latent_preprocessor.device = self.device
         self.cache_manager = cache_manager
         self.is_train = is_train
-        self.num_gpu_workers = num_gpu_workers
+        # Update num_gpu_workers to always be 1
+        self.num_gpu_workers = 1
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
+        
+        # Create dedicated CUDA stream for this pipeline
+        self.stream = torch.cuda.Stream(device=self.device_id) if torch.cuda.is_available() else None
         self.prefetch_factor = prefetch_factor
         self.device_ids = device_ids
         self.use_pinned_memory = use_pinned_memory
@@ -435,17 +446,26 @@ class PreprocessingPipeline:
 
     def _process_image(self, img_path):
         try:
+            def gpu_process(tensor):
+                tensor = tensor.to(self.device, non_blocking=True)
+                vae_dtype = next(self.latent_preprocessor.model.vae.parameters()).dtype
+                tensor = tensor.to(dtype=vae_dtype)
+                return self.latent_preprocessor.encode_images(tensor)
+
             img = Image.open(img_path).convert('RGB')
-            img = img.resize(self.target_image_size, Image.ANTIALIAS)
+            img = img.resize(self.target_image_size, Image.LANCZOS)
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
-            if torch.cuda.is_available():
-                tensor = tensor.to(self.device, non_blocking=True)
-            vae_dtype = next(self.latent_preprocessor.model.vae.parameters()).dtype
-            tensor = tensor.to(dtype=vae_dtype)
-
-            latent_output = self.latent_preprocessor.encode_images(tensor)
-            metadata = {"original_size": img.size, "path": str(img_path), "timestamp": time.time()}
+            
+            # Process on GPU with proper stream management
+            latent_output = self._process_on_gpu(gpu_process, tensor)
+            
+            metadata = {
+                "original_size": img.size,
+                "path": str(img_path),
+                "timestamp": time.time(),
+                "device_id": self.device_id if torch.cuda.is_available() else None
+            }
             return {"latent": latent_output["latent"], "metadata": metadata}
         except Exception as e:
             self.stats.failed += 1
@@ -501,6 +521,26 @@ class PreprocessingPipeline:
             self._log_action(operation, {
                 'duration': duration,
                 'memory_stats': memory_stats
+            })
+
+    def _process_on_gpu(self, func, *args, **kwargs):
+        """Execute function on GPU with proper stream management."""
+        if not torch.cuda.is_available():
+            return func(*args, **kwargs)
+            
+        try:
+            with torch.cuda.device(self.device_id):
+                with create_stream_context(self.stream):
+                    result = func(*args, **kwargs)
+                    if self.stream:
+                        self.stream.synchronize()
+                    return result
+        except Exception as e:
+            logger.error(f"GPU processing error: {str(e)}")
+            raise ProcessingError("GPU processing failed", {
+                'device_id': self.device_id,
+                'cuda_memory': torch.cuda.memory_allocated(self.device_id),
+                'error': str(e)
             })
 
     def _log_action(self, operation: str, stats: Dict[str, Any]):
