@@ -203,7 +203,7 @@ class PreprocessingPipeline:
             return
 
         cache_index = self.cache_manager.cache_index.get("files", {})
-        for image_path_str, file_info in cache_index.items():
+        for image_path_str in cache_index:
             image_path = Path(image_path_str)
             caption_path = image_path.with_suffix('.txt')
 
