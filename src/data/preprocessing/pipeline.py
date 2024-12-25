@@ -521,14 +521,14 @@ class PreprocessingPipeline:
 
                 for img_path in batch_paths:
                     try:
-                        latent_data = None
+                        image_latent = None
                         text_embeddings = None
                         metadata = {"path": img_path, "timestamp": time.time()}
 
                         if process_latents:
                             processed = self._process_image(img_path)
                             if processed:
-                                latent_data = processed["latent"]
+                                image_latent = processed["image_latent"]
                                 metadata.update(processed.get("metadata", {}))
 
                         if process_text_embeddings:
@@ -538,9 +538,9 @@ class PreprocessingPipeline:
                             metadata["caption"] = caption
 
                         # Save to cache
-                        if latent_data or text_embeddings:
+                        if image_latent or text_embeddings:
                             self.cache_manager.save_preprocessed_data(
-                                latent_data=latent_data,
+                                image_latent=image_latent,
                                 text_embeddings=text_embeddings,
                                 metadata=metadata,
                                 file_path=img_path,
