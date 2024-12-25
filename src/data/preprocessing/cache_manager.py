@@ -114,21 +114,70 @@ class CacheManager:
         self.cache_index = self._load_cache_index()
 
     def _load_cache_index(self) -> Dict:
+        """Load and validate the cache index, scanning for existing files if needed."""
         try:
+            index_data = {"files": {}, "chunks": {}}
+            
+            # Scan existing files on disk
+            latent_files = {p.stem: p for p in self.image_dir.glob("*.pt")}
+            text_files = {p.stem: p for p in self.text_dir.glob("*.pt")}
+            
+            # Try loading existing index
             if self.index_path.exists():
                 with open(self.index_path, 'r') as f:
-                    return json.load(f)
-            return {"files": {}, "chunks": {}}
+                    index_data = json.load(f)
+                    
+            # Validate and update index entries
+            valid_files = {}
+            for file_path, file_info in index_data.get("files", {}).items():
+                base_name = Path(file_path).stem
+                
+                # Check for existing files
+                latent_path = latent_files.get(base_name)
+                text_path = text_files.get(base_name)
+                
+                if latent_path and latent_path.exists():
+                    file_info["latent_path"] = str(latent_path)
+                    if text_path and text_path.exists():
+                        file_info["text_path"] = str(text_path)
+                    valid_files[file_path] = file_info
+            
+            # Add any files found on disk but not in index
+            for base_name, latent_path in latent_files.items():
+                matching_entries = [p for p, info in valid_files.items() 
+                                 if Path(info.get("latent_path", "")).stem == base_name]
+                if not matching_entries:
+                    text_path = text_files.get(base_name)
+                    file_info = {
+                        "base_name": base_name,
+                        "latent_path": str(latent_path),
+                        "timestamp": time.time()
+                    }
+                    if text_path and text_path.exists():
+                        file_info["text_path"] = str(text_path)
+                    # Use latent path as key if no original path known
+                    valid_files[str(latent_path)] = file_info
+            
+            index_data["files"] = valid_files
+            # Save validated index
+            self._save_cache_index(index_data)
+            return index_data
+            
         except Exception as e:
             logger.error(f"Failed to load cache index: {str(e)}")
             return {"files": {}, "chunks": {}}
 
-    def _save_cache_index(self) -> None:
-        """Save the cache index to disk."""
+    def _save_cache_index(self, index_data: Optional[Dict] = None) -> None:
+        """Save the cache index to disk.
+        
+        Args:
+            index_data: Optional index data to save, uses self.cache_index if None
+        """
         try:
+            data = index_data if index_data is not None else self.cache_index
             with open(self.index_path, 'w') as f:
-                json.dump(self.cache_index, f)
-            logger.info(f"Cache index saved to {self.index_path}")
+                json.dump(data, f, indent=2)  # Pretty print for readability
+            logger.info(f"Cache index saved to {self.index_path} with {len(data.get('files', {}))} entries")
         except Exception as e:
             logger.error(f"Failed to save cache index: {str(e)}")
 
