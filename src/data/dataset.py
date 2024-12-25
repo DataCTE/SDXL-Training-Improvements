@@ -164,10 +164,9 @@ class AspectBucketDataset(Dataset):
         # Get buckets from preprocessing pipeline
         self.buckets = self.preprocessing_pipeline.get_aspect_buckets(self.config)
         
-        # Assign bucket indices using pipeline - simplified call
+        # Assign bucket indices using pipeline
         self.bucket_indices = self.preprocessing_pipeline.assign_aspect_buckets(
-            image_paths=self.image_paths,
-            config=self.config  # Pass config instead of individual parameters
+            image_paths=self.image_paths
         )
 
     def _setup_transforms(self) -> transforms.Compose:
