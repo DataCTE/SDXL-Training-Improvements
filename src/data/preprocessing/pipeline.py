@@ -408,6 +408,140 @@ class PreprocessingPipeline:
             logger.error(f"Error processing item {image_path}: {e}")
             raise
 
+    def precompute_latents(
+            self,
+            image_paths: List[str],
+            batch_size: int = 1,
+            proportion_empty_prompts: float = 0.0,
+            process_latents: bool = True,
+            process_text_embeddings: bool = True
+        ) -> None:
+            """Precompute and cache latents and text embeddings.
+            
+            Args: 
+                image_paths: List of image paths to process
+                batch_size: Batch size for processing
+                proportion_empty_prompts: Proportion of prompts to leave empty
+                process_latents: Whether to process image latents
+                process_text_embeddings: Whether to process text embeddings
+            """
+            if not self.latent_preprocessor or not self.cache_manager:
+                logger.warning("Latent preprocessor or cache manager not available")
+                return
+
+            logger.info(f"Precomputing latents and embeddings for {len(image_paths)} items")
+            to_process = []
+
+            # Use the validated cache index
+            cache_index = self.cache_manager.cache_index.get("files", {})
+            cached_files = set(cache_index.keys())
+
+            # Track memory usage
+            if torch.cuda.is_available():
+                initial_memory = torch.cuda.memory_allocated()
+                logger.info(f"Initial CUDA memory: {initial_memory/1024**2:.1f}MB")
+
+            # First pass: identify what needs processing
+            for path in tqdm(image_paths, desc="Checking cache status"):
+                path_str = str(path)
+                if path_str not in cached_files:
+                    to_process.append(path)
+                    continue
+                    
+                file_info = cache_index.get(path_str)
+                if not file_info:
+                    to_process.append(path)
+                    continue
+
+                # Verify cached files exist
+                if process_latents:
+                    latent_path = Path(file_info.get("latent_path", ""))
+                    if not latent_path.exists():
+                        to_process.append(path)
+                        continue
+                        
+                if process_text_embeddings:
+                    text_path = Path(file_info.get("text_path", ""))
+                    if not text_path.exists():
+                        to_process.append(path)
+                        continue
+
+            if not to_process:
+                logger.info("All items already cached")
+                return
+
+            logger.info(f"Processing {len(to_process)} uncached items")
+
+            # Process in batches with progress bar
+            with tqdm(total=len(to_process), desc="Processing items") as pbar:
+                for i in range(0, len(to_process), batch_size):
+                    batch_paths = to_process[i:i+batch_size]
+                    
+                    # Clear CUDA cache periodically
+                    if torch.cuda.is_available() and i % 100 == 0:
+                        torch.cuda.empty_cache()
+                        current_memory = torch.cuda.memory_allocated()
+                        logger.debug(f"CUDA memory: {current_memory/1024**2:.1f}MB")
+
+                    for img_path in batch_paths:
+                        try:
+                            image_latent = None
+                            text_embeddings = None
+                            metadata = {"path": img_path, "timestamp": time.time()}
+
+                            # Process image latents if needed
+                            if process_latents:
+                                processed = self._process_image(img_path)
+                                if processed:
+                                    image_latent = processed["image_latent"]
+                                    metadata.update(processed.get("metadata", {}))
+
+                            # Process text embeddings if needed
+                            if process_text_embeddings:
+                                # Get caption from file
+                                caption_path = Path(img_path).with_suffix('.txt')
+                                if caption_path.exists():
+                                    with open(caption_path, 'r', encoding='utf-8') as f:
+                                        caption = f.read().strip()
+                                else:
+                                    # Use empty string if no caption file exists
+                                    caption = ""
+                                    logger.warning(f"No caption file found for {img_path}, using empty caption")
+
+                                # Apply empty prompt probability
+                                if proportion_empty_prompts > 0 and random.random() < proportion_empty_prompts:
+                                    caption = ""
+
+                                embeddings = self.latent_preprocessor.encode_prompt([caption])
+                                text_embeddings = embeddings
+                                metadata["caption"] = caption
+
+                            # Save to cache
+                            if image_latent is not None or text_embeddings is not None:
+                                self.cache_manager.save_preprocessed_data(
+                                    image_latent=image_latent,
+                                    text_embeddings=text_embeddings,
+                                    metadata=metadata,
+                                    file_path=img_path,
+                                    caption=metadata.get("caption", "") if process_text_embeddings else None
+                                )
+                                self.stats.successful += 1
+                        except Exception as e:
+                            self.stats.failed += 1
+                            logger.warning(f"Failed to process {img_path}: {e}")
+                        finally:
+                            pbar.update(1)
+
+                    # Force CUDA sync periodically
+                    if torch.cuda.is_available() and i % 10 == 0:
+                        torch.cuda.synchronize()
+
+            # Final memory report
+            if torch.cuda.is_available():
+                final_memory = torch.cuda.memory_allocated()
+                logger.info(f"Final CUDA memory: {final_memory/1024**2:.1f}MB")
+                logger.info(f"Memory change: {(final_memory - initial_memory)/1024**2:.1f}MB")
+
 
     def get_valid_image_paths(self) -> List[str]:
         """Return list of valid image paths found during bucketing."""
@@ -415,140 +549,7 @@ class PreprocessingPipeline:
             return []
         return self.valid_image_paths
 
-    def precompute_latents(
-        self,
-        image_paths: List[str],
-        batch_size: int = 1,
-        proportion_empty_prompts: float = 0.0,
-        process_latents: bool = True,
-        process_text_embeddings: bool = True
-    ) -> None:
-        """Precompute and cache latents and text embeddings.
-        
-        Args:
-            image_paths: List of image paths to process
-            batch_size: Batch size for processing
-            proportion_empty_prompts: Proportion of prompts to leave empty
-            process_latents: Whether to process image latents
-            process_text_embeddings: Whether to process text embeddings
-        """
-        if not self.latent_preprocessor or not self.cache_manager:
-            logger.warning("Latent preprocessor or cache manager not available")
-            return
-
-        logger.info(f"Precomputing latents and embeddings for {len(image_paths)} items")
-        to_process = []
-
-        # Use the validated cache index
-        cache_index = self.cache_manager.cache_index.get("files", {})
-        cached_files = set(cache_index.keys())
-
-        # Track memory usage
-        if torch.cuda.is_available():
-            initial_memory = torch.cuda.memory_allocated()
-            logger.info(f"Initial CUDA memory: {initial_memory/1024**2:.1f}MB")
-
-        # First pass: identify what needs processing
-        for path in tqdm(image_paths, desc="Checking cache status"):
-            path_str = str(path)
-            if path_str not in cached_files:
-                to_process.append(path)
-                continue
-                
-            file_info = cache_index.get(path_str)
-            if not file_info:
-                to_process.append(path)
-                continue
-
-            # Verify cached files exist
-            if process_latents:
-                latent_path = Path(file_info.get("latent_path", ""))
-                if not latent_path.exists():
-                    to_process.append(path)
-                    continue
-                    
-            if process_text_embeddings:
-                text_path = Path(file_info.get("text_path", ""))
-                if not text_path.exists():
-                    to_process.append(path)
-                    continue
-
-        if not to_process:
-            logger.info("All items already cached")
-            return
-
-        logger.info(f"Processing {len(to_process)} uncached items")
-
-        # Process in batches with progress bar
-        with tqdm(total=len(to_process), desc="Processing items") as pbar:
-            for i in range(0, len(to_process), batch_size):
-                batch_paths = to_process[i:i+batch_size]
-                
-                # Clear CUDA cache periodically
-                if torch.cuda.is_available() and i % 100 == 0:
-                    torch.cuda.empty_cache()
-                    current_memory = torch.cuda.memory_allocated()
-                    logger.debug(f"CUDA memory: {current_memory/1024**2:.1f}MB")
-
-                for img_path in batch_paths:
-                    try:
-                        image_latent = None
-                        text_embeddings = None
-                        metadata = {"path": img_path, "timestamp": time.time()}
-
-                        # Process image latents if needed
-                        if process_latents:
-                            processed = self._process_image(img_path)
-                            if processed:
-                                image_latent = processed["image_latent"]
-                                metadata.update(processed.get("metadata", {}))
-
-                        # Process text embeddings if needed
-                        if process_text_embeddings:
-                            # Get caption from file
-                            caption_path = Path(img_path).with_suffix('.txt')
-                            if caption_path.exists():
-                                with open(caption_path, 'r', encoding='utf-8') as f:
-                                    caption = f.read().strip()
-                            else:
-                                # Use empty string if no caption file exists
-                                caption = ""
-                                logger.warning(f"No caption file found for {img_path}, using empty caption")
-
-                            # Apply empty prompt probability
-                            if proportion_empty_prompts > 0 and random.random() < proportion_empty_prompts:
-                                caption = ""
-
-                            embeddings = self.latent_preprocessor.encode_prompt([caption])
-                            text_embeddings = embeddings
-                            metadata["caption"] = caption
-
-                        # Save to cache
-                        if image_latent is not None or text_embeddings is not None:
-                            self.cache_manager.save_preprocessed_data(
-                                image_latent=image_latent,
-                                text_embeddings=text_embeddings,
-                                metadata=metadata,
-                                file_path=img_path,
-                                caption=metadata.get("caption", "") if process_text_embeddings else None
-                            )
-                            self.stats.successful += 1
-                    except Exception as e:
-                        self.stats.failed += 1
-                        logger.warning(f"Failed to process {img_path}: {e}")
-                    finally:
-                        pbar.update(1)
-
-                # Force CUDA sync periodically
-                if torch.cuda.is_available() and i % 10 == 0:
-                    torch.cuda.synchronize()
-
-        # Final memory report
-        if torch.cuda.is_available():
-            final_memory = torch.cuda.memory_allocated()
-            logger.info(f"Final CUDA memory: {final_memory/1024**2:.1f}MB")
-            logger.info(f"Memory change: {(final_memory - initial_memory)/1024**2:.1f}MB")
-
+    
     def _process_image(self, img_path):
         try:
             def gpu_process(tensor):
