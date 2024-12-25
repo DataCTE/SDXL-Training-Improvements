@@ -49,7 +49,7 @@ class PreprocessingPipeline:
         latent_preprocessor: Optional[LatentPreprocessor] = None,
         cache_manager: Optional[CacheManager] = None,
         is_train=True,
-        num_gpu_workers: int = 1,  # Add this parameter
+        num_gpu_workers: int = 1,
         num_cpu_workers: int = 4,
         num_io_workers: int = 2,
         prefetch_factor: int = 2,
@@ -116,9 +116,9 @@ class PreprocessingPipeline:
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
         self.stats = PipelineStats()
+        # Initialize bucket-related attributes
         self.buckets = self.get_aspect_buckets(config)
         self.bucket_indices = []  # Will be populated when processing images
-        self.valid_image_paths = []
 
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
         """
@@ -134,42 +134,42 @@ class PreprocessingPipeline:
 
     def _assign_single_bucket(
         self,
-        img_path: Union[str, Path, Image.Image],
-        buckets: List[Tuple[int, int]],
-        max_aspect_ratio: float
-    ) -> int:
-        """Assign a single image to the optimal bucket based on aspect ratio and size.
+        img: Union[str, Path, Image.Image],
+        max_aspect_ratio: Optional[float] = None
+    ) -> Tuple[int, Tuple[int, int]]:
+        """Assign image to optimal bucket based on aspect ratio and size.
         
         Args:
-            img_path: Path to image or PIL Image object
-            buckets: List of available bucket dimensions (height, width)
-            max_aspect_ratio: Maximum allowed aspect ratio
+            img: Image path or PIL Image object
+            max_aspect_ratio: Optional override for max aspect ratio
             
         Returns:
-            Index of the assigned bucket
+            Tuple of (bucket_index, (height, width))
             
         Raises:
-            ValueError: If image cannot be opened or processed
+            ValueError: If image cannot be processed
         """
         try:
             # Handle both PIL Image and path inputs
-            if isinstance(img_path, Image.Image):
-                img = img_path
-            else:
-                img = Image.open(img_path).convert('RGB')
+            if isinstance(img, (str, Path)):
+                img = Image.open(img).convert('RGB')
                 
             w, h = img.size
             aspect_ratio = w / h
             img_area = w * h
             
+            # Use config max_aspect_ratio if not overridden
+            max_ar = max_aspect_ratio or self.config.global_config.image.max_aspect_ratio
+            
             min_diff = float('inf')
             best_idx = 0
+            best_bucket = self.buckets[0]
             
-            for idx, (bucket_h, bucket_w) in enumerate(buckets):
+            for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
                 bucket_ratio = bucket_w / bucket_h
                 
                 # Skip buckets exceeding max aspect ratio
-                if bucket_ratio > max_aspect_ratio:
+                if bucket_ratio > max_ar:
                     continue
                     
                 # Calculate weighted difference score
@@ -182,13 +182,14 @@ class PreprocessingPipeline:
                 if total_diff < min_diff:
                     min_diff = total_diff
                     best_idx = idx
+                    best_bucket = (bucket_h, bucket_w)
                     
-            return best_idx
+            return best_idx, best_bucket
             
         except Exception as e:
-            logger.error(f"Error assigning bucket for {img_path}: {str(e)}")
-            # Return default bucket index (0) on error
-            return 0
+            logger.error(f"Error assigning bucket for {img}: {str(e)}")
+            # Return default bucket on error
+            return 0, self.buckets[0]
 
     def get_bucket_info(self) -> Dict[str, Any]:
         """Get information about current bucket configuration.
@@ -251,46 +252,27 @@ class PreprocessingPipeline:
             
         return True
 
-    def get_optimal_bucket_size(
+    def resize_to_bucket(
         self,
-        original_size: Tuple[int, int],
-        target_bucket_idx: Optional[int] = None
-    ) -> Tuple[int, int]:
-        """Get optimal bucket dimensions for an image.
+        img: Image.Image,
+        bucket_idx: Optional[int] = None
+    ) -> Tuple[Image.Image, int]:
+        """Resize image to fit target bucket dimensions.
         
         Args:
-            original_size: Original image dimensions (height, width)
-            target_bucket_idx: Optional specific bucket index to use
+            img: PIL Image to resize
+            bucket_idx: Optional specific bucket index to use
             
         Returns:
-            Tuple of target dimensions (height, width)
+            Tuple of (resized image, used bucket index)
         """
-        if target_bucket_idx is not None and target_bucket_idx < len(self.buckets):
-            return self.buckets[target_bucket_idx]
+        if bucket_idx is None:
+            bucket_idx, _ = self._assign_single_bucket(img)
             
-        # Find best matching bucket
-        orig_h, orig_w = original_size
-        orig_aspect = orig_w / orig_h
+        target_h, target_w = self.buckets[bucket_idx]
+        resized_img = img.resize((target_w, target_h), Image.LANCZOS)
         
-        best_bucket = None
-        min_diff = float('inf')
-        
-        for bucket in self.buckets:
-            bucket_h, bucket_w = bucket
-            bucket_aspect = bucket_w / bucket_h
-            
-            # Calculate difference score based on aspect ratio and area
-            aspect_diff = abs(bucket_aspect - orig_aspect)
-            area_diff = abs(bucket_h * bucket_w - orig_h * orig_w)
-            
-            # Weighted score (can be tuned)
-            diff_score = aspect_diff * 2.0 + area_diff / (1536 * 1536)
-            
-            if diff_score < min_diff:
-                min_diff = diff_score
-                best_bucket = bucket
-                
-        return best_bucket or self.buckets[0]
+        return resized_img, bucket_idx
 
     def resize_to_bucket(
         self,
@@ -325,101 +307,31 @@ class PreprocessingPipeline:
             caption = f.read().strip()
         return caption
 
-    def group_images_by_aspect_ratio(self, image_paths: Union[str, Path, Config], tolerance: float = 0.05) -> Dict[str, List[str]]:
-        """Group images into buckets based on aspect ratio for efficient batch processing.
-
+    def assign_aspect_buckets(
+        self,
+        image_paths: List[Union[str, Path]],
+        tolerance: float = 0.1
+    ) -> List[int]:
+        """Assign multiple images to aspect ratio buckets.
+        
         Args:
-            image_paths: List of paths to images, single path string/Path, or Config object containing paths
-            tolerance: Tolerance for aspect ratio differences (default: 0.05)
-
+            image_paths: List of image paths
+            tolerance: Tolerance for aspect ratio differences
+            
         Returns:
-            Dict mapping aspect ratio strings to lists of image paths
+            List of bucket indices for each image
         """
-        # Handle various input types
-        if isinstance(image_paths, Config):
-            # Extract paths from Config
-            paths = []
-            if hasattr(image_paths.data, 'train_data_dir'):
-                train_dirs = image_paths.data.train_data_dir
-                if isinstance(train_dirs, (str, Path)):
-                    train_dirs = [train_dirs]
-                
-                # Scan directories for image files
-                for dir_path in train_dirs:
-                    dir_path = Path(convert_windows_path(dir_path) if is_windows_path(dir_path) else dir_path)
-                    if dir_path.exists() and dir_path.is_dir():
-                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp', '*.tiff', '*.tif', '*.ppm', '*.pgm'):
-                            paths.extend(str(convert_windows_path(p)) for p in dir_path.glob(ext))
-                    else:
-                        logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")
-                
-                if not paths:
-                    logger.warning(f"No image files found in training directories: {train_dirs}")
-            image_paths = paths
-        elif isinstance(image_paths, (str, Path)):
-            image_paths = [image_paths]
-        elif not isinstance(image_paths, (list, tuple)):
-            raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
-
-        if isinstance(image_paths, Config):
-            # Extract paths from Config
-            paths = []
-            if hasattr(image_paths.data, 'train_data_dir'):
-                train_dirs = image_paths.data.train_data_dir
-                if isinstance(train_dirs, (str, Path)):
-                    train_dirs = [train_dirs]
-                
-                # Scan directories for image files
-                for dir_path in train_dirs:
-                    dir_path = Path(convert_windows_path(dir_path) if is_windows_path(dir_path) else dir_path)
-                    if dir_path.exists() and dir_path.is_dir():
-                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
-                            paths.extend(str(convert_windows_path(p)) for p in dir_path.glob(ext))
-                    else:
-                        logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")
-                
-                if not paths:
-                    logger.warning(f"No image files found in training directories: {train_dirs}")
-            image_paths = paths
-        elif isinstance(image_paths, (str, Path)):
-            image_paths = [image_paths]
-        elif not isinstance(image_paths, (list, tuple)):
-            raise ValueError(f"image_paths must be a string, Path, list, tuple or Config object, got {type(image_paths)}")
-        buckets = {}
+        bucket_indices = []
         
         for path in image_paths:
-            if not isinstance(path, (str, Path)):
-                logger.warning(f"Skipping invalid path type: {type(path)}")
-                continue
-
             try:
-                path_str = str(convert_windows_path(path) if is_windows_path(path) else path)
-                if not Path(path_str).exists():
-                    logger.warning(f"Image path does not exist: {path_str}")
-                    continue
-
-                with Image.open(path_str) as img:
-                    w, h = img.size
-                    aspect = w / h
-                    # Use rounded aspect ratio as bucket key
-                    bucket_key = f"{round(aspect / tolerance) * tolerance:.2f}"
-                    if bucket_key not in buckets:
-                        buckets[bucket_key] = []
-                    buckets[bucket_key].append(path_str)
-                    self.stats.successful += 1
+                bucket_idx, _ = self._assign_single_bucket(path)
+                bucket_indices.append(bucket_idx)
             except Exception as e:
-                logger.warning(f"Failed to process {path} for bucketing: {e}")
-                self.stats.failed += 1
-                continue
-
-        if not buckets:
-            logger.warning("No valid images found for bucketing")
-            return {}
-
-        # Store valid image paths
-        self.valid_image_paths = [path for paths in buckets.values() for path in paths]
-
-        return buckets
+                logger.warning(f"Failed to assign bucket for {path}: {e}")
+                bucket_indices.append(0)  # Default to first bucket
+                
+        return bucket_indices
 
     def generate_missing_captions_from_cache(self):
         """Generate missing caption files from cache index."""
