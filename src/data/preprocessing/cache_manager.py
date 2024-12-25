@@ -126,9 +126,11 @@ class CacheManager:
                 try:
                     with open(self.index_path, 'r') as f:
                         index_data = json.load(f)
-                except json.JSONDecodeError:
-                    logger.warning("Invalid cache index file, starting fresh")
+                except (json.JSONDecodeError, FileNotFoundError):
+                    logger.warning("Invalid or missing cache index file, starting fresh")
                     index_data = {"files": {}, "chunks": {}}
+            else:
+                logger.info("Creating new cache index")
                     
             # First validate image entries
             valid_files = {}
@@ -172,6 +174,8 @@ class CacheManager:
                                  if Path(info.get("latent_path", "")).stem.replace("__image", "") == base_name]
                 if not matching_entries:
                     text_path = text_files.get(base_name)
+                    # Reconstruct original path from base name
+                    original_path = str(latent_path).replace("__image.pt", ".jpg")  # Assume .jpg as default
                     file_info = {
                         "base_name": base_name,
                         "latent_path": str(latent_path),
@@ -179,8 +183,9 @@ class CacheManager:
                     }
                     if text_path and text_path.exists():
                         file_info["text_path"] = str(text_path)
-                    # Use latent path as key if no original path known
-                    valid_files[str(latent_path)] = file_info
+                    # Use reconstructed original path as key
+                    valid_files[original_path] = file_info
+                    logger.debug(f"Added cache entry for {original_path}")
             
             index_data["files"] = valid_files
             # Save validated index
