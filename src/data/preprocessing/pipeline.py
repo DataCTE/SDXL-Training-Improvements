@@ -337,68 +337,88 @@ class PreprocessingPipeline:
         cache_index = self.cache_manager.cache_index.get("files", {})
         cached_files = set(cache_index.keys())
 
-        # Use the validated cache index
-        cache_index = self.cache_manager.cache_index.get("files", {})
-        cached_files = set(cache_index.keys())
+        # Track memory usage
+        if torch.cuda.is_available():
+            initial_memory = torch.cuda.memory_allocated()
+            logger.info(f"Initial CUDA memory: {initial_memory/1024**2:.1f}MB")
 
-        for path in image_paths:
+        # First pass: identify what needs processing
+        for path in tqdm(image_paths, desc="Checking cache status"):
             path_str = str(path)
             if path_str not in cached_files:
-                # No cache entry exists, need to process
                 to_process.append(path)
-            else:
-                # Access file_info from cache_index
-                file_info = cache_index.get(path_str)
-                if not file_info:
-                    to_process.append(path)
-                    continue
+                continue
+                
+            file_info = cache_index.get(path_str)
+            if not file_info:
+                to_process.append(path)
+                continue
 
-                # Check if latent and text paths exist
-                latent_path = Path(file_info.get("latent_path", ""))
-                text_path = Path(file_info.get("text_path", ""))
+            # Verify cached files exist
+            latent_path = Path(file_info.get("latent_path", ""))
+            text_path = Path(file_info.get("text_path", ""))
+            
+            if not latent_path.exists() or not text_path.exists():
+                to_process.append(path)
 
-                latent_exists = latent_path.exists()
-                text_exists = text_path.exists()
+        if not to_process:
+            logger.info("All items already cached")
+            return
 
-                if not latent_exists or not text_exists:
-                    logger.warning(f"Missing cached files for {path_str}. Recomputing.")
-                    to_process.append(path)
-                else:
-                    # Files exist, no need to process
-                    continue
+        logger.info(f"Processing {len(to_process)} uncached items")
 
-        for i in range(0, len(to_process), batch_size):
-            batch_paths = to_process[i:i+batch_size]
-            for img_path in batch_paths:
-                try:
-                    latent_data = None
-                    text_embeddings = None
-                    metadata = {"path": img_path, "timestamp": time.time()}
+        # Process in batches with progress bar
+        with tqdm(total=len(to_process), desc="Processing items") as pbar:
+            for i in range(0, len(to_process), batch_size):
+                batch_paths = to_process[i:i+batch_size]
+                
+                # Clear CUDA cache periodically
+                if torch.cuda.is_available() and i % 100 == 0:
+                    torch.cuda.empty_cache()
+                    current_memory = torch.cuda.memory_allocated()
+                    logger.debug(f"CUDA memory: {current_memory/1024**2:.1f}MB")
 
-                    if process_latents:
-                        processed = self._process_image(img_path)
-                        if processed:
-                            latent_data = processed["latent"]
-                            metadata.update(processed.get("metadata", {}))
+                for img_path in batch_paths:
+                    try:
+                        latent_data = None
+                        text_embeddings = None
+                        metadata = {"path": img_path, "timestamp": time.time()}
 
-                    if process_text_embeddings:
-                        caption = self._read_caption(img_path)
-                        embeddings = self.latent_preprocessor.encode_prompt([caption])
-                        text_embeddings = embeddings
+                        if process_latents:
+                            processed = self._process_image(img_path)
+                            if processed:
+                                latent_data = processed["latent"]
+                                metadata.update(processed.get("metadata", {}))
 
-                    # Save to cache
-                    if latent_data or text_embeddings:
-                        self.cache_manager.save_preprocessed_data(
-                            latent_data=latent_data,
-                            text_embeddings=text_embeddings,
-                            metadata=metadata,
-                            file_path=img_path
-                        )
-                        self.stats.cache_misses += 1
-                        self.stats.successful += 1
-                except Exception as e:
-                    self.stats.failed += 1
-                    logger.warning(f"Failed to precompute data for {img_path}: {e}")
+                        if process_text_embeddings:
+                            caption = self._read_caption(img_path)
+                            embeddings = self.latent_preprocessor.encode_prompt([caption])
+                            text_embeddings = embeddings
+
+                        # Save to cache
+                        if latent_data or text_embeddings:
+                            self.cache_manager.save_preprocessed_data(
+                                latent_data=latent_data,
+                                text_embeddings=text_embeddings,
+                                metadata=metadata,
+                                file_path=img_path
+                            )
+                            self.stats.successful += 1
+                    except Exception as e:
+                        self.stats.failed += 1
+                        logger.warning(f"Failed to process {img_path}: {e}")
+                    finally:
+                        pbar.update(1)
+
+                # Force CUDA sync periodically
+                if torch.cuda.is_available() and i % 10 == 0:
+                    torch.cuda.synchronize()
+
+        # Final memory report
+        if torch.cuda.is_available():
+            final_memory = torch.cuda.memory_allocated()
+            logger.info(f"Final CUDA memory: {final_memory/1024**2:.1f}MB")
+            logger.info(f"Memory change: {(final_memory - initial_memory)/1024**2:.1f}MB")
 
     def _process_image(self, img_path):
         try:

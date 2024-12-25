@@ -80,9 +80,12 @@ class AspectBucketDataset(Dataset):
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True,
         enable_memory_tracking: bool = True,
-        max_memory_usage: float = 0.8
+        max_memory_usage: float = 0.8,
+        timeout: float = 300  # 5 minute timeout
     ):
-        super().__init__()
+        start_time = time.time()
+        try:
+            super().__init__()
         self.stats = DatasetStats()
         self.enable_memory_tracking = enable_memory_tracking
         self.max_memory_usage = max_memory_usage
@@ -156,32 +159,51 @@ class AspectBucketDataset(Dataset):
         if not self.preprocessing_pipeline:
             raise ValueError("Preprocessing pipeline not initialized")
             
-        # First validate cache and get missing items
-        if self.cache_manager:
-            missing_text, missing_latents = self.cache_manager.validate_cache_index()
-            
-            # Combine all paths that need processing
-            to_process = set(missing_text + missing_latents)
-            logger.info(f"Found {len(missing_text)} missing text embeddings and {len(missing_latents)} missing latents")
-            
-            if to_process:
-                logger.info(f"Processing {len(to_process)} items with missing cache data")
+        logger.info("Starting latent precomputation...")
+        
+        # Track memory
+        if torch.cuda.is_available():
+            initial_memory = torch.cuda.memory_allocated()
+            logger.info(f"Initial CUDA memory: {initial_memory/1024**2:.1f}MB")
+        
+        try:
+            # First validate cache and get missing items
+            if self.cache_manager:
+                logger.info("Validating cache index...")
+                missing_text, missing_latents = self.cache_manager.validate_cache_index()
+                
+                # Combine all paths that need processing
+                to_process = set(missing_text + missing_latents)
+                logger.info(f"Found {len(missing_text)} missing text embeddings and {len(missing_latents)} missing latents")
+                
+                if to_process:
+                    logger.info(f"Processing {len(to_process)} items with missing cache data")
+                    self.preprocessing_pipeline.precompute_latents(
+                        image_paths=list(to_process),
+                        batch_size=config.training.batch_size,
+                        proportion_empty_prompts=config.data.proportion_empty_prompts
+                    )
+                else:
+                    logger.info("No missing cache items found")
+            else:
+                # No cache manager, process everything
+                logger.info("No cache manager available, processing all items")
                 self.preprocessing_pipeline.precompute_latents(
-                    image_paths=list(to_process),
-                    latent_preprocessor=latent_preprocessor,
+                    image_paths=image_paths,
                     batch_size=config.training.batch_size,
                     proportion_empty_prompts=config.data.proportion_empty_prompts
                 )
-            else:
-                logger.info("No missing cache items found")
-        else:
-            # No cache manager, process everything
-            self.preprocessing_pipeline.precompute_latents(
-                image_paths=image_paths,
-                latent_preprocessor=latent_preprocessor,
-                batch_size=config.training.batch_size,
-                proportion_empty_prompts=config.data.proportion_empty_prompts
-            )
+                
+            # Force CUDA sync
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                final_memory = torch.cuda.memory_allocated()
+                logger.info(f"Final CUDA memory: {final_memory/1024**2:.1f}MB")
+                logger.info(f"Memory change: {(final_memory - initial_memory)/1024**2:.1f}MB")
+                
+        except Exception as e:
+            logger.error(f"Error during latent precomputation: {str(e)}", exc_info=True)
+            raise
 
     def _create_buckets(self) -> List[Tuple[int, int]]:
         if not self.preprocessing_pipeline:
