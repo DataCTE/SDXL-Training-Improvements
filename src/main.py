@@ -1,10 +1,12 @@
 """Main orchestration script for SDXL fine-tuning with 100x speedups."""
 import argparse
 import os
+import time
 
 # Disable TorchDynamo in DataLoader workers
 os.environ['TORCHDYNAMO_DISABLE'] = '1'
 import multiprocessing as mp
+import torch.cuda
 import logging
 import sys
 import threading
@@ -222,9 +224,13 @@ def setup_training(
     captions: List[str]
 ) -> tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     try:
+        if torch.cuda.is_available():
+            logger.info(f"Initial CUDA memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
+            
         logger.info("Initializing latent preprocessor...")
         try:
             latent_preprocessor = LatentPreprocessor(config=config, sdxl_model=model, device=device)
+            logger.info("Latent preprocessor initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize latent preprocessor: {str(e)}", exc_info=True)
             raise
@@ -257,6 +263,7 @@ def setup_training(
                 enable_memory_tracking=True
             )
             cache_manager.validate_cache_index()
+            logger.info("Cache manager setup complete")
         except Exception as e:
             logger.error(f"Failed to setup cache manager: {str(e)}", exc_info=True)
             raise
@@ -342,6 +349,23 @@ def setup_training(
         except Exception as e:
             logger.error(f"Failed to setup optimizer: {str(e)}", exc_info=True)
             raise
+
+        # Add timeout handling
+        timeout = 300  # 5 minutes timeout
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            if not torch.cuda.is_available() or torch.cuda.current_stream().query():
+                break
+            time.sleep(0.1)
+            
+        if time.time() - start_time >= timeout:
+            raise TimeoutError("CUDA operations timed out")
+
+        # Force CUDA synchronization
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            logger.info("CUDA synchronized successfully")
 
         try:
             if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
