@@ -25,15 +25,6 @@ from contextlib import nullcontext
 
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
-from src.data.utils.tensor_utils import validate_tensor
-from src.core.memory.tensor import (
-    tensors_record_stream,
-    pin_tensor_,
-    unpin_tensor_,
-    device_equals,
-    replace_tensors_,
-    torch_sync
-)
 import logging
 from src.data.utils.paths import convert_windows_path
 
