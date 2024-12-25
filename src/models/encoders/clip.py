@@ -30,7 +30,7 @@ def encode_clip(
         if use_attention_mask:
             attention_mask = tokens.ne(text_encoder.config.pad_token_id).long()
 
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.amp.autocast(device_type=tokens.device.type):
             outputs = text_encoder(
                 tokens,
                 attention_mask=attention_mask,

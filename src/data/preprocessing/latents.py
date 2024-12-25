@@ -108,7 +108,7 @@ class LatentPreprocessor:
             stream = torch.cuda.Stream() if torch.cuda.is_available() else None
             
             # Use inference_mode for maximum speed
-            with torch.inference_mode(), torch.cuda.amp.autocast(enabled=True):
+            with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
                 if stream:
                     with torch.cuda.stream(stream):
                         txt_out, pooled_out = self.model.encode_text(
@@ -156,7 +156,7 @@ class LatentPreprocessor:
             stream = torch.cuda.Stream() if torch.cuda.is_available() else None
             
             # Use inference mode with mixed precision
-            with torch.inference_mode(), torch.cuda.amp.autocast(enabled=True):
+            with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
                 if stream:
                     with torch.cuda.stream(stream):
                         # Ensure input is on correct device and dtype
