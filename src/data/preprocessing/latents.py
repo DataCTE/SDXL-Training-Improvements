@@ -22,16 +22,30 @@ class LatentPreprocessor:
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
     ):
+        # Enable inference optimizations
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
-            torch.set_float32_matmul_precision('medium')
-
+            torch.set_float32_matmul_precision('high')  # Use high precision for inference
+            
+            # Set memory format for faster inference
+            torch.backends.cuda.preferred_linalg_library('cusolver')
+            
         self.config = config
         self.model = sdxl_model
         self.device = torch.device(device) if isinstance(device, str) else device
+        
+        # Put model in eval mode for inference
+        self.model.eval()
         self.model.to(self.device)
+        
+        # Cache text encoder parameters for faster inference
+        with torch.inference_mode():
+            for module in self.model.modules():
+                if hasattr(module, 'weight'):
+                    module.weight = module.weight.to(memory_format=torch.channels_last)
+        
         self.max_retries = max_retries
         self.chunk_size = chunk_size
         self.max_memory_usage = max_memory_usage
@@ -74,7 +88,7 @@ class LatentPreprocessor:
             self.use_cache = False
 
     def encode_prompt(self, prompt_batch: List[str]) -> Dict[str, torch.Tensor]:
-        """Encode text prompts into embeddings.
+        """Encode text prompts into embeddings with optimized inference mode.
         
         Args:
             prompt_batch: List of text prompts to encode
@@ -90,31 +104,31 @@ class LatentPreprocessor:
             # Create CUDA stream for async processing if available
             stream = torch.cuda.Stream() if torch.cuda.is_available() else None
             
-            with torch.cuda.amp.autocast(enabled=True):
-                with torch.no_grad():
-                    if stream:
-                        with torch.cuda.stream(stream):
-                            txt_out, pooled_out = self.model.encode_text(
-                                train_device=self.device,  # Explicitly pass device
-                                batch_size=len(prompt_batch),
-                                text=prompt_batch,
-                                text_encoder_1_layer_skip=0,
-                                text_encoder_2_layer_skip=0
-                            )
-                            # Ensure computation is complete
-                            stream.synchronize()
-                    else:
+            # Use inference_mode for maximum speed
+            with torch.inference_mode(), torch.cuda.amp.autocast(enabled=True):
+                if stream:
+                    with torch.cuda.stream(stream):
                         txt_out, pooled_out = self.model.encode_text(
-                            train_device=self.device,  # Explicitly pass device
+                            train_device=self.device,
                             batch_size=len(prompt_batch),
                             text=prompt_batch,
                             text_encoder_1_layer_skip=0,
                             text_encoder_2_layer_skip=0
                         )
+                        # Ensure computation is complete
+                        stream.synchronize()
+                else:
+                    txt_out, pooled_out = self.model.encode_text(
+                        train_device=self.device,
+                        batch_size=len(prompt_batch),
+                        text=prompt_batch,
+                        text_encoder_1_layer_skip=0,
+                        text_encoder_2_layer_skip=0
+                    )
 
-            # Ensure tensors are on correct device
-            txt_out = txt_out.to(self.device)
-            pooled_out = pooled_out.to(self.device)
+            # Ensure tensors are on correct device and contiguous for speed
+            txt_out = txt_out.to(self.device, non_blocking=True).contiguous()
+            pooled_out = pooled_out.to(self.device, non_blocking=True).contiguous()
             
             return {
                 "prompt_embeds": txt_out,
