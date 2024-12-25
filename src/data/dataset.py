@@ -87,9 +87,9 @@ class AspectBucketDataset(Dataset):
         try:
             super().__init__()
             self.stats = DatasetStats()
-        self.enable_memory_tracking = enable_memory_tracking
-        self.max_memory_usage = max_memory_usage
-        self.captions = captions
+            self.enable_memory_tracking = enable_memory_tracking
+            self.max_memory_usage = max_memory_usage
+            self.captions = captions
 
         # CUDA optimizations
         if torch.cuda.is_available():
