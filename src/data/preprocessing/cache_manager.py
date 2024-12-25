@@ -118,31 +118,53 @@ class CacheManager:
         try:
             index_data = {"files": {}, "chunks": {}}
             
-            # Scan existing files on disk with type tags
-            latent_files = {f"{p.stem}__image": p for p in self.image_dir.glob("*.pt")}
-            text_files = {f"{p.stem}__text": p for p in self.text_dir.glob("*.pt")}
+            # First pass: Scan and process image files
+            image_files = {p.stem.replace("__image", ""): p for p in self.image_dir.glob("*.pt")}
             
             # Try loading existing index
             if self.index_path.exists():
-                with open(self.index_path, 'r') as f:
-                    index_data = json.load(f)
+                try:
+                    with open(self.index_path, 'r') as f:
+                        index_data = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning("Invalid cache index file, starting fresh")
+                    index_data = {"files": {}, "chunks": {}}
                     
-            # Validate and update index entries
+            # First validate image entries
             valid_files = {}
             for file_path, file_info in index_data.get("files", {}).items():
                 base_name = Path(file_path).stem
                 
-                # Check for existing files with type tags
-                latent_path = latent_files.get(f"{base_name}__image")
-                text_path = text_files.get(f"{base_name}__text")
-                
-                if latent_path and latent_path.exists():
-                    file_info["latent_path"] = str(latent_path)
-                    file_info["type"] = "image"  # Tag as image file
-                    if text_path and text_path.exists():
-                        file_info["text_path"] = str(text_path)
-                        file_info["text_type"] = "text"  # Tag text component
+                # Check for existing image file
+                image_path = image_files.get(base_name)
+                if image_path and image_path.exists():
+                    file_info["latent_path"] = str(image_path)
+                    file_info["type"] = "image"
                     valid_files[file_path] = file_info
+            
+            # Add any new image files found on disk
+            for base_name, image_path in image_files.items():
+                matching_entries = [p for p, info in valid_files.items() 
+                                if Path(info.get("latent_path", "")).stem.replace("__image", "") == base_name]
+                if not matching_entries:
+                    file_info = {
+                        "base_name": base_name,
+                        "latent_path": str(image_path),
+                        "type": "image",
+                        "timestamp": time.time()
+                    }
+                    valid_files[str(image_path)] = file_info
+            
+            # Second pass: Process text files
+            text_files = {p.stem.replace("__text", ""): p for p in self.text_dir.glob("*.pt")}
+            
+            # Update existing entries with text information
+            for file_path, file_info in valid_files.items():
+                base_name = Path(file_path).stem
+                text_path = text_files.get(base_name)
+                if text_path and text_path.exists():
+                    file_info["text_path"] = str(text_path)
+                    file_info["text_type"] = "text"
             
             # Add any files found on disk but not in index
             for base_name, latent_path in latent_files.items():
@@ -268,38 +290,50 @@ class CacheManager:
         text_embeddings: Optional[Dict[str, torch.Tensor]],
         metadata: Dict,
         file_path: Union[str, Path],
-        caption: Optional[str] = None  # Add caption parameter
+        caption: Optional[str] = None
     ) -> bool:
         if latent_data is None and text_embeddings is None:
             logger.error(f"Both latent_data and text_embeddings are None for {file_path}")
             return False
+            
         if self.enable_memory_tracking:
             self._track_memory("save_start")
+            
         base_name = Path(file_path).stem
         current_entry = self.cache_index["files"].get(str(file_path), {})
         metadata["timestamp"] = time.time()
 
         if caption is not None:
-            metadata["caption"] = caption  # Store caption in metadata
+            metadata["caption"] = caption
 
         # Initialize or update the cache index entry
         file_info = current_entry.copy()
         file_info["base_name"] = base_name
         file_info["timestamp"] = metadata["timestamp"]
 
-        if latent_data is not None:
-            # Handle latent data
-            latent_path = self.image_dir / f"{base_name}__image.pt"
-            # (Saving latent data code...)
-            file_info["latent_path"] = str(latent_path)
-            file_info["type"] = "image"  # Tag as image file
+        try:
+            # First handle image data if present
+            if latent_data is not None:
+                latent_path = self.image_dir / f"{base_name}__image.pt"
+                torch.save({
+                    "latent": latent_data,
+                    "metadata": metadata
+                }, latent_path)
+                file_info["latent_path"] = str(latent_path)
+                file_info["type"] = "image"
+                # Save index after image processing
+                self.cache_index["files"][str(file_path)] = file_info
+                self._save_cache_index()
 
-        if text_embeddings is not None:
-            # Handle text embeddings
-            text_path = self.text_dir / f"{base_name}__text.pt"
-            # (Saving text embeddings code...)
-            file_info["text_path"] = str(text_path)
-            file_info["text_type"] = "text"  # Tag text component
+            # Then handle text data if present
+            if text_embeddings is not None:
+                text_path = self.text_dir / f"{base_name}__text.pt"
+                torch.save({
+                    "embeddings": text_embeddings,
+                    "metadata": metadata
+                }, text_path)
+                file_info["text_path"] = str(text_path)
+                file_info["text_type"] = "text"
 
         # Update the cache index
         self.cache_index["files"][str(file_path)] = file_info
