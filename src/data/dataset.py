@@ -140,8 +140,7 @@ class AspectBucketDataset(Dataset):
         
         # Assign bucket indices using pipeline - simplified call
         self.bucket_indices = self.preprocessing_pipeline.assign_aspect_buckets(
-            image_paths=self.image_paths,
-            config=self.config  # Pass config instead of individual parameters
+            image_paths=self.image_paths
         )
 
         # Log bucket statistics
