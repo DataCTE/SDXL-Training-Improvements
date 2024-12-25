@@ -470,8 +470,13 @@ class PreprocessingPipeline:
                 tensor = tensor.to(dtype=vae_dtype)
                 return self.latent_preprocessor.encode_images(tensor)
 
+            # Get bucket dimensions for this image
+            bucket_idx = self._assign_single_bucket(img_path, self.buckets, self.config.global_config.image.max_aspect_ratio)
+            target_size = self.buckets[bucket_idx]
+
             img = Image.open(img_path).convert('RGB')
-            img = img.resize(self.target_image_size, Image.LANCZOS)
+            # Use bucket dimensions instead of hardcoded size
+            img = img.resize(target_size, Image.LANCZOS)
             tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
             tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
             
@@ -480,6 +485,8 @@ class PreprocessingPipeline:
             
             metadata = {
                 "original_size": img.size,
+                "bucket_size": target_size,  # Add bucket size to metadata
+                "bucket_index": bucket_idx,  # Add bucket index to metadata
                 "path": str(img_path),
                 "timestamp": time.time(),
                 "device_id": self.device_id if torch.cuda.is_available() else None
