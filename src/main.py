@@ -378,6 +378,7 @@ def setup_training(
         raise
 
 def main():
+    print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
     device = None
     try:
@@ -479,4 +480,7 @@ def main():
             logger.error(f"Error context: {e.context}")
             
         sys.exit(1)
+
+if __name__ == "__main__":
+    main()
 
