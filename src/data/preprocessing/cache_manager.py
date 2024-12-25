@@ -16,12 +16,13 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
 
-from src.core.types import DataType, ModelWeightDtypes
+
 from tqdm.auto import tqdm
 from contextlib import nullcontext
 
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
+from src.data.utils.tensor_utils import validate_tensor
 from src.core.memory.tensor import (
     tensors_record_stream,
     pin_tensor_,
@@ -30,7 +31,7 @@ from src.core.memory.tensor import (
     replace_tensors_,
     torch_sync
 )
-from src.core.logging.logging import setup_logging
+import logging
 from ..utils.paths import convert_windows_path
 
 logger = logging.getLogger(__name__)
@@ -361,7 +362,7 @@ class CacheManager:
 
 
     def _validate_tensor(self, tensor: torch.Tensor) -> bool:
-        from ..utils.tensor_utils import validate_tensor
+
         return validate_tensor(
             tensor,
             expected_dims=4,
