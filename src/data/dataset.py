@@ -285,20 +285,17 @@ class AspectBucketDataset(Dataset):
                 
             self.stats.cache_hits += 1
             
-            # Handle different latent data formats
-            latent = None
-            if "latent_dist" in cached_data:
-                latent = cached_data["latent_dist"]
-            elif "latent" in cached_data:
-                # Convert to expected format if needed
-                latent = {
-                    "sample": cached_data["latent"],
-                    "mean": cached_data["latent"],
-                    "std": torch.ones_like(cached_data["latent"])
+            # Handle latent data
+            if "latent" in cached_data:
+                latent_tensor = cached_data["latent"]
+                # Create latent distribution dict
+                latent_dist = {
+                    "sample": latent_tensor,
+                    "mean": latent_tensor,
+                    "std": torch.ones_like(latent_tensor)
                 }
-            
-            if latent is None:
-                raise ValueError(f"No valid latent data found in cache for {image_path}")
+            else:
+                raise ValueError(f"No latent data found in cache for {image_path}")
             
             # Get metadata for size information
             metadata = cached_data.get("metadata", {})
@@ -308,7 +305,8 @@ class AspectBucketDataset(Dataset):
             
             # Create result with required fields
             result = {
-                "latent_dist": latent,  # Use latent_dist instead of model_input
+                "latent_dist": latent_dist,
+                "model_input": latent_tensor,  # Also provide direct tensor access
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
