@@ -49,12 +49,13 @@ class PreprocessingPipeline:
         latent_preprocessor: Optional[LatentPreprocessor] = None,
         cache_manager: Optional[CacheManager] = None,
         is_train=True,
-        num_cpu_workers=4,
-        num_io_workers=2,
-        prefetch_factor=2,
-        use_pinned_memory=True,
-        enable_memory_tracking=True,
-        stream_timeout=10.0
+        num_gpu_workers: int = 1,  # Add this parameter
+        num_cpu_workers: int = 4,
+        num_io_workers: int = 2,
+        prefetch_factor: int = 2,
+        use_pinned_memory: bool = True,
+        enable_memory_tracking: bool = True,
+        stream_timeout: float = 10.0
     ):
         """Initialize preprocessing pipeline.
         
@@ -63,6 +64,7 @@ class PreprocessingPipeline:
             latent_preprocessor: Optional latent preprocessor
             cache_manager: Optional cache manager
             is_train: Whether this is for training
+            num_gpu_workers: Number of GPU workers for parallel processing
             num_cpu_workers: Number of CPU workers for preprocessing
             num_io_workers: Number of IO workers for data loading
             prefetch_factor: Prefetch factor for data loading
@@ -102,6 +104,8 @@ class PreprocessingPipeline:
         self.cache_manager = cache_manager
         self.is_train = is_train
         
+        # Store worker configurations
+        self.num_gpu_workers = num_gpu_workers
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         
