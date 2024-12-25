@@ -74,19 +74,56 @@ class LatentPreprocessor:
             self.use_cache = False
 
     def encode_prompt(self, prompt_batch: List[str]) -> Dict[str, torch.Tensor]:
+        """Encode text prompts into embeddings.
+        
+        Args:
+            prompt_batch: List of text prompts to encode
+            
+        Returns:
+            Dictionary containing text embeddings
+        """
         try:
-            with torch.no_grad():
-                txt_out, pooled_out = self.model.encode_text(
-                    train_device=self.device,
-                    batch_size=len(prompt_batch),
-                    text=prompt_batch,
-                    text_encoder_1_layer_skip=0,
-                    text_encoder_2_layer_skip=0
-                )
-            return {"prompt_embeds": txt_out, "pooled_prompt_embeds": pooled_out}
+            # Ensure model is on correct device
+            if not self.model.device == self.device:
+                self.model.to(self.device)
+                
+            # Create CUDA stream for async processing if available
+            stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            
+            with torch.cuda.amp.autocast(enabled=True):
+                with torch.no_grad():
+                    if stream:
+                        with torch.cuda.stream(stream):
+                            txt_out, pooled_out = self.model.encode_text(
+                                train_device=self.device,  # Explicitly pass device
+                                batch_size=len(prompt_batch),
+                                text=prompt_batch,
+                                text_encoder_1_layer_skip=0,
+                                text_encoder_2_layer_skip=0
+                            )
+                            # Ensure computation is complete
+                            stream.synchronize()
+                    else:
+                        txt_out, pooled_out = self.model.encode_text(
+                            train_device=self.device,  # Explicitly pass device
+                            batch_size=len(prompt_batch),
+                            text=prompt_batch,
+                            text_encoder_1_layer_skip=0,
+                            text_encoder_2_layer_skip=0
+                        )
+
+            # Ensure tensors are on correct device
+            txt_out = txt_out.to(self.device)
+            pooled_out = pooled_out.to(self.device)
+            
+            return {
+                "prompt_embeds": txt_out,
+                "pooled_prompt_embeds": pooled_out
+            }
+            
         except Exception as e:
             logger.error(f"Failed to encode prompts: {str(e)}")
-            raise
+            raise RuntimeError(f"Text encoding failed: {str(e)}")
 
     def encode_images(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
         try:
