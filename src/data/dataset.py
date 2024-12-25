@@ -267,8 +267,73 @@ class AspectBucketDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """Dataset is used only for initialization, not item retrieval."""
-        return self
+        """Get a single item from the dataset.
+        
+        Args:
+            idx: Index of the item to get
+            
+        Returns:
+            Dictionary containing processed item data
+        """
+        try:
+            image_path = self.image_paths[idx]
+            caption = self.captions[idx]
+            bucket_idx = self.bucket_indices[idx]
+
+            # Try to get from cache first
+            if self.cache_manager and self.config.global_config.cache.use_cache:
+                cached_data = self.cache_manager.get_cached_item(image_path)
+                if cached_data:
+                    self.stats.cache_hits += 1
+                    return {
+                        "model_input": cached_data["latent"],
+                        "text": caption,
+                        "bucket_idx": bucket_idx,
+                        "image_path": image_path
+                    }
+                self.stats.cache_misses += 1
+
+            # Load and process image if not cached
+            try:
+                img = Image.open(image_path).convert('RGB')
+                # Resize to bucket dimensions
+                resized_img, _ = self.preprocessing_pipeline.resize_to_bucket(img, bucket_idx)
+                
+                # Convert to tensor and preprocess
+                img_tensor = self.transforms(resized_img).unsqueeze(0)
+                
+                # Get latents using preprocessor
+                if self.latent_preprocessor:
+                    with torch.no_grad():
+                        processed = self.latent_preprocessor.encode_images(img_tensor)
+                        latents = processed["image_latent"]
+                else:
+                    raise ValueError("Latent preprocessor not initialized")
+
+                # Cache result if enabled
+                if self.cache_manager and self.config.global_config.cache.use_cache:
+                    self.cache_manager.save_preprocessed_data(
+                        image_latent={"latent": latents},
+                        text_embeddings=None,
+                        metadata={"bucket_idx": bucket_idx},
+                        file_path=image_path
+                    )
+
+                return {
+                    "model_input": latents,
+                    "text": caption,
+                    "bucket_idx": bucket_idx,
+                    "image_path": image_path
+                }
+
+            except Exception as e:
+                logger.error(f"Error processing image {image_path}: {str(e)}")
+                self.stats.failed_images += 1
+                raise
+
+        except Exception as e:
+            logger.error(f"Error getting dataset item {idx}: {str(e)}")
+            raise
 
     def __enter__(self):
         """Context manager entry."""
