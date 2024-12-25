@@ -5,8 +5,8 @@ from torch import Tensor
 from transformers import CLIPTextModel, CLIPTokenizer
 from src.core.logging.logging import setup_logging
 
-# Initialize logger with core logging system
-logger = setup_logging(__name__)
+# Initialize logger with debug disabled by default
+logger = setup_logging(__name__, default_level="INFO")
 
 class CLIPEncoder:
     """Optimized CLIP encoder wrapper with extreme speedup."""
@@ -16,17 +16,23 @@ class CLIPEncoder:
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
         device: Union[str, torch.device] = "cuda",
-        dtype: Optional[torch.dtype] = torch.float16
+        dtype: Optional[torch.dtype] = torch.float16,
+        debug: bool = False
     ):
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.device = torch.device(device)
         self.dtype = dtype
+        self.debug = debug
         
         # Apply optimizations
         self.text_encoder.to(device=self.device, dtype=self.dtype)
         if hasattr(torch, "compile") and self.device.type == "cuda":
             self.text_encoder = torch.compile(self.text_encoder, mode="reduce-overhead", fullgraph=False)
+            
+        if self.debug:
+            logger.setLevel("DEBUG")
+            logger.debug("CLIP encoder debug logging enabled")
             
         logger.info("CLIP encoder initialized", extra={
             'device': str(self.device),
@@ -44,10 +50,11 @@ class CLIPEncoder:
             Dictionary containing text embeddings and pooled outputs
         """
         try:
-            logger.debug("Starting prompt encoding", extra={
-                'batch_size': len(prompt_batch),
-                'device': str(self.device)
-            })
+            if self.debug:
+                logger.debug("Starting prompt encoding", extra={
+                    'batch_size': len(prompt_batch),
+                    'device': str(self.device)
+                })
             
             # Tokenize prompts
             tokens = self.tokenizer(
@@ -72,12 +79,13 @@ class CLIPEncoder:
                 "pooled_embeds": pooled_output
             }
             
-            logger.debug("Prompt encoding complete", extra={
-                'output_shapes': {
-                    'text_embeds': tuple(text_encoder_output.shape),
-                    'pooled_embeds': tuple(pooled_output.shape) if pooled_output is not None else None
-                }
-            })
+            if self.debug:
+                logger.debug("Prompt encoding complete", extra={
+                    'output_shapes': {
+                        'text_embeds': tuple(text_encoder_output.shape),
+                        'pooled_embeds': tuple(pooled_output.shape) if pooled_output is not None else None
+                    }
+                })
             
             return result
             
@@ -103,12 +111,13 @@ class CLIPEncoder:
     ) -> Tuple[Tensor, Optional[Tensor]]:
         """Low-level CLIP encoding with caching support."""
         try:
-            logger.debug("Starting CLIP encoding", extra={
-                'tokens_shape': tuple(tokens.shape),
-                'default_layer': default_layer,
-                'layer_skip': layer_skip,
-                'use_attention_mask': use_attention_mask
-            })
+            if self.debug:
+                logger.debug("Starting CLIP encoding", extra={
+                    'tokens_shape': tuple(tokens.shape),
+                    'default_layer': default_layer,
+                    'layer_skip': layer_skip,
+                    'use_attention_mask': use_attention_mask
+                })
 
             # Ensure tokens are on correct device and dtype
             tokens = tokens.to(self.device, dtype=torch.long)
@@ -138,10 +147,11 @@ class CLIPEncoder:
                         else:
                             pooled_output = outputs.pooler_output if hasattr(outputs, "pooler_output") else outputs.last_hidden_state.mean(dim=1)
 
-            logger.debug("CLIP encoding complete", extra={
-                'output_shape': tuple(text_encoder_output.shape),
-                'pooled_shape': tuple(pooled_output.shape) if pooled_output is not None else None
-            })
+            if self.debug:
+                logger.debug("CLIP encoding complete", extra={
+                    'output_shape': tuple(text_encoder_output.shape),
+                    'pooled_shape': tuple(pooled_output.shape) if pooled_output is not None else None
+                })
 
             return text_encoder_output, pooled_output
 
