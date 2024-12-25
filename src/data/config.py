@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import yaml
 import logging
+from src.core.logging.logging import setup_logging
 
 logger = logging.getLogger(__name__)
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
+from src.data.preprocessing.exceptions import PreprocessingError
 
 
 from tqdm.auto import tqdm
