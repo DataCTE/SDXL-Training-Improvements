@@ -1,6 +1,7 @@
 """High-performance preprocessing pipeline with extreme speedups."""
 import time
 import torch
+import random
 import logging
 from contextlib import contextmanager
 from src.core.logging.logging import setup_logging
@@ -471,14 +472,25 @@ class PreprocessingPipeline:
 
     def precompute_latents(
         self,
-        image_paths,
-        batch_size=1,
-        proportion_empty_prompts=0.0,
-        process_latents=True,
-        process_text_embeddings=True
-    ):
-        if not self.latent_preprocessor or not self.cache_manager or not self.is_train:
+        image_paths: List[str],
+        batch_size: int = 1,
+        proportion_empty_prompts: float = 0.0,
+        process_latents: bool = True,
+        process_text_embeddings: bool = True
+    ) -> None:
+        """Precompute and cache latents and text embeddings.
+        
+        Args:
+            image_paths: List of image paths to process
+            batch_size: Batch size for processing
+            proportion_empty_prompts: Proportion of prompts to leave empty
+            process_latents: Whether to process image latents
+            process_text_embeddings: Whether to process text embeddings
+        """
+        if not self.latent_preprocessor or not self.cache_manager:
+            logger.warning("Latent preprocessor or cache manager not available")
             return
+
         logger.info(f"Precomputing latents and embeddings for {len(image_paths)} items")
         to_process = []
 
@@ -539,26 +551,41 @@ class PreprocessingPipeline:
                         text_embeddings = None
                         metadata = {"path": img_path, "timestamp": time.time()}
 
+                        # Process image latents if needed
                         if process_latents:
                             processed = self._process_image(img_path)
                             if processed:
                                 image_latent = processed["image_latent"]
                                 metadata.update(processed.get("metadata", {}))
 
+                        # Process text embeddings if needed
                         if process_text_embeddings:
-                            caption = self._read_caption(img_path)
+                            # Get caption from file
+                            caption_path = Path(img_path).with_suffix('.txt')
+                            if caption_path.exists():
+                                with open(caption_path, 'r', encoding='utf-8') as f:
+                                    caption = f.read().strip()
+                            else:
+                                # Use empty string if no caption file exists
+                                caption = ""
+                                logger.warning(f"No caption file found for {img_path}, using empty caption")
+
+                            # Apply empty prompt probability
+                            if proportion_empty_prompts > 0 and random.random() < proportion_empty_prompts:
+                                caption = ""
+
                             embeddings = self.latent_preprocessor.encode_prompt([caption])
                             text_embeddings = embeddings
                             metadata["caption"] = caption
 
                         # Save to cache
-                        if image_latent or text_embeddings:
+                        if image_latent is not None or text_embeddings is not None:
                             self.cache_manager.save_preprocessed_data(
                                 image_latent=image_latent,
                                 text_embeddings=text_embeddings,
                                 metadata=metadata,
                                 file_path=img_path,
-                                caption=caption if process_text_embeddings else None
+                                caption=metadata.get("caption", "") if process_text_embeddings else None
                             )
                             self.stats.successful += 1
                     except Exception as e:
