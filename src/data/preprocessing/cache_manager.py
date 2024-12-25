@@ -118,9 +118,9 @@ class CacheManager:
         try:
             index_data = {"files": {}, "chunks": {}}
             
-            # Scan existing files on disk
-            latent_files = {p.stem: p for p in self.image_dir.glob("*.pt")}
-            text_files = {p.stem: p for p in self.text_dir.glob("*.pt")}
+            # Scan existing files on disk with type tags
+            latent_files = {f"{p.stem}__image": p for p in self.image_dir.glob("*.pt")}
+            text_files = {f"{p.stem}__text": p for p in self.text_dir.glob("*.pt")}
             
             # Try loading existing index
             if self.index_path.exists():
@@ -132,14 +132,16 @@ class CacheManager:
             for file_path, file_info in index_data.get("files", {}).items():
                 base_name = Path(file_path).stem
                 
-                # Check for existing files
-                latent_path = latent_files.get(base_name)
-                text_path = text_files.get(base_name)
+                # Check for existing files with type tags
+                latent_path = latent_files.get(f"{base_name}__image")
+                text_path = text_files.get(f"{base_name}__text")
                 
                 if latent_path and latent_path.exists():
                     file_info["latent_path"] = str(latent_path)
+                    file_info["type"] = "image"  # Tag as image file
                     if text_path and text_path.exists():
                         file_info["text_path"] = str(text_path)
+                        file_info["text_type"] = "text"  # Tag text component
                     valid_files[file_path] = file_info
             
             # Add any files found on disk but not in index
@@ -287,15 +289,17 @@ class CacheManager:
 
         if latent_data is not None:
             # Handle latent data
-            latent_path = self.image_dir / f"{base_name}.pt"
+            latent_path = self.image_dir / f"{base_name}__image.pt"
             # (Saving latent data code...)
             file_info["latent_path"] = str(latent_path)
+            file_info["type"] = "image"  # Tag as image file
 
         if text_embeddings is not None:
             # Handle text embeddings
-            text_path = self.text_dir / f"{base_name}.pt"
+            text_path = self.text_dir / f"{base_name}__text.pt"
             # (Saving text embeddings code...)
             file_info["text_path"] = str(text_path)
+            file_info["text_type"] = "text"  # Tag text component
 
         # Update the cache index
         self.cache_index["files"][str(file_path)] = file_info
