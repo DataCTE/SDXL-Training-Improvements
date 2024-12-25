@@ -140,14 +140,58 @@ class LatentPreprocessor:
             raise RuntimeError(f"Text encoding failed: {str(e)}")
 
     def encode_images(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Encode images to latents with optimized inference.
+        
+        Args:
+            pixel_values: Image tensor of shape (B, C, H, W)
+            
+        Returns:
+            Dictionary containing encoded latents
+        """
         try:
-            with torch.no_grad():
-                # Ensure pixel_values has the same dtype as the VAE
-                vae_dtype = next(self.model.vae.parameters()).dtype
-                pixel_values = pixel_values.to(dtype=vae_dtype)
-                latents = self.model.vae.encode(pixel_values).latents
-                latents = latents * self.model.vae.config.scaling_factor
-            return {"image_latent": latents}
+            # Create CUDA stream for async processing if available
+            stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+            
+            # Use inference mode with mixed precision
+            with torch.inference_mode(), torch.cuda.amp.autocast(enabled=True):
+                if stream:
+                    with torch.cuda.stream(stream):
+                        # Ensure input is on correct device and dtype
+                        vae_dtype = next(self.model.vae.parameters()).dtype
+                        pixel_values = pixel_values.to(
+                            device=self.device,
+                            dtype=vae_dtype,
+                            memory_format=torch.channels_last,
+                            non_blocking=True
+                        )
+                        
+                        # Encode with VAE
+                        latents = self.model.vae.encode(pixel_values).latents
+                        latents = latents * self.model.vae.config.scaling_factor
+                        
+                        # Ensure computation is complete
+                        stream.synchronize()
+                        
+                        # Record stream for tensor memory management
+                        if hasattr(latents, 'record_stream'):
+                            latents.record_stream(stream)
+                else:
+                    # Non-stream processing path
+                    vae_dtype = next(self.model.vae.parameters()).dtype
+                    pixel_values = pixel_values.to(
+                        device=self.device,
+                        dtype=vae_dtype,
+                        memory_format=torch.channels_last,
+                        non_blocking=True
+                    )
+                    latents = self.model.vae.encode(pixel_values).latents
+                    latents = latents * self.model.vae.config.scaling_factor
+                
+                # Ensure output is contiguous and properly formatted
+                latents = latents.contiguous()
+                
+                return {"image_latent": latents}
+                
         except Exception as e:
             logger.error(f"Failed to encode images: {str(e)}")
-            raise
+            raise RuntimeError(f"Image encoding failed: {str(e)}")
