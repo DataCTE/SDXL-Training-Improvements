@@ -243,6 +243,17 @@ class CacheManager:
                         if "timestamp" in latent_data["metadata"]:
                             file_info["latent_path"] = str(latent_path)
                             file_info["timestamp"] = latent_data["metadata"]["timestamp"]
+                            
+                            # Check text embeddings file  
+                            text_path = text_files.get(base_name)
+                            if text_path and text_path.exists():
+                                file_info["text_path"] = str(text_path)
+                            else:
+                                missing_text.append(file_path)
+                                logger.warning(f"Missing text embeddings file for: {file_path}")
+                            
+                            # Keep entry if at least latents exist
+                            valid_files[file_path] = file_info
                             continue
                 except Exception as e:
                     logger.warning(f"Invalid latent file for {file_path}: {e}")
@@ -250,18 +261,6 @@ class CacheManager:
             missing_latents.append(file_path)
             logger.warning(f"Missing or invalid latent file for: {file_path}")
             continue
-                
-            # Check text embeddings file  
-            text_path = text_files.get(base_name)
-            if text_path and text_path.exists():
-                file_info["text_path"] = str(text_path)
-            else:
-                missing_text.append(file_path)
-                logger.warning(f"Missing text embeddings file for: {file_path}")
-                
-            # Keep entry if at least latents exist
-            if latent_path:
-                valid_files[file_path] = file_info
 
         # Update index with validated entries
         self.cache_index["files"] = valid_files
