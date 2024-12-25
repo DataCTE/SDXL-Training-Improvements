@@ -556,7 +556,7 @@ class CacheManager:
 
             def load_tensor_file(path: Path, target_key: str):
                 if path.exists():
-                    data = torch.load(path, map_location='cpu')
+                    data = torch.load(path, map_location='cpu', weights_only=True)
                     if target_key == "latent":
                         return {"latent": data["latent"], "metadata": data["metadata"]}
                     else:

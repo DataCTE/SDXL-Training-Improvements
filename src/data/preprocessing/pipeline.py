@@ -380,32 +380,41 @@ class PreprocessingPipeline:
                 else:
                     self.stats.cache_misses += 1
 
+            # Always process text embeddings if not in cache
+            if "text_embeddings" not in processed_data:
+                if caption is None:
+                    caption = self._read_caption(image_path)
+                embeddings = self.latent_preprocessor.encode_prompt([caption])
+                processed_data["text_embeddings"] = embeddings
+                
+                # Save text embeddings to cache immediately
+                if self.cache_manager:
+                    self.cache_manager.save_preprocessed_data(
+                        image_latent=None,
+                        text_embeddings=embeddings,
+                        metadata={"caption": caption, "timestamp": time.time()},
+                        file_path=image_path,
+                        caption=caption
+                    )
+
             if "image_latent" not in processed_data:
                 processed = self._process_image(image_path)
                 if processed:
                     processed_data["image_latent"] = processed["image_latent"]
                     processed_data.setdefault("metadata", {}).update(processed.get("metadata", {}))
+                    
+                    # Save image latent to cache
+                    if self.cache_manager:
+                        self.cache_manager.save_preprocessed_data(
+                            image_latent=processed["image_latent"],
+                            text_embeddings=None,
+                            metadata=processed.get("metadata", {}),
+                            file_path=image_path
+                        )
                 else:
                     raise ProcessingError(f"Failed to process image: {image_path}")
 
-            if caption is None:
-                caption = self._read_caption(image_path)
-
-            if "text_embeddings" not in processed_data:
-                embeddings = self.latent_preprocessor.encode_prompt([caption])
-                processed_data["text_embeddings"] = embeddings
-
-            processed_data["text"] = caption
-
-            if self.cache_manager:
-                self.cache_manager.save_preprocessed_data(
-                    image_latent=processed_data.get("image_latent"),
-                    text_embeddings=processed_data.get("text_embeddings"),
-                    metadata=processed_data.get("metadata", {}),
-                    file_path=image_path,
-                    caption=caption  # Pass caption
-                )
-
+            processed_data["text"] = caption or self._read_caption(image_path)
             return processed_data
 
         except Exception as e:
