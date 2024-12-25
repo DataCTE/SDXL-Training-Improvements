@@ -234,13 +234,13 @@ class AspectBucketDataset(Dataset):
         try:
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
-            # Let pipeline handle caching, etc.
+            
+            # Remove extra arguments - get_processed_item only takes image_path and caption
             processed_data = self.preprocessing_pipeline.get_processed_item(
                 image_path=image_path,
-                caption=caption,
-                cache_manager=self.cache_manager,
-                latent_preprocessor=self.latent_preprocessor
+                caption=caption
             )
+            
             data_item = {}
             if "latent" in processed_data:
                 latent_tensor = processed_data["latent"]
@@ -255,6 +255,7 @@ class AspectBucketDataset(Dataset):
             data_item["text"] = caption
             data_item["loss_weight"] = self.tag_weighter.get_caption_weight(caption) if self.tag_weighter else 1.0
             return data_item
+            
         except Exception as e:
             logger.error(f"Error getting item {idx}: {e}")
             raise
