@@ -12,6 +12,7 @@ from contextlib import contextmanager, nullcontext
 
 import torch
 import torch.backends.cudnn
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -240,8 +241,9 @@ class AspectBucketDataset(Dataset):
             if key == "text":
                 # Keep text items as list
                 result[key] = [item[key] for item in batch]
-            elif key == "model_input":
-                # Handle the latent tensors
+            elif key in ["model_input", "prompt_embeds", "pooled_prompt_embeds", 
+                        "prompt_embeds_2", "pooled_prompt_embeds_2"]:
+                # Handle all tensor data
                 tensors = [item[key] for item in batch]
                 # Pad and stack tensors
                 max_shape = [max(sizes) for sizes in zip(*[t.shape for t in tensors])]
@@ -273,7 +275,7 @@ class AspectBucketDataset(Dataset):
             idx: Index of the item to get
             
         Returns:
-            Dictionary containing processed item data
+            Dictionary containing processed item data including text embeddings
         """
         try:
             image_path = self.image_paths[idx]
@@ -285,49 +287,69 @@ class AspectBucketDataset(Dataset):
                 cached_data = self.cache_manager.get_cached_item(image_path)
                 if cached_data:
                     self.stats.cache_hits += 1
-                    return {
+                    result = {
                         "model_input": cached_data["latent"],
                         "text": caption,
                         "bucket_idx": bucket_idx,
                         "image_path": image_path
                     }
+                    
+                    # Add text embeddings if available in cache
+                    if "text_embeddings" in cached_data:
+                        result.update({
+                            "prompt_embeds": cached_data["text_embeddings"].get("prompt_embeds"),
+                            "pooled_prompt_embeds": cached_data["text_embeddings"].get("pooled_prompt_embeds"),
+                            "prompt_embeds_2": cached_data["text_embeddings"].get("prompt_embeds_2"),
+                            "pooled_prompt_embeds_2": cached_data["text_embeddings"].get("pooled_prompt_embeds_2")
+                        })
+                    return result
                 self.stats.cache_misses += 1
 
-            # Load and process image if not cached
+            # Process both image and text
             try:
+                # Process image
                 img = Image.open(image_path).convert('RGB')
-                # Resize to bucket dimensions
                 resized_img, _ = self.preprocessing_pipeline.resize_to_bucket(img, bucket_idx)
-                
-                # Convert to tensor and preprocess
                 img_tensor = self.transforms(resized_img).unsqueeze(0)
                 
-                # Get latents using preprocessor
-                if self.latent_preprocessor:
-                    with torch.no_grad():
-                        processed = self.latent_preprocessor.encode_images(img_tensor)
-                        latents = processed["image_latent"]
-                else:
+                # Get image latents
+                if not self.latent_preprocessor:
                     raise ValueError("Latent preprocessor not initialized")
+                    
+                with torch.no_grad():
+                    processed_image = self.latent_preprocessor.encode_images(img_tensor)
+                    image_latents = processed_image["image_latent"]
+                    
+                    # Get text embeddings
+                    text_embeddings = self.latent_preprocessor.encode_prompt([caption])
 
-                # Cache result if enabled
+                # Cache results if enabled
                 if self.cache_manager and self.config.global_config.cache.use_cache:
                     self.cache_manager.save_preprocessed_data(
-                        image_latent={"latent": latents},
-                        text_embeddings=None,
-                        metadata={"bucket_idx": bucket_idx},
-                        file_path=image_path
+                        image_latent={"latent": image_latents},
+                        text_embeddings=text_embeddings,
+                        metadata={
+                            "bucket_idx": bucket_idx,
+                            "caption": caption
+                        },
+                        file_path=image_path,
+                        caption=caption
                     )
 
+                # Return combined results
                 return {
-                    "model_input": latents,
+                    "model_input": image_latents,
                     "text": caption,
                     "bucket_idx": bucket_idx,
-                    "image_path": image_path
+                    "image_path": image_path,
+                    "prompt_embeds": text_embeddings["prompt_embeds"],
+                    "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"],
+                    "prompt_embeds_2": text_embeddings["prompt_embeds_2"],
+                    "pooled_prompt_embeds_2": text_embeddings["pooled_prompt_embeds_2"]
                 }
 
             except Exception as e:
-                logger.error(f"Error processing image {image_path}: {str(e)}")
+                logger.error(f"Error processing item {image_path}: {str(e)}")
                 self.stats.failed_images += 1
                 raise
 
