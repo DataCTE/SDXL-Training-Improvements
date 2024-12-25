@@ -123,7 +123,7 @@ class PreprocessingPipeline:
                 for dir_path in train_dirs:
                     dir_path = Path(convert_windows_path(dir_path) if is_windows_path(dir_path) else dir_path)
                     if dir_path.exists() and dir_path.is_dir():
-                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
+                        for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp', '*.tiff', '*.tif', '*.ppm', '*.pgm'):
                             paths.extend(str(convert_windows_path(p)) for p in dir_path.glob(ext))
                     else:
                         logger.warning(f"Training directory does not exist or is not a directory: {dir_path}")

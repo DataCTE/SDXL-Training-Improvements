@@ -211,12 +211,12 @@ class CacheManager:
             logger.error(f"Failed to save cache index: {str(e)}")
 
     def validate_cache_index(self) -> Tuple[List[str], List[str]]:
-        """Validate cache index by ensuring all referenced files exist.
+        """Validate cache index by ensuring all referenced files exist and are valid.
         
         Returns:
             Tuple containing:
             - List of paths missing text embeddings
-            - List of paths missing latent files
+            - List of paths missing or invalid latent files
         """
         valid_files = {}
         missing_text = []
@@ -230,14 +230,24 @@ class CacheManager:
         for file_path, file_info in self.cache_index.get("files", {}).items():
             base_name = Path(file_path).stem
             
-            # Check latent file
+            # Check latent file and validate if it exists
             latent_path = latent_files.get(base_name)
             if latent_path and latent_path.exists():
-                file_info["latent_path"] = str(latent_path)
-            else:
-                missing_latents.append(file_path)
-                logger.warning(f"Missing latent file for: {file_path}")
-                continue
+                try:
+                    # Quick validation without loading full tensor
+                    latent_data = torch.load(latent_path, map_location='cpu')
+                    if "latent" in latent_data and "metadata" in latent_data:
+                        # Check if metadata contains timestamp
+                        if "timestamp" in latent_data["metadata"]:
+                            file_info["latent_path"] = str(latent_path)
+                            file_info["timestamp"] = latent_data["metadata"]["timestamp"]
+                            continue
+                except Exception as e:
+                    logger.warning(f"Invalid latent file for {file_path}: {e}")
+                    
+            missing_latents.append(file_path)
+            logger.warning(f"Missing or invalid latent file for: {file_path}")
+            continue
                 
             # Check text embeddings file  
             text_path = text_files.get(base_name)
@@ -527,7 +537,8 @@ class CacheManager:
         max_aspect_ratio: float
     ) -> int:
         try:
-            img = Image.open(img_path)
+            # Support more image formats
+            img = Image.open(img_path).convert('RGB')  # Convert to RGB to ensure compatibility
             w, h = img.size
             aspect_ratio = w / h
             img_area = w * h
