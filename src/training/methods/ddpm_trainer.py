@@ -65,7 +65,15 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
-            latents = batch["model_input"]
+            # Extract latents - handle both direct latents and VAE output formats
+            if "model_input" in batch:
+                latents = batch["model_input"]
+            elif "latent_dist" in batch:
+                # Handle VAE output format
+                latents = batch["latent_dist"].sample()
+            else:
+                raise ValueError("No latent data found in batch")
+                
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
             
