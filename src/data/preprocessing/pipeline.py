@@ -296,17 +296,6 @@ class PreprocessingPipeline:
         
         return resized_img, bucket_idx
 
-
-    def _read_caption(self, img_path: Union[str, Path]) -> str:
-        # Construct the path to the corresponding .txt file
-        caption_path = Path(img_path).with_suffix('.txt')
-        if not caption_path.exists():
-            logger.warning(f"Caption file not found for image {img_path}. Using empty caption.")
-            return ""
-        with open(caption_path, 'r', encoding='utf-8') as f:
-            caption = f.read().strip()
-        return caption
-
     def assign_aspect_buckets(
         self,
         image_paths: List[Union[str, Path]],
