@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import yaml
-from src.core.logging.logging import setup_logging
+import logging
 
 logger = logging.getLogger(__name__)
 
