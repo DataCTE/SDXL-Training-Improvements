@@ -43,8 +43,10 @@ class LatentPreprocessor:
         # Cache text encoder parameters for faster inference
         with torch.inference_mode():
             for module in self.model.modules():
-                if hasattr(module, 'weight'):
-                    module.weight = module.weight.to(memory_format=torch.channels_last)
+                if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
+                    # Create new Parameter with channels_last memory format
+                    weight_tensor = module.weight.data.to(memory_format=torch.channels_last)
+                    module.weight = torch.nn.Parameter(weight_tensor)
         
         self.max_retries = max_retries
         self.chunk_size = chunk_size
