@@ -1,7 +1,9 @@
 """High-performance preprocessing pipeline with extreme speedups."""
-import logging
 import time
 import torch
+from src.core.logging.logging import setup_logging
+
+logger = setup_logging(__name__, level=logging.INFO)
 import torch.backends.cudnn
 from pathlib import Path
 import multiprocessing as mp
@@ -53,6 +55,8 @@ class PreprocessingPipeline:
         enable_memory_tracking=True,
         stream_timeout=10.0
     ):
+        self.logger = logging.getLogger(__name__)
+        self.action_history = {}
         # Basic initialization
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
