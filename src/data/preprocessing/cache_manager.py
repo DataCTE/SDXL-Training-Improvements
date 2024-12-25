@@ -405,15 +405,15 @@ class CacheManager:
 
     def save_preprocessed_data(
         self,
-        latent_data: Optional[Dict[str, torch.Tensor]],
+        image_latent: Optional[Dict[str, torch.Tensor]],
         text_embeddings: Optional[Dict[str, torch.Tensor]],
         metadata: Dict,
         file_path: Union[str, Path],
         caption: Optional[str] = None
     ) -> bool:
         """Save preprocessed data with optimized parallel writes."""
-        if latent_data is None and text_embeddings is None:
-            logger.error(f"Both latent_data and text_embeddings are None for {file_path}")
+        if image_latent is None and text_embeddings is None:
+            logger.error(f"Both image_latent and text_embeddings are None for {file_path}")
             return False
 
         try:

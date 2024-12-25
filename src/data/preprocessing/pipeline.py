@@ -380,10 +380,10 @@ class PreprocessingPipeline:
                 else:
                     self.stats.cache_misses += 1
 
-            if "latent" not in processed_data:
+            if "image_latent" not in processed_data:
                 processed = self._process_image(image_path)
                 if processed:
-                    processed_data["latent"] = processed["latent"]
+                    processed_data["image_latent"] = processed["image_latent"]
                     processed_data.setdefault("metadata", {}).update(processed.get("metadata", {}))
                 else:
                     raise ProcessingError(f"Failed to process image: {image_path}")
@@ -399,7 +399,7 @@ class PreprocessingPipeline:
 
             if self.cache_manager:
                 self.cache_manager.save_preprocessed_data(
-                    latent_data=processed_data.get("latent"),
+                    image_latent=processed_data.get("image_latent"),
                     text_embeddings=processed_data.get("text_embeddings"),
                     metadata=processed_data.get("metadata", {}),
                     file_path=image_path,
@@ -592,7 +592,7 @@ class PreprocessingPipeline:
                 "timestamp": time.time(),
                 "device_id": self.device_id if torch.cuda.is_available() else None
             }
-            return {"latent": latent_output["latent"], "metadata": metadata}
+            return {"image_latent": latent_output["image_latent"], "metadata": metadata}
         except Exception as e:
             self.stats.failed += 1
             logger.warning(f"Failed to process {img_path}: {e}")

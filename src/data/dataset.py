@@ -262,8 +262,8 @@ class AspectBucketDataset(Dataset):
             )
             
             data_item = {}
-            if "latent" in processed_data:
-                latent_tensor = processed_data["latent"]
+            if "image_latent" in processed_data:
+                latent_tensor = processed_data["image_latent"]
                 data_item["model_input"] = latent_tensor
             if "text_embeddings" in processed_data:
                 data_item["text_embeddings"] = processed_data["text_embeddings"]

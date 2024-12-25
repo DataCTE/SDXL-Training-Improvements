@@ -96,7 +96,7 @@ class LatentPreprocessor:
                 pixel_values = pixel_values.to(dtype=vae_dtype)
                 latents = self.model.vae.encode(pixel_values).latents
                 latents = latents * self.model.vae.config.scaling_factor
-            return {"latent": latents}
+            return {"image_latent": latents}
         except Exception as e:
             logger.error(f"Failed to encode images: {str(e)}")
             raise
