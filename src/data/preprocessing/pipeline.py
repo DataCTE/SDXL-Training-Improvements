@@ -20,6 +20,7 @@ from src.data.utils.paths import convert_windows_path, is_windows_path
 from contextlib import nullcontext
 from src.data.preprocessing.cache_manager import CacheManager
 from src.data.preprocessing.latents import LatentPreprocessor
+from src.core.memory.tensor import create_stream_context
 import numpy as np
 from src.data.config import Config
 
