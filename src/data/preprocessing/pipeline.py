@@ -116,7 +116,8 @@ class PreprocessingPipeline:
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
         self.stats = PipelineStats()
-        self.target_image_size = (1024, 1024)  # Define your target dimensions
+        self.buckets = self.get_aspect_buckets(config)
+        self.bucket_indices = []  # Will be populated when processing images
         self.valid_image_paths = []
 
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
