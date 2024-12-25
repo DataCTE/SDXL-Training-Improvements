@@ -449,11 +449,11 @@ class CacheManager:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = []
                 
-                if latent_data is not None:
+                if image_latent is not None:
                     latent_path = self.image_dir / f"{base_name}.pt"
                     futures.append(
                         executor.submit(save_tensor_file, 
-                            {"latent": latent_data, "metadata": metadata},
+                            {"latent": image_latent, "metadata": metadata},
                             latent_path, "latent"
                         )
                     )
