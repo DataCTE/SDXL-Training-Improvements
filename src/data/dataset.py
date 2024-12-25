@@ -269,92 +269,51 @@ class AspectBucketDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """Get a single item from the dataset.
-        
-        Args:
-            idx: Index of the item to get
-            
-        Returns:
-            Dictionary containing processed item data including text embeddings
-        """
+        """Get a single item from the dataset."""
         try:
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
             bucket_idx = self.bucket_indices[idx]
 
-            # Try to get from cache first
-            if self.cache_manager and self.config.global_config.cache.use_cache:
-                cached_data = self.cache_manager.get_cached_item(image_path)
-                if cached_data:
-                    self.stats.cache_hits += 1
-                    result = {
-                        "model_input": cached_data["latent"],  # Ensure this is the actual latent tensor
-                        "text": caption,
-                        "bucket_idx": bucket_idx,
-                        "image_path": image_path,
-                        "original_sizes": [(1024, 1024)],  # Add required metadata
-                        "crop_top_lefts": [(0, 0)],
-                        "target_sizes": [(1024, 1024)]
-                    }
-                    
-                    # Add text embeddings if available in cache
-                    if "text_embeddings" in cached_data:
-                        result.update({
-                            "prompt_embeds": cached_data["text_embeddings"].get("prompt_embeds"),
-                            "pooled_prompt_embeds": cached_data["text_embeddings"].get("pooled_prompt_embeds"),
-                            "prompt_embeds_2": cached_data["text_embeddings"].get("prompt_embeds_2"),
-                            "pooled_prompt_embeds_2": cached_data["text_embeddings"].get("pooled_prompt_embeds_2")
-                        })
-                    return result
-                self.stats.cache_misses += 1
-
-            # Process both image and text
-            try:
-                # Process image
-                img = Image.open(image_path).convert('RGB')
-                resized_img, _ = self.preprocessing_pipeline.resize_to_bucket(img, bucket_idx)
-                img_tensor = self.transforms(resized_img).unsqueeze(0)
+            # Get from cache - required since we're using precomputed latents
+            if not (self.cache_manager and self.config.global_config.cache.use_cache):
+                raise RuntimeError("Cache manager not initialized or caching disabled")
                 
-                # Get image latents
-                if not self.latent_preprocessor:
-                    raise ValueError("Latent preprocessor not initialized")
-                    
-                with torch.no_grad():
-                    processed_image = self.latent_preprocessor.encode_images(img_tensor)
-                    image_latents = processed_image["image_latent"]
-                    
-                    # Get text embeddings
-                    text_embeddings = self.latent_preprocessor.encode_prompt([caption])
-
-                # Cache results if enabled
-                if self.cache_manager and self.config.global_config.cache.use_cache:
-                    self.cache_manager.save_preprocessed_data(
-                        image_latent={"latent": image_latents},
-                        text_embeddings=text_embeddings,
-                        metadata={
-                            "bucket_idx": bucket_idx,
-                            "caption": caption
-                        },
-                        file_path=image_path,
-                        caption=caption
-                    )
-
-                # Return combined results
-                return {
-                    "model_input": image_latents,
-                    "text": caption,
-                    "bucket_idx": bucket_idx,
-                    "image_path": image_path,
-                    "prompt_embeds": text_embeddings["prompt_embeds"],
-                    "pooled_prompt_embeds": text_embeddings["pooled_prompt_embeds"],
-                    "prompt_embeds_2": text_embeddings["prompt_embeds_2"],
-                    "pooled_prompt_embeds_2": text_embeddings["pooled_prompt_embeds_2"]
-                }
-
-            except Exception as e:
-                logger.error(f"Error processing item {image_path}: {str(e)}")
-                self.stats.failed_images += 1
-                raise
+            cached_data = self.cache_manager.get_cached_item(image_path)
+            if not cached_data:
+                raise RuntimeError(f"No cached data found for {image_path}. Run preprocessing first.")
+                
+            self.stats.cache_hits += 1
+            
+            # Ensure latent data is properly formatted
+            latent = cached_data.get("latent")
+            if latent is None:
+                raise ValueError(f"No latent data found in cache for {image_path}")
+            
+            # Create result with required fields
+            result = {
+                "model_input": latent,
+                "text": caption,
+                "bucket_idx": bucket_idx,
+                "image_path": image_path,
+                "original_sizes": [(1024, 1024)],
+                "crop_top_lefts": [(0, 0)],
+                "target_sizes": [(1024, 1024)]
+            }
+            
+            # Add text embeddings if available
+            if "text_embeddings" in cached_data:
+                embeddings = cached_data["text_embeddings"]
+                result.update({
+                    "prompt_embeds": embeddings.get("prompt_embeds"),
+                    "pooled_prompt_embeds": embeddings.get("pooled_prompt_embeds"),
+                    "prompt_embeds_2": embeddings.get("prompt_embeds_2"),
+                    "pooled_prompt_embeds_2": embeddings.get("pooled_prompt_embeds_2")
+                })
+            else:
+                raise ValueError(f"No text embeddings found in cache for {image_path}")
+                
+            return result
 
         except Exception as e:
             logger.error(f"Error getting dataset item {idx}: {str(e)}")
