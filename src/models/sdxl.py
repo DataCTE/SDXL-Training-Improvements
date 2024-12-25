@@ -447,30 +447,43 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         """
         logger.info(f"Moving model components to {device}")
         try:
-            if device.type == "cuda":
-                stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                with create_stream_context(stream):
-                    self.vae_to(device)
-                    torch_gc()
-                    self.text_encoder_to(device)
-                    torch_gc()
-                    self.unet_to(device)
-                    torch_gc()
-                if torch.cuda.is_available():
-                    torch.cuda.current_stream().synchronize()
-            else:
-                self.vae_to(device)
-                self.text_encoder_to(device)
-                self.unet_to(device)
+            if device.type == "cuda" and not torch.cuda.is_available():
+                raise RuntimeError("CUDA device requested but CUDA is not available")
+
+            # Create stream context only for CUDA devices
+            stream_ctx = (
+                create_stream_context(torch.cuda.Stream())
+                if device.type == "cuda"
+                else nullcontext()
+            )
+
+            with stream_ctx:
+                # Move components sequentially with memory cleanup
+                for component_name, move_fn in [
+                    ("VAE", self.vae_to),
+                    ("text encoders", self.text_encoder_to),
+                    ("UNet", self.unet_to)
+                ]:
+                    try:
+                        move_fn(device)
+                        if device.type == "cuda":
+                            torch_gc()
+                    except Exception as comp_error:
+                        raise RuntimeError(f"Failed to move {component_name} to {device}") from comp_error
+
+                # Ensure CUDA operations are complete
+                if device.type == "cuda":
+                    torch_sync()
 
         except Exception as e:
             error_context = {
                 'device': str(device),
                 'cuda_available': torch.cuda.is_available(),
-                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                'error': str(e)
             }
             logger.error("Failed to move model to device", extra=error_context)
-            raise
+            raise RuntimeError(f"Failed to move model to {device}: {str(e)}") from e
 
     def create_pipeline(self) -> 'StableDiffusionXLPipeline':
         """

@@ -41,7 +41,7 @@ training:
     enable_async_offloading: true
     temp_device: "cpu"
   optimizer:
-    type: "adamw"  # Options: adamw, adamw_bf16, adamw_kahan, soap
+    type: "adamw_bf16"  # Options: adamw, adamw_bf16, adamw_kahan, soap
     soap_config:
       precondition_frequency: 10
       max_precond_dim: 10000

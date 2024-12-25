@@ -9,7 +9,7 @@ import colorama
 from colorama import Fore, Style
 from datetime import datetime
 from pathlib import Path
-
+import threading
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
 
@@ -38,46 +38,14 @@ class ColoredFormatter(logging.Formatter):
     
     # Fields to exclude from console output
     exclude_fields = ['process', 'thread', 'processName', 'threadName']
-
-    def format(self, record):
-        """Enhanced formatter with detailed context and error tracking."""
-        # Add color to level name
-        levelname = record.levelname
-        if levelname in self.COLORS:
-            color = self.COLORS[levelname]
-            levelname_color = f"{color}{levelname}{Style.RESET_ALL}"
-            record.levelname = levelname_color
-
-        # Format the message
-        message = super().format(record)
-
-        # Add exception info and stack trace if present
-        if record.exc_info:
-            exception_text = self.formatException(record.exc_info)
-            message = f"{message}\nException:\n{exception_text}"
-
-        if record.stack_info:
-            stack_info_text = self.formatStack(record.stack_info)
-            message = f"{message}\nStack Trace:\n{stack_info_text}"
-
-        return message
-    exclude_fields = ['process', 'thread', 'processName', 'threadName']
-    
-    KEYWORDS = {
-        'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
-        'success': (Fore.GREEN, ['Complete', 'Finished', 'Saved', 'Success']),
-        'error': (Fore.RED, ['Error', 'Failed', 'Exception']),
-        'warning': (Fore.YELLOW, ['Warning', 'Caution']),
-        'progress': (Fore.BLUE, ['Processing', 'Loading', 'Computing'])
-    }
     
     def format(self, record):
         """Enhanced formatter with detailed context and error tracking."""
-        # Add timestamp and filtered context
-        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')
-        
         # Create a copy of the record to avoid modifying the original
         filtered_record = logging.makeLogRecord(record.__dict__)
+        
+        # Get timestamp once for consistency
+        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')
         
         # Filter out excluded fields from the copy
         for field in self.exclude_fields:
@@ -86,12 +54,13 @@ class ColoredFormatter(logging.Formatter):
         
         # Track error levels that cause failures
         if record.levelno >= logging.ERROR:
-            action_history[f'error_{time.time()}'] = {
-                'level': record.levelno,
-                'level_name': record.levelname,
-                'message': record.msg,
-                'timestamp': timestamp
-            }
+            with threading.Lock():  # Add thread safety
+                action_history[f'error_{time.time()}'] = {
+                    'level': record.levelno,
+                    'level_name': record.levelname,
+                    'message': record.msg,
+                    'timestamp': timestamp
+                }
         
         # Build detailed context string
         context_parts = []
@@ -104,7 +73,7 @@ class ColoredFormatter(logging.Formatter):
                     else:
                         value_str = str(value)
                     context_parts.append(f"{field}: {value_str}")
-
+        
         # Add exception info and stack trace
         if record.exc_info:
             exception_text = self.formatException(record.exc_info)
@@ -114,35 +83,30 @@ class ColoredFormatter(logging.Formatter):
             stack_info_text = self.formatStack(record.stack_info)
             record.msg = f"{record.msg}\nStack Trace:\n{stack_info_text}"
 
-        return super().format(record)
+        # Add context information if there are any context parts
+        if context_parts:
+            record.msg = f"{record.msg}\nContext:\n{chr(10).join(context_parts)}"
         
-        # Add color to level name
-        if record.levelname in self.COLORS:
-            color = self.COLORS[record.levelname]
-            record.levelname = f"{color}{record.levelname:8}{Style.RESET_ALL}"
+        # Get the base color for the entire message based on level
+        base_color = self.COLORS.get(record.levelname, '')
         
-        # Add color to important keywords and track actions
-        msg = record.msg
-        for category, (color, keywords) in self.KEYWORDS.items():
-            for keyword in keywords:
-                if keyword.lower() in msg.lower():
-                    # Track action timing
-                    action_key = f"{category}_{time.time()}"
-                    action_history[action_key] = {
-                        'category': category,
-                        'message': msg,
-                        'timestamp': timestamp
-                    }
-                    # Add color
-                    msg = msg.replace(keyword, f"{color}{keyword}{Style.RESET_ALL}")
-        record.msg = msg
+        # Format the record using the parent formatter
+        formatted_message = super().format(record)
         
-        # Add context information for errors
-        if record.levelno >= logging.ERROR:
-            if hasattr(record, 'exc_info') and record.exc_info:
-                record.msg = f"{record.msg}\nException details: {str(record.exc_info[1])}"
-            
-        return super().format(record)
+        # Apply the color to the entire formatted message
+        colored_message = f"{base_color}{formatted_message}{Style.RESET_ALL}"
+        
+        return colored_message
+    
+    KEYWORDS = {
+        'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
+        'success': (Fore.GREEN, ['Complete', 'Finished', 'Saved', 'Success']),
+        'error': (Fore.RED, ['Error', 'Failed', 'Exception']),
+        'warning': (Fore.YELLOW, ['Warning', 'Caution']),
+        'progress': (Fore.BLUE, ['Processing', 'Loading', 'Computing'])
+    }
+    
+    
 
 def setup_logging(
     log_dir: str = "outputs/wslref/logs",
