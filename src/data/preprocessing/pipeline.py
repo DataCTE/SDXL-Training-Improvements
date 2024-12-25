@@ -382,15 +382,12 @@ class PreprocessingPipeline:
 
             # Always process text embeddings if not in cache
             if "text_embeddings" not in processed_data:
-                # First try to use provided caption
+                # Use provided caption directly, don't try to read from file
                 if caption is None:
-                    # If no caption provided, read from corresponding text file
-                    caption = self._read_caption(image_path)
-                    if not caption:
-                        logger.warning(f"No caption found for {image_path}")
-                        caption = ""  # Use empty string as fallback
+                    logger.warning(f"No caption provided for {image_path}")
+                    caption = ""  # Use empty string as fallback
                 
-                # Now encode the actual caption text, not the image path
+                # Now encode the actual caption text
                 embeddings = self.latent_preprocessor.encode_prompt([caption])
                 processed_data["text_embeddings"] = embeddings
                 
@@ -421,7 +418,8 @@ class PreprocessingPipeline:
                 else:
                     raise ProcessingError(f"Failed to process image: {image_path}")
 
-            processed_data["text"] = caption or self._read_caption(image_path)
+            # Use the provided caption or cached caption, don't try to read from file
+            processed_data["text"] = caption or processed_data.get("metadata", {}).get("caption", "")
             return processed_data
 
         except Exception as e:
