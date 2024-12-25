@@ -75,6 +75,7 @@ class AspectBucketDataset(Dataset):
         self,
         config: Config,
         image_paths: List[str],
+        captions: List[str],
         preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
         tag_weighter: Optional[TagWeighter] = None,
         is_train: bool = True,
@@ -85,7 +86,7 @@ class AspectBucketDataset(Dataset):
         self.stats = DatasetStats()
         self.enable_memory_tracking = enable_memory_tracking
         self.max_memory_usage = max_memory_usage
-
+        self.captions = captions
 
         # CUDA optimizations
         if torch.cuda.is_available():
@@ -133,9 +134,9 @@ class AspectBucketDataset(Dataset):
         self.bucket_indices = self._assign_buckets()
         self.transforms = self._setup_transforms()
 
-    def _create_tag_weighter(self, config: Config, captions: List[str]) -> Optional[TagWeighter]:
+    def _create_tag_weighter(self, config: Config, image_paths: List[str]) -> Optional[TagWeighter]:
         if hasattr(config, 'tag_weighting') and config.tag_weighting.enable_tag_weighting:
-            return create_tag_weighter(config, captions)
+            return create_tag_weighter(config, image_paths)
         return None
 
     def _setup_image_config(self):
@@ -291,6 +292,7 @@ class AspectBucketDataset(Dataset):
 def create_dataset(
     config: Config,
     image_paths: List[str],
+    captions: List[str],
     preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
@@ -298,6 +300,7 @@ def create_dataset(
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,
+        captions=captions,
         preprocessing_pipeline=preprocessing_pipeline,
         enable_memory_tracking=enable_memory_tracking,
         max_memory_usage=max_memory_usage

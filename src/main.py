@@ -7,6 +7,7 @@ os.environ['TORCHDYNAMO_DISABLE'] = '1'
 import multiprocessing as mp
 import logging
 import sys
+import threading
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -19,6 +20,9 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
 from torch.distributed import init_process_group
+from src.training.optimizers import AdamWScheduleFreeKahan
+from src.training.optimizers import AdamWBF16
+from src.training.optimizers import SOAP
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from src.core.logging import setup_logging
 from src.core.logging.wandb import WandbLogger
@@ -44,7 +48,6 @@ from src.data.dataset import create_dataset
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from transformers import CLIPTextModel, CLIPTokenizer
 from src.models import ModelType, StableDiffusionXLModel
-from adamw_bf16 import AdamWBF16
 
 logger = logging.getLogger(__name__)
 
@@ -219,102 +222,136 @@ def setup_training(
     captions: List[str]
 ) -> tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     try:
-        latent_preprocessor = LatentPreprocessor(config=config, sdxl_model=model, device=device)
-        if config.global_config.cache.clear_cache_on_start:
-            logger.info("Clearing latent cache...")
-            latent_preprocessor.clear_cache()
-        model_dtypes = ModelWeightDtypes(
-            train_dtype=DataType.from_str(config.model.dtype),
-            fallback_train_dtype=DataType.from_str(config.model.fallback_dtype),
-            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
-            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
-            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
-            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
-            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
-            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
-            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
-            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
-            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
-            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
-            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
-        )
-    
-        cache_manager = CacheManager(
-            model_dtypes=model_dtypes,
-            cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
-            num_proc=config.global_config.cache.num_proc,
-            chunk_size=config.global_config.cache.chunk_size,
-            compression=getattr(config.global_config.cache, 'compression', 'zstd'),
-            verify_hashes=config.global_config.cache.verify_hashes,
-            max_memory_usage=0.8,
-            enable_memory_tracking=True
-        )
-        cache_manager.validate_cache_index()
-        preprocessing_pipeline = PreprocessingPipeline(
-            config=config,
-            latent_preprocessor=latent_preprocessor,
-            cache_manager=cache_manager,
-            is_train=True,
-            num_gpu_workers=config.preprocessing.num_gpu_workers,
-            num_cpu_workers=config.preprocessing.num_cpu_workers,
-            num_io_workers=config.preprocessing.num_io_workers,
-            prefetch_factor=config.preprocessing.prefetch_factor,
-            use_pinned_memory=config.preprocessing.use_pinned_memory
-        )
-        train_dataset = create_dataset(
-            config=config,
-            image_paths=image_paths,
-            preprocessing_pipeline=preprocessing_pipeline,
-            enable_memory_tracking=True,
-            max_memory_usage=0.8
-        )
-        train_dataloader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
-            shuffle=True,
-            num_workers=config.data.num_workers,
-            pin_memory=config.data.pin_memory,
-            persistent_workers=config.data.persistent_workers,
-            collate_fn=train_dataset.collate_fn
-        )
-        # Configure optimizer
-        optimizer_kwargs = {
-            "lr": config.training.learning_rate,
-            "betas": config.training.optimizer_betas,
-            "weight_decay": config.training.weight_decay,
-            "eps": config.training.optimizer_eps
-        }
+        logger.info("Initializing latent preprocessor...")
+        try:
+            latent_preprocessor = LatentPreprocessor(config=config, sdxl_model=model, device=device)
+        except Exception as e:
+            logger.error(f"Failed to initialize latent preprocessor: {str(e)}", exc_info=True)
+            raise
+        
+        logger.info("Setting up cache manager...")
+        try:
+            model_dtypes = ModelWeightDtypes(
+                train_dtype=DataType.from_str(config.model.dtype),
+                fallback_train_dtype=DataType.from_str(config.model.fallback_dtype),
+                unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
+                prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
+                text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
+                text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
+                vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
+                effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
+                decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
+                decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
+                decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
+                lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
+                embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
+            )
+            cache_manager = CacheManager(
+                model_dtypes=model_dtypes,
+                cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
+                num_proc=config.global_config.cache.num_proc,
+                chunk_size=config.global_config.cache.chunk_size,
+                compression=getattr(config.global_config.cache, 'compression', 'zstd'),
+                verify_hashes=config.global_config.cache.verify_hashes,
+                max_memory_usage=0.8,
+                enable_memory_tracking=True
+            )
+            cache_manager.validate_cache_index()
+        except Exception as e:
+            logger.error(f"Failed to setup cache manager: {str(e)}", exc_info=True)
+            raise
+        
+        logger.info("Creating preprocessing pipeline...")
+        try:
+            preprocessing_pipeline = PreprocessingPipeline(
+                config=config,
+                latent_preprocessor=latent_preprocessor,
+                cache_manager=cache_manager,
+                is_train=True,
+                num_gpu_workers=config.preprocessing.num_gpu_workers,
+                num_cpu_workers=config.preprocessing.num_cpu_workers,
+                num_io_workers=config.preprocessing.num_io_workers,
+                prefetch_factor=config.preprocessing.prefetch_factor,
+                use_pinned_memory=config.preprocessing.use_pinned_memory
+            )
+        except Exception as e:
+            logger.error(f"Failed to create preprocessing pipeline: {str(e)}", exc_info=True)
+            raise
+        
+        logger.info("Creating dataset...")
+        try:
+            train_dataset = create_dataset(
+                config=config,
+                image_paths=image_paths,
+                captions=captions,
+                preprocessing_pipeline=preprocessing_pipeline,
+                enable_memory_tracking=True,
+                max_memory_usage=0.8
+            )
+        except Exception as e:
+            logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
+            raise
+        
+        logger.info("Creating dataloader...")
+        try:
+            train_dataloader = torch.utils.data.DataLoader(
+                train_dataset,
+                batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
+                shuffle=True,
+                num_workers=config.data.num_workers,
+                pin_memory=config.data.pin_memory,
+                persistent_workers=config.data.persistent_workers,
+                collate_fn=train_dataset.collate_fn
+            )
+        except Exception as e:
+            logger.error(f"Failed to create dataloader: {str(e)}", exc_info=True)
+            raise
+        
+        logger.info("Setting up optimizer...")
+        try:
+            optimizer_kwargs = {
+                "lr": config.training.learning_rate,
+                "betas": config.training.optimizer_betas,
+                "weight_decay": config.training.weight_decay,
+                "eps": config.training.optimizer_eps
+            }
 
-        # Select optimizer based on config and hardware capabilities
-        if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-            from src.training.optimizers import AdamWBF16
-            optimizer = AdamWBF16(model.unet.parameters(), **optimizer_kwargs)
-            logger.info("Using BF16-optimized AdamW optimizer")
-        elif config.training.method == "flow_matching":
-            from src.training.optimizers import SOAP
-            optimizer = SOAP(
-                model.unet.parameters(),
-                **optimizer_kwargs,
-                precondition_frequency=10,
-                max_precond_dim=10000
-            )
-            logger.info("Using SOAP optimizer for flow matching")
-        elif config.training.zero_terminal_snr:
-            from src.training.optimizers import AdamWScheduleFreeKahan
-            optimizer = AdamWScheduleFreeKahan(
-                model.unet.parameters(),
-                **optimizer_kwargs,
-                warmup_steps=config.training.warmup_steps,
-                kahan_sum=True
-            )
-            logger.info("Using Schedule-free AdamW with Kahan summation")
-        else:
-            optimizer = torch.optim.AdamW(model.unet.parameters(), **optimizer_kwargs)
-            logger.info("Using standard AdamW optimizer")
-        if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-            model.unet = torch.nn.parallel.DistributedDataParallel(
-                model.unet, device_ids=[device] if device.type == "cuda" else None
-            )
+            # Select optimizer based on config and hardware capabilities
+            if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                optimizer = AdamWBF16(model.unet.parameters(), **optimizer_kwargs)
+                logger.info("Using BF16-optimized AdamW optimizer")
+            elif config.training.method == "flow_matching":
+                optimizer = SOAP(
+                    model.unet.parameters(),
+                    **optimizer_kwargs,
+                    precondition_frequency=10,
+                    max_precond_dim=10000
+                )
+                logger.info("Using SOAP optimizer for flow matching")
+            elif config.training.zero_terminal_snr:
+                optimizer = AdamWScheduleFreeKahan(
+                    model.unet.parameters(),
+                    **optimizer_kwargs,
+                    warmup_steps=config.training.warmup_steps,
+                    kahan_sum=True
+                )
+                logger.info("Using Schedule-free AdamW with Kahan summation")
+            else:
+                optimizer = torch.optim.AdamW(model.unet.parameters(), **optimizer_kwargs)
+                logger.info("Using standard AdamW optimizer")
+        except Exception as e:
+            logger.error(f"Failed to setup optimizer: {str(e)}", exc_info=True)
+            raise
+
+        try:
+            if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
+                model.unet = torch.nn.parallel.DistributedDataParallel(
+                    model.unet, device_ids=[device] if device.type == "cuda" else None
+                )
+        except Exception as e:
+            logger.error(f"Failed to setup distributed training: {str(e)}", exc_info=True)
+            raise
+
         wandb_logger = None
         if config.training.use_wandb and is_main_process():
             try:
@@ -328,11 +365,17 @@ def setup_training(
                 # Explicitly log model parameters
                 wandb_logger.log_model(model.unet)
             except Exception as e:
-                logger.warning(f"Failed to initialize WandB logging: {str(e)}")
+                logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
                 wandb_logger = None
+
         return train_dataloader, optimizer, wandb_logger
+
+    except TimeoutError:
+        logger.error("Setup timed out after 5 minutes", exc_info=True)
+        raise
     except Exception as e:
-        raise TrainingSetupError("Failed to setup training components", {"error": str(e)})
+        logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
+        raise
 
 def main():
     mp.set_start_method('spawn', force=True)
@@ -437,5 +480,3 @@ def main():
             
         sys.exit(1)
 
-if __name__ == "__main__":
-    main()

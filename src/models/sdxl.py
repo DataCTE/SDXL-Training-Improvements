@@ -452,28 +452,32 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             # Create stream context only for CUDA devices
             stream_ctx = (
-                create_stream_context(torch.cuda.Stream())
+                create_stream_context(torch.cuda.current_stream())  # Use current stream instead of creating new one
                 if device.type == "cuda"
                 else nullcontext()
             )
 
             with stream_ctx:
-                # Move components sequentially with memory cleanup
+                # Move components sequentially with memory cleanup and synchronization
                 for component_name, move_fn in [
                     ("VAE", self.vae_to),
                     ("text encoders", self.text_encoder_to),
                     ("UNet", self.unet_to)
                 ]:
                     try:
+                        logger.debug(f"Moving {component_name} to {device}")
                         move_fn(device)
                         if device.type == "cuda":
+                            torch_sync()  # Synchronize after each component
                             torch_gc()
+                            logger.debug(f"Successfully moved {component_name} to {device}")
                     except Exception as comp_error:
-                        raise RuntimeError(f"Failed to move {component_name} to {device}") from comp_error
+                        raise RuntimeError(f"Failed to move {component_name} to {device}: {str(comp_error)}") from comp_error
 
-                # Ensure CUDA operations are complete
+                # Final synchronization
                 if device.type == "cuda":
                     torch_sync()
+                    logger.info(f"Successfully moved all components to {device}")
 
         except Exception as e:
             error_context = {

@@ -66,10 +66,11 @@ class PreprocessingPipeline:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.cache_manager = cache_manager
         self.is_train = is_train
-        self.num_gpu_workers = 0  # Disable GPU multi-workers
+        self.num_gpu_workers = num_gpu_workers
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         self.prefetch_factor = prefetch_factor
+        self.device_ids = device_ids
         self.use_pinned_memory = use_pinned_memory
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
@@ -417,3 +418,25 @@ class PreprocessingPipeline:
             self.stats.failed += 1
             logger.warning(f"Failed to process {img_path}: {e}")
             return None
+
+    def encode_prompt(self, caption: str) -> Dict[str, torch.Tensor]:
+        """Encode a text prompt into embeddings using the latent preprocessor.
+        
+        Args:
+            caption: Text caption to encode
+            
+        Returns:
+            Dictionary containing text embeddings
+        """
+        try:
+            if not self.latent_preprocessor:
+                raise ValueError("Latent preprocessor not initialized")
+            
+            embeddings = self.latent_preprocessor.encode_prompt([caption])
+            return {
+                "text_embeddings": embeddings,
+                "metadata": {"caption": caption, "timestamp": time.time()}
+            }
+        except Exception as e:
+            logger.error(f"Failed to encode prompt: {e}")
+            raise
