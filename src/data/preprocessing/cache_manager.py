@@ -167,9 +167,9 @@ class CacheManager:
                     file_info["text_type"] = "text"
             
             # Add any files found on disk but not in index
-            for base_name, latent_path in latent_files.items():
+            for base_name, latent_path in image_files.items():
                 matching_entries = [p for p, info in valid_files.items() 
-                                 if Path(info.get("latent_path", "")).stem == base_name]
+                                 if Path(info.get("latent_path", "")).stem.replace("__image", "") == base_name]
                 if not matching_entries:
                     text_path = text_files.get(base_name)
                     file_info = {
