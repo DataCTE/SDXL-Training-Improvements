@@ -168,7 +168,7 @@ class TagWeighter:
                     self.tag_counts[tag_type].items(),
                     key=lambda x: x[1],
                     reverse=True
-                )[:10],
+                )[:3],
                 "weight_range": (
                     min(self.tag_weights[tag_type].values()),
                     max(self.tag_weights[tag_type].values())

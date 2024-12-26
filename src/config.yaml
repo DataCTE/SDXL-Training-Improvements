@@ -75,6 +75,10 @@ model:
   sigma_min: 0.002
   sigma_max: 2000.0
   rho: 7.0
+  enable_memory_efficient_attention: true
+  enable_vae_slicing: false
+  enable_model_cpu_offload: false
+  enable_sequential_cpu_offload: false
 
 training:
   batch_size: 4
@@ -139,5 +143,5 @@ tag_weighting:
   use_cache: true
   default_weight: 1.0
   min_weight: 0.1
-  max_weight: 10.0
+  max_weight: 3.0
   smoothing_factor: 0.1
