@@ -1,5 +1,6 @@
 """High-level latent preprocessing with optimized orchestration."""
 from typing import Dict, List, Optional, Union
+import sys
 import time
 import torch
 from pathlib import Path
@@ -197,7 +198,45 @@ class LatentPreprocessor:
             latents = encoded_output.get("latent_dist")
             if latents is None:
                 raise ValueError("VAE encoder did not return latent distribution")
-                
+            
+            # Check for NaN/Inf values with detailed location tracking
+            nan_mask = torch.isnan(latents)
+            inf_mask = torch.isinf(latents)
+        
+            if nan_mask.any() or inf_mask.any():
+                nan_count = nan_mask.sum().item()
+                inf_count = inf_mask.sum().item()
+            
+                # Get indices of first few NaN/Inf values for debugging
+                nan_indices = torch.where(nan_mask)
+                inf_indices = torch.where(inf_mask)
+            
+                error_context = {
+                    'nan_count': nan_count,
+                    'inf_count': inf_count,
+                    'total_elements': latents.numel(),
+                    'nan_percentage': (nan_count / latents.numel()) * 100,
+                    'first_nan_indices': [
+                        tuple(idx[i].item() for idx in nan_indices)
+                        for i in range(min(5, len(nan_indices[0])))
+                    ] if nan_count > 0 else [],
+                    'first_inf_indices': [
+                        tuple(idx[i].item() for idx in inf_indices)
+                        for i in range(min(5, len(inf_indices[0])))
+                    ] if inf_count > 0 else [],
+                    'input_shape': tuple(pixel_values.shape),
+                    'latent_shape': tuple(latents.shape)
+                }
+            
+                error_msg = (
+                    f"VAE produced invalid values: {nan_count} NaN, {inf_count} Inf. "
+                    f"First NaN at: {error_context['first_nan_indices']}, "
+                    f"First Inf at: {error_context['first_inf_indices']}"
+                )
+                logger.error(error_msg, extra=error_context)
+                # Force script termination
+                sys.exit(1)
+
             # Return in expected format for cache manager
             return {
                 "image_latent": latents,
