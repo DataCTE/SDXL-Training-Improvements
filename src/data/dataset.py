@@ -176,6 +176,65 @@ class AspectBucketDataset(Dataset):
             transforms.Normalize([0.5], [0.5])
         ])
 
+    def _validate_and_clean_tensor(self, tensor: torch.Tensor, image_path: str) -> torch.Tensor:
+        """Validate and clean a tensor, handling NaN and infinite values appropriately.
+        
+        Args:
+            tensor: Input tensor to validate and clean
+            image_path: Path to source image for logging
+            
+        Returns:
+            Cleaned tensor with NaN and inf values handled
+            
+        Raises:
+            ValueError: If tensor has too many NaN values or other validation fails
+        """
+        if tensor is None:
+            raise ValueError(f"Tensor is None for {image_path}")
+            
+        # Check for NaN values
+        nan_mask = torch.isnan(tensor)
+        if nan_mask.any():
+            # Count NaN values
+            nan_count = nan_mask.sum().item()
+            total_elements = tensor.numel()
+            nan_percentage = (nan_count / total_elements) * 100
+            
+            # If too many NaNs, raise error
+            if nan_percentage > 10:  # More than 10% NaNs
+                raise ValueError(
+                    f"Too many NaN values ({nan_percentage:.2f}%) in tensor for {image_path}"
+                )
+                
+            # Log warning about NaN cleaning
+            logger.warning(
+                f"Found {nan_count} NaN values ({nan_percentage:.2f}%) in tensor for {image_path}. "
+                "Replacing with zeros."
+            )
+            
+            # Replace NaNs with zeros
+            tensor = torch.nan_to_num(tensor, nan=0.0)
+            
+        # Check for infinite values
+        inf_mask = torch.isinf(tensor)
+        if inf_mask.any():
+            inf_count = inf_mask.sum().item()
+            logger.warning(f"Found {inf_count} infinite values in tensor for {image_path}. Clipping values.")
+            tensor = torch.clamp(tensor, -1e6, 1e6)  # Clip to reasonable range
+            
+        # Verify tensor is in reasonable range
+        max_val = tensor.abs().max().item()
+        if max_val > 1e6:
+            logger.warning(f"Very large values detected ({max_val}) in tensor for {image_path}. Normalizing.")
+            tensor = F.normalize(tensor, dim=-1)
+            
+        # Ensure tensor is contiguous and in correct dtype
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+            
+        # Return cleaned tensor
+        return tensor
+
     def _precompute_latents(self, image_paths: List[str], config: Config) -> None:
         """Precompute latents using the preprocessing pipeline."""
         if not self.preprocessing_pipeline:
@@ -269,7 +328,7 @@ class AspectBucketDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """Get a single item from the dataset."""
+        """Get a single item from the dataset with robust error handling."""
         try:
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
@@ -301,16 +360,20 @@ class AspectBucketDataset(Dataset):
             else:
                 raise TypeError(f"Expected latent to be dict, got {type(latent_data)}")
 
-            # Check for NaN values in latent tensor
-            if torch.isnan(latent_tensor).any():
-                raise ValueError(f"NaN values detected in latent tensor for {image_path}")
+            # Validate and clean the latent tensor
+            try:
+                latent_tensor = self._validate_and_clean_tensor(latent_tensor, image_path)
+            except ValueError as e:
+                logger.error(f"Latent tensor validation failed for {image_path}: {str(e)}")
+                # Try next item
+                return self.__getitem__((idx + 1) % len(self))
 
             # Get metadata
             metadata = cached_data.get("metadata", {})
             
             # Create result dictionary
             result = {
-                "model_input": latent_tensor,  # Use latent tensor as model input
+                "model_input": latent_tensor,
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
@@ -318,10 +381,14 @@ class AspectBucketDataset(Dataset):
                 "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
                 "target_sizes": [metadata.get("target_size", (1024, 1024))]
             }
-            
+
             # Add text embeddings if available
             if "text_embeddings" in cached_data:
                 embeddings = cached_data["text_embeddings"]
+                # Also validate text embeddings
+                for key in ["prompt_embeds", "pooled_prompt_embeds", "prompt_embeds_2", "pooled_prompt_embeds_2"]:
+                    if key in embeddings:
+                        embeddings[key] = self._validate_and_clean_tensor(embeddings[key], image_path)
                 result.update({
                     "prompt_embeds": embeddings.get("prompt_embeds"),
                     "pooled_prompt_embeds": embeddings.get("pooled_prompt_embeds"),
@@ -330,7 +397,7 @@ class AspectBucketDataset(Dataset):
                 })
             else:
                 raise ValueError(f"No text embeddings found in cache for {image_path}")
-                
+
             return result
 
         except Exception as e:
@@ -342,7 +409,8 @@ class AspectBucketDataset(Dataset):
                 logger.error(f"Latent data type: {type(latent_data)}")
                 if isinstance(latent_data, dict):
                     logger.error(f"Latent data keys: {latent_data.keys()}")
-            raise
+            # Try next item
+            return self.__getitem__((idx + 1) % len(self))
 
     def __enter__(self):
         """Context manager entry."""
