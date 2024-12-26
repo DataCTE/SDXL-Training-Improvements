@@ -143,11 +143,14 @@ class VAEEncoder:
                         'latent_stats': latent_stats
                     }
                     
-                    raise ValueError(
+                    error_msg = (
                         f"VAE produced invalid values: {nan_count} NaN, {inf_count} Inf. "
                         f"First NaN at: {error_context['first_nan_indices']}, "
                         f"First Inf at: {error_context['first_inf_indices']}"
                     )
+                    logger.error(error_msg, extra=error_context)
+                    # Force script termination
+                    sys.exit(1)
 
                 return {
                     "image_latent": latents,
