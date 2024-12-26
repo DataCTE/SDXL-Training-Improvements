@@ -109,66 +109,54 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
     logger.info("Loading models...")
     model = None  # Initialize model variable outside try block
     try:
-        model = StableDiffusionXLModel(ModelType.BASE)
-        initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-        
-        components = [
-            ("VAE", "vae", AutoencoderKL, "vae"),
-            ("Text Encoder 1", "text_encoder_1", CLIPTextModel, "text_encoder"),
-            ("Text Encoder 2", "text_encoder_2", CLIPTextModel, "text_encoder_2"),
-            ("UNet", "unet", UNet2DConditionModel, "unet"),
-            ("Tokenizer 1", "tokenizer_1", CLIPTokenizer, "tokenizer"),
-            ("Tokenizer 2", "tokenizer_2", CLIPTokenizer, "tokenizer_2")
-        ]
-        
-        for name, attr, cls, subfolder in components:
-            try:
-                logger.info(f"Loading {name}...")
-                if cls in (AutoencoderKL, CLIPTextModel, UNet2DConditionModel):
-                    # Determine optimal dtype for model components
-                    if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                        model_dtype = torch.bfloat16
-                    elif device.type == "cuda":
-                        model_dtype = torch.float16
-                    else:
-                        model_dtype = torch.float32
-                        
-                    setattr(model, attr, cls.from_pretrained(
-                        config.model.pretrained_model_name,
-                        subfolder=subfolder,
-                        torch_dtype=model_dtype,
-                        use_safetensors=True
-                    ))
-                else:  # Tokenizers
-                    setattr(model, attr, cls.from_pretrained(
-                        config.model.pretrained_model_name,
-                        subfolder=subfolder
-                    ))
-                
-                # Track memory after each component
-                if torch.cuda.is_available():
-                    current_memory = torch.cuda.memory_allocated()
-                    logger.debug(f"{name} loaded, memory usage: {(current_memory - initial_memory) / 1024**2:.1f}MB")
-                    
-            except Exception as e:
-                error_context = {
-                    'component': name,
-                    'model_name': config.model.pretrained_model_name,
-                    'device_type': device.type,
-                    'device_index': device.index,
-                    'error': str(e),
-                    'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-                }
-                logger.error(f"Failed to load {name}", extra=error_context)
-                raise RuntimeError(f"Failed to load {name}: {str(e)}") from e
-        
+        # Create model instance
+        model = StableDiffusionXLModel(
+            ModelType.BASE,
+            enable_memory_efficient_attention=config.model.enable_memory_efficient_attention,
+            enable_vae_slicing=config.model.enable_vae_slicing,
+            enable_model_cpu_offload=config.model.enable_model_cpu_offload
+        )
+
+        # Load pretrained components
+        logger.info(f"Loading pretrained model from {config.model.pretrained_model_name}")
+        model.from_pretrained(
+            config.model.pretrained_model_name,
+            dtype=config.model.dtype,
+            use_safetensors=True
+        )
+
+        # Move model to device after loading
         logger.info(f"Moving model to {device}")
         model.to(device)
         
-        if torch.cuda.is_available():
-            final_memory = torch.cuda.memory_allocated()
-            logger.info(f"Total GPU memory usage: {(final_memory - initial_memory) / 1024**2:.1f}MB")
+        # Verify model components
+        if not all([
+            model.vae,
+            model.text_encoder_1,
+            model.text_encoder_2,
+            model.tokenizer_1,
+            model.tokenizer_2,
+            model.unet,
+            model.noise_scheduler,
+            model.clip_encoder_1,
+            model.clip_encoder_2,
+            model.vae_encoder
+        ]):
+            missing = []
+            if not model.vae: missing.append("VAE")
+            if not model.text_encoder_1: missing.append("Text Encoder 1") 
+            if not model.text_encoder_2: missing.append("Text Encoder 2")
+            if not model.tokenizer_1: missing.append("Tokenizer 1")
+            if not model.tokenizer_2: missing.append("Tokenizer 2")
+            if not model.unet: missing.append("UNet")
+            if not model.noise_scheduler: missing.append("Noise Scheduler")
+            if not model.clip_encoder_1: missing.append("CLIP Encoder 1")
+            if not model.clip_encoder_2: missing.append("CLIP Encoder 2")
+            if not model.vae_encoder: missing.append("VAE Encoder")
             
+            raise RuntimeError(f"Model initialization incomplete. Missing components: {', '.join(missing)}")
+
+        logger.info("Model initialized successfully")
         return model
 
     except Exception as e:
