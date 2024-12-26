@@ -225,10 +225,10 @@ class CLIPEncoder:
              return True
 
          except Exception as e:
-             logger.error(f"Embedding validation failed: {str(e)}")
-             return False
+            logger.error(f"Embedding validation failed: {str(e)}")
+            return False
 
-     def encode_prompt(
+    def encode_prompt(
         self,
         prompt_batch: List[str],
         num_images_per_prompt: int = 1,
