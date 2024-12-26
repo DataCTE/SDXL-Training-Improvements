@@ -125,7 +125,7 @@ class VAEEncoder:
                     nan_indices = torch.where(nan_mask)
                     inf_indices = torch.where(inf_mask)
                     
-                    logger.warning("NaN/Inf values detected in latents", extra={
+                    error_context = {
                         'nan_count': nan_count,
                         'inf_count': inf_count,
                         'total_elements': latents.numel(),
@@ -140,21 +140,13 @@ class VAEEncoder:
                         ] if inf_count > 0 else [],
                         'input_stats': input_stats,
                         'latent_stats': latent_stats
-                    })
-
-                    # Attempt recovery
-                    logger.info("Attempting to recover from NaN/Inf values...")
-                    latents = torch.nan_to_num(latents, nan=0.0, posinf=1e6, neginf=-1e6)
-                    latents = torch.clamp(latents, -1e6, 1e6)
+                    }
                     
-                    # Verify recovery
-                    if torch.isnan(latents).any() or torch.isinf(latents).any():
-                        raise ValueError(
-                            f"Failed to recover from NaN/Inf values. "
-                            f"NaN count: {torch.isnan(latents).sum().item()}, "
-                            f"Inf count: {torch.isinf(latents).sum().item()}"
-                        )
-                    logger.info("Successfully recovered from NaN/Inf values")
+                    raise ValueError(
+                        f"VAE produced invalid values: {nan_count} NaN, {inf_count} Inf. "
+                        f"First NaN at: {error_context['first_nan_indices']}, "
+                        f"First Inf at: {error_context['first_inf_indices']}"
+                    )
 
                 return {
                     "image_latent": latents,
