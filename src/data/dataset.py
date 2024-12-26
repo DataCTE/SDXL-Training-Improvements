@@ -349,6 +349,19 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Error during latent precomputation: {str(e)}", exc_info=True)
             raise
 
+    def __len__(self) -> int:
+        """Return the total number of items in the dataset."""
+        try:
+            return len(self.image_paths)
+        except Exception as e:
+            logger.error("Failed to get dataset length", extra={
+                'error': str(e),
+                'image_paths_type': type(self.image_paths).__name__,
+                'has_image_paths': hasattr(self, 'image_paths')
+            })
+            # Return 0 to indicate empty dataset on error
+            return 0
+
     def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format.
         
