@@ -51,37 +51,62 @@ class FlowMatchingTrainer(TrainingMethod):
             return self._compiled_loss(model, batch, generator)
         return self._compute_loss_impl(model, batch, generator)
 
-    def _compute_loss_impl(self, model, batch, generator=None) -> Dict[str, torch.Tensor]:
-        x1 = batch["model_input"]
-        prompt_embeds = batch["prompt_embeds"]
-        pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-        
-        t = self.sample_logit_normal((x1.shape[0],), x1.device, x1.dtype, generator=generator)
-        x0 = torch.randn_like(x1)
-        
-        add_time_ids = get_add_time_ids(
-            batch["original_sizes"],
-            batch["crop_top_lefts"],
-            batch["target_sizes"],
-            dtype=prompt_embeds.dtype,
-            device=x1.device
-        )
-        
-        cond_emb = {
-            "prompt_embeds": prompt_embeds,
-            "added_cond_kwargs": {
-                "text_embeds": pooled_prompt_embeds,
-                "time_ids": add_time_ids
+    def _compute_loss_impl(
+        self,
+        model: torch.nn.Module,
+        batch: Dict[str, torch.Tensor],
+        generator: Optional[torch.Generator] = None
+    ) -> Dict[str, torch.Tensor]:
+        try:
+            # Direct access since data is already validated
+            x1 = batch["model_input"]
+            prompt_embeds = batch["prompt_embeds"]
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+            
+            # Sample time steps
+            t = self.sample_logit_normal(
+                (x1.shape[0],),
+                x1.device,
+                x1.dtype,
+                generator=generator
+            )
+            
+            # Generate random starting point
+            x0 = torch.randn_like(x1)
+            
+            # Get time embeddings
+            add_time_ids = get_add_time_ids(
+                batch["original_sizes"],
+                batch["crop_top_lefts"],
+                batch["target_sizes"],
+                dtype=prompt_embeds.dtype,
+                device=x1.device
+            )
+            
+            # Prepare conditioning embeddings
+            cond_emb = {
+                "prompt_embeds": prompt_embeds,
+                "added_cond_kwargs": {
+                    "text_embeds": pooled_prompt_embeds,
+                    "time_ids": add_time_ids
+                }
             }
-        }
-        
-        loss = self.compute_flow_matching_loss(self.unet, x0, x1, t, cond_emb)
-        if "loss_weights" in batch:
-            loss = loss * batch["loss_weights"]
-        loss = loss.mean()
-        
-        torch_sync()
-        return {"loss": loss}
+            
+            # Compute flow matching loss
+            loss = self.compute_flow_matching_loss(self.unet, x0, x1, t, cond_emb)
+            
+            # Apply loss weights if present
+            if "loss_weights" in batch:
+                loss = loss * batch["loss_weights"]
+            loss = loss.mean()
+            
+            torch_sync()
+            return {"loss": loss}
+
+        except Exception as e:
+            logger.error(f"Error computing Flow Matching loss: {str(e)}", exc_info=True)
+            torch_sync()
+            raise
 
     def sample_logit_normal(self, shape, device, dtype, mean=0.0, std=1.0, generator=None):
         normal = torch.randn(shape, device=device, dtype=dtype, generator=generator)
