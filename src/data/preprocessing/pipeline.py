@@ -249,9 +249,14 @@ class PreprocessingPipeline:
             logger.debug(f"Image too large: {w}x{h} = {total_pixels} pixels > {max_pixels}")
             return False
             
-        # Check minimum dimensions - both width and height must be at least min_size
+        # Check minimum dimensions
         if w < min_w or h < min_h:
             logger.debug(f"Image too small: {w}x{h} < minimum {min_w}x{min_h}")
+            return False
+        
+        # Check maximum dimensions
+        if w > max_w or h > max_h:
+            logger.debug(f"Image too large: {w}x{h} > maximum {max_w}x{max_h}")
             return False
                 
         # Check aspect ratio
@@ -302,6 +307,75 @@ class PreprocessingPipeline:
                 
         return bucket_indices
 
+    def _process_text_embeddings(
+        self,
+        image_paths: List[str],
+        batch_size: int = 1,
+        proportion_empty_prompts: float = 0.0
+    ) -> None:
+        """Process text embeddings with improved handling."""
+        text_embeddings_dir = Path(self.cache_manager.cache_dir) / "text_latents"
+        cached_text_files = set(p.stem for p in text_embeddings_dir.glob("*.pt"))
+        
+        missing_embeddings = []
+        for img_path in image_paths:
+            img_path = Path(img_path)
+            txt_path = img_path.parent / f"{img_path.stem}.txt"
+            
+            if txt_path.exists() and img_path.stem not in cached_text_files:
+                try:
+                    with open(txt_path, 'r', encoding='utf-8') as f:
+                        caption = f.read().strip()
+                        
+                    if caption and random.random() >= proportion_empty_prompts:
+                        missing_embeddings.append({
+                            "caption": caption,
+                            "img_id": img_path.stem,
+                            "img_path": str(img_path),
+                            "txt_path": str(txt_path)
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to read caption from {txt_path}: {e}")
+                    continue
+
+        if missing_embeddings:
+            logger.info(f"Processing {len(missing_embeddings)} missing text embeddings")
+            
+            with tqdm(total=len(missing_embeddings), desc="Processing text embeddings") as pbar:
+                for i in range(0, len(missing_embeddings), batch_size):
+                    batch_items = missing_embeddings[i:i+batch_size]
+                    
+                    for item in batch_items:
+                        try:
+                            with torch.cuda.amp.autocast():
+                                embeddings = self.latent_preprocessor.encode_prompt([item["caption"]])
+                            
+                            self.cache_manager.save_preprocessed_data(
+                                image_latent=None,
+                                text_latent={
+                                    "embeddings": embeddings["embeddings"],
+                                    "caption": item["caption"]
+                                },
+                                metadata={
+                                    "image_path": item["img_path"],
+                                    "text_path": item["txt_path"],
+                                    "timestamp": time.time()
+                                },
+                                file_path=item["img_id"]
+                            )
+                            self.stats.successful += 1
+                            
+                        except Exception as e:
+                            self.stats.failed += 1
+                            logger.error(f"Failed to process caption from {item['txt_path']}: {e}")
+                        finally:
+                            pbar.update(1)
+                            
+                    if torch.cuda.is_available() and i % 100 == 0:
+                        torch.cuda.empty_cache()
+        else:
+            logger.info("All text embeddings already cached")
+        logger.info(f"Precomputation complete. Successful: {self.stats.successful}, Failed: {self.stats.failed}")
 
 
     def precompute_latents(
@@ -318,54 +392,41 @@ class PreprocessingPipeline:
             logger.warning("Latent preprocessor or cache manager not available")
             return
 
-        # Verify cache folders and get cached files
-        image_latents_dir = Path(self.cache_manager.cache_dir) / "image"
-        text_embeddings_dir = Path(self.cache_manager.cache_dir) / "text"
+        # Setup cache directories
+        image_latents_dir = self.cache_manager.image_latents_dir
+        text_latents_dir = self.cache_manager.text_latents_dir
         
-        # Check if directories exist
-        image_latents_dir.mkdir(exist_ok=True)
-        text_embeddings_dir.mkdir(exist_ok=True)
-        
-        # Get actual cached files
+        # Get cached file lists
         cached_image_files = set(p.stem for p in image_latents_dir.glob("*.pt"))
-        cached_text_files = set(p.stem for p in text_embeddings_dir.glob("*.pt"))
+        cached_text_files = set(p.stem for p in text_latents_dir.glob("*.pt"))
         
-        # Build new index from actual files
+        # Build verified index
         new_index = {"files": {}, "chunks": {}}
-        
         for img_path in image_paths:
             base_name = Path(img_path).stem
             file_info = {}
             
-            # Check for image latents
             if base_name in cached_image_files:
                 file_info["latent_path"] = str(image_latents_dir / f"{base_name}.pt")
-                file_info["type"] = "image"
                 
-            # Check for text embeddings
             if base_name in cached_text_files:
-                file_info["text_path"] = str(text_embeddings_dir / f"{base_name}.pt")
-                file_info["text_type"] = "text"
+                file_info["text_path"] = str(text_latents_dir / f"{base_name}.pt")
                 
             if file_info:
                 new_index["files"][str(img_path)] = file_info
         
-        # Save initial index
         self.cache_manager._save_cache_index(new_index)
         
-        # First pass: Process image latents if requested
+        # Process image latents
         if process_latents:
-            missing_latents = []
-            for img_path in image_paths:
-                img_id = Path(img_path).stem
-                if img_id not in cached_image_files:
-                    missing_latents.append(img_path)
+            missing_latents = [
+                img_path for img_path in image_paths
+                if Path(img_path).stem not in cached_image_files
+            ]
 
             if missing_latents:
-                logger.info(f"Processing {len(missing_latents)} missing image latents out of {len(image_paths)} total")
-                
-                # Track when to save cache index
-                save_interval = max(100, len(missing_latents) // 20)  # Save every 5% or 100 items
+                logger.info(f"Processing {len(missing_latents)} missing image latents")
+                save_interval = max(100, len(missing_latents) // 20)
                 last_save = 0
                 
                 with tqdm(total=len(missing_latents), desc="Processing image latents") as pbar:
@@ -374,69 +435,57 @@ class PreprocessingPipeline:
                         
                         for img_path in batch_paths:
                             try:
-                                processed = self._process_image(img_path)
-                                if processed:
-                                    metadata = {
-                                        "path": img_path,
-                                        "timestamp": time.time(),
-                                        **processed.get("metadata", {})
-                                    }
-                                    
-                                    self.cache_manager.save_preprocessed_data(
-                                        image_latent=processed["image_latent"],
-                                        text_latent=None,
-                                        metadata=metadata,
-                                        file_path=img_path
-                                    )
-                                    self.stats.successful += 1
-                                    
+                                with torch.cuda.amp.autocast():
+                                    processed = self._process_image(img_path)
+                                    if processed:
+                                        metadata = {
+                                            **processed.get("metadata", {}),
+                                            "path": img_path,
+                                            "timestamp": time.time()
+                                        }
+                                        
+                                        self.cache_manager.save_preprocessed_data(
+                                            image_latent=processed["image_latent"],
+                                            metadata=metadata,
+                                            file_path=img_path
+                                        )
+                                        self.stats.successful += 1
                             except Exception as e:
                                 self.stats.failed += 1
-                                # Only log serious errors, not validation failures
                                 if not isinstance(e, ValueError):
-                                    logger.error(f"Failed to process image {img_path}: {e}", exc_info=True)
+                                    logger.error(f"Failed to process image {img_path}: {e}")
                             finally:
                                 pbar.update(1)
                         
-                        # Save cache index periodically instead of every iteration
+                        # Periodic saves and cleanup
                         if i - last_save >= save_interval:
                             self.cache_manager._save_cache_index(silent=True)
                             last_save = i
-                        
                         if torch.cuda.is_available() and i % 100 == 0:
                             torch.cuda.empty_cache()
-                            
-                # Final save after processing - this one can show the message
-                self.cache_manager._save_cache_index(silent=False)
-                logger.info(f"Completed processing {len(missing_latents)} images")
+
+                self.cache_manager._save_cache_index()
             else:
                 logger.info("All image latents already cached")
 
-        # Reset stats for second pass
-        self.stats = PipelineStats()
-
-        # Second pass: Process text embeddings
+        # Process text embeddings
         if process_text_embeddings:
             missing_embeddings = []
             for img_path in image_paths:
-                # Convert image path to text path properly by replacing the extension
                 img_path = Path(img_path)
                 txt_path = img_path.parent / f"{img_path.stem}.txt"
                 
-                if txt_path.exists():  # Only process if text file exists
+                if txt_path.exists() and img_path.stem not in cached_text_files:
                     try:
                         with open(txt_path, 'r', encoding='utf-8') as f:
                             caption = f.read().strip()
                             
-                        if caption and not (proportion_empty_prompts > 0 and random.random() < proportion_empty_prompts):
-                            img_id = img_path.stem
-                            if img_id not in cached_text_files:
-                                missing_embeddings.append({
-                                    "caption": caption,
-                                    "img_id": img_id,
-                                    "img_path": str(img_path),
-                                    "txt_path": str(txt_path)
-                                })
+                        if caption and random.random() >= proportion_empty_prompts:
+                            missing_embeddings.append({
+                                "caption": caption,
+                                "img_path": str(img_path),
+                                "txt_path": str(txt_path)
+                            })
                     except Exception as e:
                         logger.warning(f"Failed to read caption from {txt_path}: {e}")
                         continue
@@ -449,37 +498,35 @@ class PreprocessingPipeline:
                         
                         for item in batch_items:
                             try:
-                                embeddings = self.latent_preprocessor.encode_prompt([item["caption"]])
-                                metadata = {
-                                    "image_path": item["img_path"],
-                                    "text_path": item["txt_path"],
-                                    "timestamp": time.time(),
-                                    "caption": item["caption"]
-                                }
-
-                                self.cache_manager.save_preprocessed_data(
-                                    image_latent=None,
-                                    text_latent={
-                                        "embeddings": embeddings,
-                                        "caption": item["caption"],
-                                        "processed_text": metadata.get("processed_caption", "")
-                                    },
-                                    metadata=metadata,
-                                    file_path=item["img_id"]  # Use image ID for cache consistency
-                                )
-                                self.stats.successful += 1
-
+                                with torch.cuda.amp.autocast():
+                                    text_embeddings = self.latent_preprocessor.encode_prompt([item["caption"]])
+                                    
+                                    self.cache_manager.save_preprocessed_data(
+                                        image_latent=None,
+                                        text_latent={
+                                            "embeddings": text_embeddings.get("embeddings", {}),
+                                            "caption": item["caption"]
+                                        },
+                                        metadata={
+                                            "image_path": item["img_path"],
+                                            "text_path": item["txt_path"],
+                                            "timestamp": time.time()
+                                        },
+                                        file_path=item["img_path"]
+                                    )
+                                    self.stats.successful += 1
                             except Exception as e:
                                 self.stats.failed += 1
-                                logger.error(f"Failed to process caption from {item['txt_path']}: {e}", exc_info=True)
+                                logger.error(f"Failed to process caption from {item['txt_path']}: {e}")
                             finally:
                                 pbar.update(1)
-
+                                
                         if torch.cuda.is_available() and i % 100 == 0:
                             torch.cuda.empty_cache()
             else:
                 logger.info("All text embeddings already cached")
 
+        logger.info(f"Precomputation complete. Successful: {self.stats.successful}, Failed: {self.stats.failed}")
 
     def get_valid_image_paths(self) -> List[str]:
         """Return list of valid image paths found during bucketing."""
@@ -520,49 +567,83 @@ class PreprocessingPipeline:
             # Use first bucket as fallback
             target_h, target_w = self.buckets[0]
             return img.resize((target_w, target_h), Image.LANCZOS), 0
+        
+    def _validate_tensor(self, tensor: torch.Tensor, name: str = "") -> torch.Tensor:
+        """Validate tensor and handle invalid values."""
+        if tensor is None:
+            raise ValueError(f"Tensor {name} is None")
+            
+        if torch.isnan(tensor).any():
+            logger.warning(f"Found NaN values in {name}, replacing with zeros")
+            tensor = torch.nan_to_num(tensor, nan=0.0)
+            
+        if torch.isinf(tensor).any():
+            logger.warning(f"Found infinite values in {name}, clipping")
+            tensor = torch.nan_to_num(tensor, posinf=1.0, neginf=-1.0)
+            
+        return tensor
 
     def _process_image(self, img_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
-        """Process a single image."""
+        """Process single image with enhanced error handling."""
         try:
             img = Image.open(img_path).convert('RGB')
-            w, h = img.size
-            
-            # Validate image size with detailed error
             if not self.validate_image_size(img.size):
-                logger.warning(
-                    f"Invalid image size for {img_path}: {w}x{h} "
-                    f"(max pixels: {self.config.global_config.image.max_dim}, "
-                    f"min size: {self.config.global_config.image.min_size}, "
-                    f"max aspect ratio: {self.config.global_config.image.max_aspect_ratio})"
-                )
+                logger.warning(f"Image {img_path} failed size validation")
                 return None
-                
-            # Get bucket assignment and resize image
+
             resized_img, bucket_idx = self.resize_to_bucket(img)
             
-            # Convert to tensor and process
             tensor = torch.from_numpy(np.array(resized_img)).permute(2, 0, 1).float() / 255.0
-            tensor = tensor.unsqueeze(0).contiguous(memory_format=torch.channels_last)
+            tensor = tensor.unsqueeze(0).to(device=self.device, dtype=torch.float32)
+            tensor = tensor.contiguous(memory_format=torch.channels_last)
             
-            # Process on GPU
+            # Validate input tensor
+            tensor = self._validate_tensor(tensor, "input")
+            
             with torch.cuda.amp.autocast():
-                latent = self.latent_preprocessor.encode_images(tensor.to(self.device))
-            
-            metadata = {
-                "original_size": img.size,
-                "bucket_size": self.buckets[bucket_idx],
-                "bucket_index": bucket_idx,
-                "path": str(img_path),
-                "timestamp": time.time()
-            }
-            
-            return {
-                "image_latent": latent["image_latent"],
-                "metadata": metadata
-            }
-            
+                with self.track_memory_usage("vae_encoding"):
+                    vae_output = self._process_on_gpu(
+                        self.latent_preprocessor.encode_images,
+                        tensor
+                    )
+                    
+                if vae_output is None:
+                    raise ValueError(f"VAE encoding failed for {img_path}")
+                    
+                latents = self._validate_tensor(vae_output["image_latent"], "latents")
+                uncond_latents = self._validate_tensor(
+                    vae_output.get("uncond_latents"), 
+                    "uncond_latents"
+                )
+                
+                metadata = {
+                    "original_size": img.size,
+                    "bucket_size": self.buckets[bucket_idx],
+                    "bucket_index": bucket_idx,
+                    "path": str(img_path),
+                    "timestamp": time.time(),
+                    "scaling_factor": vae_output.get("scaling_factor", 0.18215),
+                    "latent_shape": vae_output.get("latent_shape"),
+                    "input_shape": vae_output.get("input_shape"),
+                    "vae_stats": vae_output.get("stats", {})
+                }
+                
+                result = {"image_latent": latents, "metadata": metadata}
+                if uncond_latents is not None:
+                    result["uncond_latents"] = uncond_latents
+                    
+                self.stats.successful += 1
+                return result
+                
         except Exception as e:
-            logger.warning(f"Failed to process {img_path}: {str(e)}")
+            self.stats.failed += 1
+            logger.error(f"Failed to process {img_path}: {str(e)}")
+            self.performance_stats['errors'].append({
+                'path': str(img_path),
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'timestamp': time.time()
+            })
             return None
     
     def encode_prompt(self, caption: str) -> Dict[str, torch.Tensor]:
