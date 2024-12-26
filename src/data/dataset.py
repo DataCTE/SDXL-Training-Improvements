@@ -234,8 +234,8 @@ class AspectBucketDataset(Dataset):
             if latent_data is None:
                 raise ValueError("No latent data in cache")
 
-            # Extract and validate latent tensor from proper structure
-            latent_tensor = latent_data.get("model_input")
+            # The latent data is already a tensor in this case
+            latent_tensor = latent_data if isinstance(latent_data, torch.Tensor) else latent_data.get("model_input")
             if latent_tensor is None:
                 raise ValueError("No valid model input tensor found")
 
@@ -257,14 +257,17 @@ class AspectBucketDataset(Dataset):
             }
 
             # Add text embeddings if available
-            if "embeddings" in cached_data.get("text_latent", {}):
-                embeddings = cached_data["text_latent"]["embeddings"]
+            text_latent = cached_data.get("text_latent", {})
+            if isinstance(text_latent, dict) and "embeddings" in text_latent:
+                embeddings = text_latent["embeddings"]
                 for key in ["prompt_embeds", "pooled_prompt_embeds", 
-                          "prompt_embeds_2", "pooled_prompt_embeds_2"]:
+                           "prompt_embeds_2", "pooled_prompt_embeds_2"]:
                     if key in embeddings:
-                        result[key] = self._validate_and_clean_tensor(
-                            embeddings[key], image_path
-                        )
+                        embedding_tensor = embeddings[key]
+                        if isinstance(embedding_tensor, torch.Tensor):
+                            result[key] = self._validate_and_clean_tensor(
+                                embedding_tensor, image_path
+                            )
 
             return result
 
