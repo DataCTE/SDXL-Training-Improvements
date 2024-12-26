@@ -31,6 +31,10 @@ class LatentPreprocessor:
             self.model = sdxl_model
             self.device = torch.device(device) if isinstance(device, str) else device
             
+            # Validate model components are initialized
+            if not sdxl_model.vae:
+                raise ValueError("VAE is not initialized in SDXL model")
+                
             # Initialize VAE encoder in float32
             self.vae_encoder = VAEEncoder(
                 vae=sdxl_model.vae,
@@ -38,21 +42,50 @@ class LatentPreprocessor:
                 dtype=torch.float32
             )
             
+            # Validate CLIP encoders
+            if not sdxl_model.clip_encoder_1:
+                raise ValueError("CLIP encoder 1 is not initialized in SDXL model")
+            if not sdxl_model.clip_encoder_2:
+                raise ValueError("CLIP encoder 2 is not initialized in SDXL model")
+                
             # CLIP encoders
             self.clip_encoder_1 = sdxl_model.clip_encoder_1
             self.clip_encoder_2 = sdxl_model.clip_encoder_2
-            self.embedding_processor = sdxl_model.clip_encoder_1
             
+            # Set embedding processor and validate
+            self.embedding_processor = sdxl_model.clip_encoder_1
+            if not self.embedding_processor:
+                raise ValueError("Embedding processor could not be initialized")
+                
+            # Validate embedding processor has required method
+            if not hasattr(self.embedding_processor, 'process_embeddings'):
+                raise ValueError("Embedding processor missing process_embeddings method")
+                
             self.max_retries = max_retries
             self.chunk_size = chunk_size
             self.max_memory_usage = max_memory_usage
             
             self._setup_cache(config)
             
+            logger.info("Initialized latent preprocessor", extra={
+                'device': str(self.device),
+                'vae_initialized': self.vae_encoder is not None,
+                'clip1_initialized': self.clip_encoder_1 is not None,
+                'clip2_initialized': self.clip_encoder_2 is not None,
+                'embedding_processor_initialized': self.embedding_processor is not None
+            })
+            
         except Exception as e:
-           
             logger.error("Failed to initialize latent preprocessor", 
-                        extra={'error': str(e), 'device': str(device)})
+                        extra={
+                            'error': str(e),
+                            'error_type': type(e).__name__,
+                            'device': str(device),
+                            'model_type': type(sdxl_model).__name__,
+                            'vae_present': hasattr(sdxl_model, 'vae') and sdxl_model.vae is not None,
+                            'clip1_present': hasattr(sdxl_model, 'clip_encoder_1') and sdxl_model.clip_encoder_1 is not None,
+                            'clip2_present': hasattr(sdxl_model, 'clip_encoder_2') and sdxl_model.clip_encoder_2 is not None
+                        })
             raise
             
     def _validate_tensor(self, tensor: torch.Tensor, name: str = "") -> torch.Tensor:

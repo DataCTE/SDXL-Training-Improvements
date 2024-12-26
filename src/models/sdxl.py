@@ -164,6 +164,13 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             'num_allocations': 0
         }
 
+        # Initialize encoders
+        self._initialize_encoders()
+        
+        # Validate initialization
+        if not self.clip_encoder_1 or not self.clip_encoder_2 or not self.vae_encoder:
+            raise RuntimeError("Failed to initialize model encoders")
+
         logger.info("Initialized SDXL model", extra={
             'model_type': str(model_type),
             'optimizations': {
@@ -171,6 +178,11 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 'vae_slicing': enable_vae_slicing,
                 'model_cpu_offload': enable_model_cpu_offload,
                 'sequential_cpu_offload': enable_sequential_cpu_offload
+            },
+            'encoders_initialized': {
+                'clip1': self.clip_encoder_1 is not None,
+                'clip2': self.clip_encoder_2 is not None,
+                'vae': self.vae_encoder is not None
             }
         })
 
