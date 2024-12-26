@@ -64,12 +64,14 @@ class CacheManager(TensorValidator):
 
         with ThreadPoolExecutor() as executor:
             for file_path, info in self.cache_index["files"].items():
-                base_name = Path(file_path).stem
-                latent_path = self.image_latents_dir / f"{base_name}.pt"
-                text_path = self.text_latents_dir / f"{base_name}.pt"
+                base_name = info["base_name"]
                 
-                latent_future = executor.submit(validate_file, latent_path)
-                text_future = executor.submit(validate_file, text_path)
+                # Get paths from cache entry or construct default paths
+                image_latent_path = Path(info.get("image_latent_path", self.image_latents_dir / f"{base_name}.pt"))
+                text_latent_path = Path(info.get("text_latent_path", self.text_latents_dir / f"{base_name}.pt"))
+                
+                latent_future = executor.submit(validate_file, image_latent_path)
+                text_future = executor.submit(validate_file, text_latent_path)
                 
                 valid_latent = latent_future.result()
                 valid_text = text_future.result()
@@ -79,7 +81,14 @@ class CacheManager(TensorValidator):
                 if not valid_text:
                     missing_text.append(file_path)
                 if valid_latent or valid_text:
-                    valid_files[file_path] = info
+                    valid_files[file_path] = {
+                        "base_name": base_name,
+                        "timestamp": info["timestamp"]
+                    }
+                    if valid_latent:
+                        valid_files[file_path]["image_latent_path"] = str(image_latent_path)
+                    if valid_text:
+                        valid_files[file_path]["text_latent_path"] = str(text_latent_path)
 
         self.cache_index["files"] = valid_files
         self._save_index()
@@ -116,6 +125,12 @@ class CacheManager(TensorValidator):
             base_name = Path(file_path).stem
             metadata = metadata or {}
             metadata["timestamp"] = time.time()
+            
+            # Track files in cache index
+            cache_entry = {
+                "base_name": base_name,
+                "timestamp": time.time()
+            }
 
             if image_latent is not None:
                 image_latent = self._process_latents(image_latent, "image")
@@ -124,6 +139,7 @@ class CacheManager(TensorValidator):
                     "latent": image_latent,
                     "metadata": metadata
                 }, latent_path)
+                cache_entry["image_latent_path"] = str(latent_path)
 
             if text_latent is not None:
                 text_latent = self._process_latents(text_latent.get("embeddings", {}), "text")
@@ -132,11 +148,9 @@ class CacheManager(TensorValidator):
                     "embeddings": text_latent,
                     "metadata": {**metadata, "type": "text_latent"}
                 }, text_path)
+                cache_entry["text_latent_path"] = str(text_path)
 
-            self.cache_index["files"][str(file_path)] = {
-                "base_name": base_name,
-                "timestamp": time.time()
-            }
+            self.cache_index["files"][str(file_path)] = cache_entry
             self._save_index()
             return True
 

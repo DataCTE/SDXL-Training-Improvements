@@ -1,10 +1,10 @@
-"""Tag weighting system for SDXL training."""
+"""Tag weighting system for SDXL training with JSON index support."""
+
 import json
 from collections import defaultdict
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
-
 import numpy as np
 import torch
 
@@ -21,6 +21,7 @@ class TagWeighter:
     ):
         """Initialize tag weighting system."""
         self.config = config
+        
         from src.data.utils.paths import convert_windows_path
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True)
         self.cache_path = Path(convert_windows_path(
@@ -88,7 +89,7 @@ class TagWeighter:
             for tag_type, tags in categorized_tags.items():
                 for tag in tags:
                     self.tag_counts[tag_type][tag] += 1
-
+        
         self._compute_weights()
         
         if self.config.tag_weighting.use_cache:
@@ -110,14 +111,14 @@ class TagWeighter:
                 # Apply inverse frequency with smoothing
                 raw_weight = 1.0 / (frequency + self.smoothing_factor)
                 
-                # Scale the weight to our desired range (0.01 to 3.0)
+                # Scale the weight to our desired range
                 # First normalize to 0-1 range
                 max_possible_weight = 1.0 / self.smoothing_factor  # Theoretical maximum when frequency = 0
                 normalized_weight = (raw_weight - 1.0) / (max_possible_weight - 1.0)
                 
                 # Then scale to our desired range
                 scaled_weight = (
-                    self.min_weight + 
+                    self.min_weight +
                     (normalized_weight * (self.max_weight - self.min_weight))
                 )
                 
@@ -146,6 +147,37 @@ class TagWeighter:
             
         return float(np.exp(np.mean(np.log(weights))))
 
+    def get_caption_weight_details(self, caption: str) -> Dict[str, any]:
+        """Get detailed weights for all tags in a caption."""
+        categorized_tags = self._extract_tags(caption)
+        tag_details = {
+            "total_weight": self.default_weight,
+            "tags": defaultdict(list)
+        }
+        
+        weights = []
+        
+        # Process each tag category
+        for tag_type, tags in categorized_tags.items():
+            tag_weights = []
+            for tag in tags:
+                weight = self.tag_weights[tag_type][tag]
+                tag_weights.append(weight)
+                tag_details["tags"][tag_type].append({
+                    "tag": tag,
+                    "weight": weight,
+                    "frequency": self.tag_counts[tag_type][tag] / self.total_samples if self.total_samples > 0 else 0
+                })
+            
+            if tag_weights:
+                weights.append(np.mean(tag_weights))
+        
+        # Calculate total caption weight using geometric mean
+        if weights:
+            tag_details["total_weight"] = float(np.exp(np.mean(np.log(weights))))
+        
+        return dict(tag_details)
+
     def get_batch_weights(self, captions: List[str]) -> torch.Tensor:
         """Get weights for a batch of captions."""
         weights = [self.get_caption_weight(caption) for caption in captions]
@@ -159,12 +191,12 @@ class TagWeighter:
             "total_samples": self.total_samples
         }
         
-        with open(self.cache_path, 'w') as f:
-            json.dump(cache_data, f)
+        with open(self.cache_path, 'w', encoding='utf-8') as f:
+            json.dump(cache_data, f, indent=2, ensure_ascii=False)
 
     def _load_cache(self) -> None:
         """Load tag statistics from cache."""
-        with open(self.cache_path, 'r') as f:
+        with open(self.cache_path, 'r', encoding='utf-8') as f:
             cache_data = json.load(f)
             
         self.tag_counts = defaultdict(lambda: defaultdict(int))
@@ -200,6 +232,37 @@ class TagWeighter:
             
         return stats
 
+    def save_to_index(self, output_path: Path, image_tags: Dict[str, Dict[str, any]]) -> None:
+        """Save tag weights and statistics to a JSON index file."""
+        index_data = {
+            "metadata": {
+                "total_samples": self.total_samples,
+                "default_weight": self.default_weight,
+                "min_weight": self.min_weight,
+                "max_weight": self.max_weight,
+                "smoothing_factor": self.smoothing_factor
+            },
+            "tag_types": self.tag_types,
+            "tag_statistics": self.get_tag_statistics(),
+            "image_tags": image_tags
+        }
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(index_data, f, indent=2, ensure_ascii=False)
+    
+    def process_dataset_tags(self, image_captions: Dict[str, str]) -> Dict[str, Dict[str, any]]:
+        """Process all image captions and return detailed tag information."""
+        image_tags = {}
+        
+        for image_id, caption in image_captions.items():
+            tag_details = self.get_caption_weight_details(caption)
+            image_tags[image_id] = {
+                "caption": caption,
+                "weight_details": tag_details
+            }
+            
+        return image_tags
+
 def create_tag_weighter(
     config: "Config",  # type: ignore
     captions: List[str],
@@ -220,4 +283,31 @@ def create_tag_weighter(
         logger.info(f"Total occurrences: {type_stats['total_occurrences']}")
         logger.info(f"Weight range: {type_stats['weight_range']}")
         
+    return weighter
+
+def create_tag_weighter_with_index(
+    config: "Config",
+    image_captions: Dict[str, str],
+    index_output_path: Path,
+    cache_path: Optional[Path] = None
+) -> TagWeighter:
+    """Create a tag weighter and save comprehensive index."""
+    weighter = TagWeighter(config, cache_path)
+    
+    if not (config.tag_weighting.use_cache and weighter.cache_path.exists()):
+        logger.info("Computing tag statistics...")
+        weighter.update_statistics(list(image_captions.values()))
+    
+    logger.info("Processing image tags and creating index...")
+    image_tags = weighter.process_dataset_tags(image_captions)
+    weighter.save_to_index(index_output_path, image_tags)
+    
+    stats = weighter.get_tag_statistics()
+    logger.info("Tag statistics:")
+    for tag_type, type_stats in stats.items():
+        logger.info(f"\n{tag_type}:")
+        logger.info(f"Total unique tags: {type_stats['total_tags']}")
+        logger.info(f"Total occurrences: {type_stats['total_occurrences']}")
+        logger.info(f"Weight range: {type_stats['weight_range']}")
+    
     return weighter
