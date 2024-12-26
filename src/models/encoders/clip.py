@@ -1,30 +1,30 @@
- """CLIP encoder implementation with extreme speedups and embedding support."""
- from typing import Dict, List, Optional, Tuple, Union, Any
- import logging
- import time
- import torch
- from torch import Tensor
- from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
- from src.core.logging.logging import setup_logging
- from src.models import BaseModelEmbedding
+"""CLIP encoder implementation with extreme speedups and embedding support."""
+from typing import Dict, List, Optional, Tuple, Union, Any
+import logging
+import time
+import torch
+from torch import Tensor
+from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
+from src.core.logging.logging import setup_logging
+from src.models import BaseModelEmbedding
 
- # Initialize logger with debug disabled by default
- logger = setup_logging(__name__, level=logging.INFO)
+# Initialize logger with debug disabled by default
+logger = setup_logging(__name__, level=logging.INFO)
 
- class CLIPEncoder:
-     """Optimized CLIP encoder wrapper with extreme speedup and embedding support."""
-
-     def __init__(
-         self,
-         text_encoder: Union[CLIPTextModel, CLIPTextModelWithProjection],
-         tokenizer: CLIPTokenizer,
-         device: Union[str, torch.device] = "cuda",
-         dtype: Optional[torch.dtype] = torch.float16,
-         enable_memory_efficient_attention: bool = True,
-         enable_vae_slicing: bool = False,
-         enable_model_cpu_offload: bool = False,
-         debug: bool = False
-     ):
+class CLIPEncoder:
+    """Optimized CLIP encoder wrapper with extreme speedup and embedding support."""
+    
+    def __init__(
+        self,
+        text_encoder: Union[CLIPTextModel, CLIPTextModelWithProjection],
+        tokenizer: CLIPTokenizer,
+        device: Union[str, torch.device] = "cuda",
+        dtype: Optional[torch.dtype] = torch.float16,
+        enable_memory_efficient_attention: bool = True,
+        enable_vae_slicing: bool = False,
+        enable_model_cpu_offload: bool = False,
+        debug: bool = False
+    ):
          """Initialize CLIP encoder with optimizations.
 
          Args:
