@@ -229,24 +229,20 @@ class AspectBucketDataset(Dataset):
     ) -> Dict[str, Any]:
         """Process a cached item with validation."""
         try:
-            # Get latent data
+            # Get latent data with proper structure
             latent_data = cached_data.get("latent")
             if latent_data is None:
                 raise ValueError("No latent data in cache")
 
-            # Extract and validate latent tensor
-            latent_tensor = (
-                latent_data.get("model_input") or 
-                latent_data.get("latent") or 
-                latent_data if isinstance(latent_data, torch.Tensor) else None
-            )
+            # Extract and validate latent tensor from proper structure
+            latent_tensor = latent_data.get("model_input")
             if latent_tensor is None:
-                raise ValueError("No valid latent tensor found")
+                raise ValueError("No valid model input tensor found")
 
             # Clean tensor
             latent_tensor = self._validate_and_clean_tensor(latent_tensor, image_path)
 
-            # Get metadata
+            # Get metadata from proper structure
             metadata = cached_data.get("metadata", {})
 
             # Build result dictionary

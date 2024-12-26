@@ -284,6 +284,18 @@ def setup_training(
             logger.error(f"Failed to create preprocessing pipeline: {str(e)}", exc_info=True)
             raise
         
+        # Create tag weighter with proper configuration
+        if config.training.use_tag_weighting:
+            logger.info("Initializing tag weighter...")
+            tag_weighter = create_tag_weighter_with_index(
+                config=config,
+                image_captions={path: caption for path, caption in zip(image_paths, captions)},
+                index_output_path=Path(config.global_config.output_dir) / "tag_weights.json",
+                cache_path=Path(config.global_config.cache.cache_dir) / "tag_weights_cache.json"
+            )
+        else:
+            tag_weighter = None
+
         logger.info("Creating dataset...")
         try:
             train_dataset = create_dataset(
@@ -291,6 +303,7 @@ def setup_training(
                 image_paths=image_paths,
                 captions=captions,
                 preprocessing_pipeline=preprocessing_pipeline,
+                tag_weighter=tag_weighter,
                 enable_memory_tracking=True,
                 max_memory_usage=0.8
             )
