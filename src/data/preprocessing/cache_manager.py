@@ -315,6 +315,9 @@ class CacheManager(TensorValidator):
     def scan_and_rebuild_index(self) -> None:
         """Scan cache directories and rebuild index with actual files."""
         try:
+            from concurrent.futures import ThreadPoolExecutor
+            import itertools
+            
             # Initialize new index structure
             new_index = {
                 "metadata": {
@@ -333,46 +336,66 @@ class CacheManager(TensorValidator):
                 }
             }
 
-            # Scan image latents directory
-            for latent_path in self.image_latents_dir.glob("*.pt"):
+            # Pre-scan directories to get file lists
+            image_latents = list(self.image_latents_dir.glob("*.pt"))
+            text_latents = list(self.text_latents_dir.glob("*.pt"))
+            
+            # Process files in parallel
+            def process_latent_file(path: Path, is_image: bool) -> tuple[str, dict]:
                 try:
-                    data = torch.load(latent_path, map_location='cpu')
-                    if isinstance(data, dict) and "latent" in data and "metadata" in data:
-                        base_name = latent_path.stem
-                        file_path = data["metadata"].get("path", str(latent_path))
+                    # Just load metadata portion for speed
+                    data = torch.load(path, map_location='cpu', weights_only=True)
+                    if isinstance(data, dict):
+                        base_name = path.stem
+                        file_path = data.get("metadata", {}).get(
+                            "path" if is_image else "image_path", 
+                            str(path)
+                        )
                         
-                        if file_path not in new_index["files"]:
-                            new_index["files"][file_path] = {
-                                "base_name": base_name,
-                                "timestamp": data["metadata"].get("timestamp", time.time())
-                            }
+                        entry = {
+                            "base_name": base_name,
+                            "timestamp": data.get("metadata", {}).get("timestamp", time.time())
+                        }
                         
-                        new_index["files"][file_path]["image_latent_path"] = str(latent_path)
-                        new_index["statistics"]["total_image_latents"] += 1
+                        if is_image:
+                            entry["image_latent_path"] = str(path)
+                        else:
+                            entry["text_latent_path"] = str(path)
+                            
+                        return file_path, entry
+                        
                 except Exception as e:
-                    logger.warning(f"Failed to process image latent {latent_path}: {e}")
+                    logger.warning(f"Failed to process {'image' if is_image else 'text'} latent {path}: {e}")
+                return None
 
-            # Scan text latents directory
-            for text_path in self.text_latents_dir.glob("*.pt"):
-                try:
-                    data = torch.load(text_path, map_location='cpu')
-                    if isinstance(data, dict) and "embeddings" in data and "metadata" in data:
-                        base_name = text_path.stem
-                        file_path = data["metadata"].get("image_path", str(text_path))
-                        
+            # Process files in parallel using thread pool
+            with ThreadPoolExecutor(max_workers=min(32, (len(image_latents) + len(text_latents)))) as executor:
+                # Submit all tasks
+                future_to_path = {
+                    executor.submit(process_latent_file, path, True): path 
+                    for path in image_latents
+                }
+                future_to_path.update({
+                    executor.submit(process_latent_file, path, False): path 
+                    for path in text_latents
+                })
+
+                # Process results as they complete
+                for future in itertools.as_completed(future_to_path):
+                    result = future.result()
+                    if result:
+                        file_path, entry = result
                         if file_path not in new_index["files"]:
-                            new_index["files"][file_path] = {
-                                "base_name": base_name,
-                                "timestamp": data["metadata"].get("timestamp", time.time())
-                            }
-                        
-                        new_index["files"][file_path]["text_latent_path"] = str(text_path)
-                        new_index["statistics"]["total_text_latents"] += 1
-                except Exception as e:
-                    logger.warning(f"Failed to process text latent {text_path}: {e}")
+                            new_index["files"][file_path] = entry
+                        else:
+                            new_index["files"][file_path].update(entry)
 
-            # Update total files count
-            new_index["statistics"]["total_files"] = len(new_index["files"])
+            # Update statistics
+            new_index["statistics"].update({
+                "total_files": len(new_index["files"]),
+                "total_image_latents": sum(1 for f in new_index["files"].values() if "image_latent_path" in f),
+                "total_text_latents": sum(1 for f in new_index["files"].values() if "text_latent_path" in f)
+            })
 
             # Update cache index and save
             self.cache_index = new_index
