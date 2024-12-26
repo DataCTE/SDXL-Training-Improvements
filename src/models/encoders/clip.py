@@ -143,11 +143,11 @@ class CLIPEncoder:
              })
              raise
 
-     def combine_embeddings(
-         self,
-         text_embeddings: torch.Tensor,
-         additional_embeddings: Optional[List[BaseModelEmbedding]] = None,
-         base_embedding: Optional[BaseModelEmbedding] = None
+    def combine_embeddings(
+        self,
+        text_embeddings: torch.Tensor,
+        additional_embeddings: Optional[List[BaseModelEmbedding]] = None,
+        base_embedding: Optional[BaseModelEmbedding] = None
      ) -> torch.Tensor:
          """Combine text embeddings with custom embeddings.
 
