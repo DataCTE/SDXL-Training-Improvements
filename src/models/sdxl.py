@@ -212,6 +212,12 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             self.dtype = model_dtypes.train_dtype
 
+            # Reset encoders to ensure clean initialization
+            self.clip_encoder_1 = None
+            self.clip_encoder_2 = None 
+            self.vae_encoder = None
+            self.embedding_processor = None
+
             # 2. Load VAE with error tracking
             logger.info("Loading VAE...")
             try:
@@ -281,7 +287,16 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             # Initialize encoders using dedicated implementations
             self._initialize_encoders()
 
-            logger.info("Successfully loaded all model components.")
+            # Initialize encoders AFTER all components are loaded
+            try:
+                self._initialize_encoders()
+            except Exception as e:
+                raise RuntimeError(f"Failed to initialize encoders: {str(e)}") from e
+
+            if not self.clip_encoder_1 or not self.clip_encoder_2 or not self.vae_encoder:
+                raise RuntimeError("Encoders were not properly initialized")
+
+            logger.info("Successfully loaded all model components and initialized encoders.")
 
         except Exception as e:
             error_context = {
@@ -309,6 +324,9 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
     def _initialize_encoders(self):
         """Initialize optimized encoder wrappers using imported implementations."""
+        if not self.vae or not self.text_encoder_1 or not self.text_encoder_2:
+            raise RuntimeError("Cannot initialize encoders: model components not loaded")
+
         try:
             # Initialize VAE encoder using imported VAEEncoder
             self.vae_encoder = VAEEncoder(
@@ -316,6 +334,8 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 device=self.device,
                 dtype=next(self.vae.parameters()).dtype
             )
+            if not self.vae_encoder:
+                raise RuntimeError("Failed to initialize VAE encoder")
 
             # Initialize CLIP encoders using imported CLIPEncoder
             self.clip_encoder_1 = CLIPEncoder(
@@ -325,6 +345,8 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 dtype=next(self.text_encoder_1.parameters()).dtype,
                 enable_memory_efficient_attention=self.enable_memory_efficient_attention
             )
+            if not self.clip_encoder_1:
+                raise RuntimeError("Failed to initialize CLIP encoder 1")
             
             self.clip_encoder_2 = CLIPEncoder(
                 text_encoder=self.text_encoder_2,
@@ -333,14 +355,27 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 dtype=next(self.text_encoder_2.parameters()).dtype,
                 enable_memory_efficient_attention=self.enable_memory_efficient_attention
             )
+            if not self.clip_encoder_2:
+                raise RuntimeError("Failed to initialize CLIP encoder 2")
 
             # Use CLIP encoder's embedding processor
             self.embedding_processor = self.clip_encoder_1
+            if not self.embedding_processor:
+                raise RuntimeError("Failed to set embedding processor")
+
+            logger.info("Successfully initialized all encoders", extra={
+                'vae_device': str(self.vae_encoder.device),
+                'clip1_device': str(self.clip_encoder_1.device),
+                'clip2_device': str(self.clip_encoder_2.device)
+            })
 
         except Exception as e:
             raise ModelError("Failed to initialize encoders", {
                 'error': str(e),
-                'device': str(self.device)
+                'device': str(self.device),
+                'vae_loaded': self.vae is not None,
+                'text_encoder_1_loaded': self.text_encoder_1 is not None,
+                'text_encoder_2_loaded': self.text_encoder_2 is not None
             })
 
         
