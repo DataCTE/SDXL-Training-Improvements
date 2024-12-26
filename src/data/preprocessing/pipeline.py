@@ -58,6 +58,8 @@ class PreprocessingPipeline:
         enable_memory_tracking: bool = True,
         stream_timeout: float = 10.0
     ):
+        # Add embedding processor reference
+        self.embedding_processor = latent_preprocessor.embedding_processor if latent_preprocessor else None
         """Initialize preprocessing pipeline.
         
         Args:

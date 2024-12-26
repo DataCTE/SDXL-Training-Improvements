@@ -28,6 +28,8 @@ class LatentPreprocessor:
         chunk_size: int = 1000,
         max_memory_usage: float = 0.8
     ):
+        # Add embedding processor
+        self.embedding_processor = sdxl_model.embedding_processor
         """Initialize preprocessor with model and encoders.
         
         Args:
@@ -129,19 +131,31 @@ class LatentPreprocessor:
             self.use_cache = False
 
     def encode_prompt(self, prompt_batch: List[str]) -> Dict[str, torch.Tensor]:
-        """Encode text prompts using both CLIP encoders."""
+        """Enhanced prompt encoding with embedding processing."""
         try:
+            # Process prompts with embedding processor
+            processed_prompts = []
+            for prompt in prompt_batch:
+                processed = self.embedding_processor.process_embeddings(prompt)
+                processed_prompts.append(processed["processed_text"])
+
             # Get embeddings from both encoders
-            encoder_1_output = self.clip_encoder_1.encode_prompt(prompt_batch)
-            encoder_2_output = self.clip_encoder_2.encode_prompt(prompt_batch)
-            
+            encoder_1_output = self.clip_encoder_1.encode_prompt(processed_prompts)
+            encoder_2_output = self.clip_encoder_2.encode_prompt(processed_prompts)
+
             # Combine results
-            return {
+            embeddings = {
                 "prompt_embeds": encoder_1_output["text_embeds"],
                 "pooled_prompt_embeds": encoder_1_output["pooled_embeds"],
                 "prompt_embeds_2": encoder_2_output["text_embeds"],
                 "pooled_prompt_embeds_2": encoder_2_output["pooled_embeds"]
             }
+
+            # Validate embeddings
+            if not self.embedding_processor.validate_embeddings(embeddings):
+                raise ValueError("Invalid embeddings detected")
+
+            return embeddings
             
         except Exception as e:
             logger.error("Failed to encode prompts", extra={

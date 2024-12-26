@@ -132,6 +132,7 @@ class AspectBucketDataset(Dataset):
             )
 
         self.latent_preprocessor = self.preprocessing_pipeline.latent_preprocessor
+        self.embedding_processor = self.preprocessing_pipeline.embedding_processor
         self.tag_weighter = tag_weighter or self._create_tag_weighter(config, self.image_paths)
 
         self._setup_image_config()
@@ -341,6 +342,18 @@ class AspectBucketDataset(Dataset):
             cached_data = self.cache_manager.get_cached_item(image_path)
             if not cached_data:
                 raise RuntimeError(f"No cached data found for {image_path}. Run preprocessing first.")
+                
+            # Process caption with embedding processor if needed
+            if caption and not cached_data.get("text_embeddings"):
+                processed = self.embedding_processor.process_embeddings(caption)
+                embeddings = self.latent_preprocessor.encode_prompt([processed["processed_text"]])
+                cached_data["text_embeddings"] = embeddings
+                cached_data["metadata"]["processed_caption"] = processed["processed_text"]
+
+            # Validate embeddings
+            if "text_embeddings" in cached_data:
+                if not self.embedding_processor.validate_embeddings(cached_data["text_embeddings"]):
+                    raise ValueError(f"Invalid embeddings for {image_path}")
                 
             self.stats.cache_hits += 1
 
