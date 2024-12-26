@@ -86,7 +86,17 @@ def setup_device_and_logging(config: Config) -> torch.device:
     log_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
-    setup_logging(log_dir=str(log_dir), filename="train.log")
+    
+    # Get logging levels from config
+    console_level = getattr(logging, config.global_config.logging.console_level.upper())
+    file_level = getattr(logging, config.global_config.logging.file_level.upper())
+    
+    setup_logging(
+        log_dir=str(log_dir),
+        filename="train.log",
+        level=file_level,
+        console_level=console_level
+    )
     if is_main_process():
         logger.info(f"Using device: {device}")
         if device.type == "cuda":

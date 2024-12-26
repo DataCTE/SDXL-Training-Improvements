@@ -110,19 +110,23 @@ class ColoredFormatter(logging.Formatter):
 
 def setup_logging(
     log_dir: str = "outputs/wslref/logs",
-    level: int = logging.DEBUG,
+    level: int = logging.DEBUG,  # Keep DEBUG as default for file logging
     filename: Optional[str] = None,
     module_name: Optional[str] = None,
     capture_warnings: bool = True,
-    propagate: bool = True
+    propagate: bool = True,
+    console_level: int = logging.INFO  # Add new parameter for console output level
 ) -> logging.Logger:
     """Setup logging configuration with detailed action tracking and colored output.
     
     Args:
         log_dir: Directory for log files
-        level: Logging level
+        level: Logging level for file output
         filename: Optional log file name
         module_name: Optional module name for logger
+        capture_warnings: Whether to capture Python warnings
+        propagate: Whether to propagate logs to parent loggers
+        console_level: Logging level for console output (default: INFO)
         
     Returns:
         Configured logger instance
@@ -147,14 +151,14 @@ def setup_logging(
         logger.removeHandler(handler)
     
     try:
-        # Create console handler with simplified colored output
+        # Create console handler with simplified colored output and INFO level
         console_handler = logging.StreamHandler(sys.stdout)
         console_formatter = ColoredFormatter(
-            '%(asctime)s | %(levelname)s | %(name)s | %(filename)s:%(lineno)d | %(message)s',
+            '%(asctime)s | %(levelname)s | %(message)s',  # Simplified console format
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_handler.setFormatter(console_formatter)
-        console_handler.setLevel(level)
+        console_handler.setLevel(console_level)  # Use console_level for terminal output
         logger.addHandler(console_handler)
 
         # Enable warning capture and configure propagation

@@ -21,6 +21,11 @@ global_config:
     clear_cache_on_start: false
   seed: null
   output_dir: "outputs"
+  logging:
+    console_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    file_level: "DEBUG"
+    log_dir: "outputs/wslref/logs"
+    filename: "train.log"
 
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
