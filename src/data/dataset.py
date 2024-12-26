@@ -39,7 +39,7 @@ from .utils.paths import convert_windows_path
 from .config import Config
 from src.data.preprocessing import (
     LatentPreprocessor, TagWeighter, create_tag_weighter,
-    CacheManager, PreprocessingPipeline
+    create_tag_weighter_with_index, CacheManager, PreprocessingPipeline
 )
 
 logger = logging.getLogger(__name__)
