@@ -353,10 +353,18 @@ def create_tag_weighter_with_index(
     if not (config.tag_weighting.use_cache and weighter.cache_path.exists()):
         logger.info("Computing tag statistics...")
         weighter.update_statistics(list(image_captions.values()))
+        # Force save cache after statistics update
+        weighter._save_cache()
     
     logger.info("Processing image tags and creating index...")
     image_tags = weighter.process_dataset_tags(image_captions)
+    
+    # Ensure the output directory exists
+    index_output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save the index file
     weighter.save_to_index(index_output_path, image_tags)
+    logger.info(f"Saved tag weights index to {index_output_path}")
     
     stats = weighter.get_tag_statistics()
     logger.info("Tag statistics:")
