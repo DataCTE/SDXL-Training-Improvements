@@ -31,81 +31,111 @@ class VAEEncoder:
             'model_type': type(self.vae).__name__
         })
             
-    def encode(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Encode images to latent space with enhanced validation and diagnostics."""
+    def encode(
+        self, 
+        pixel_values: torch.Tensor,
+        num_images_per_prompt: int = 1,
+        output_hidden_states: bool = False
+    ) -> Dict[str, torch.Tensor]:
+        """Encode images to latent space with enhanced validation and diffusers-style processing.
+        
+        Args:
+            pixel_values: Input image tensor
+            num_images_per_prompt: Number of images to generate per prompt
+            output_hidden_states: Whether to output hidden states instead of embeddings
+            
+        Returns:
+            Dictionary containing encoded latents or hidden states
+        """
         try:
+            # Input validation and normalization
             if not isinstance(pixel_values, torch.Tensor):
-                raise ValueError("Invalid input tensor.")
+                raise ValueError("Input must be a tensor")
                 
-            # Add input normalization and validation
-            if pixel_values.dtype != self.dtype:
-                pixel_values = pixel_values.to(dtype=self.dtype)
-                
-            # Ensure values are in correct range
-            if pixel_values.min() < -1 or pixel_values.max() > 1:
-                logger.warning("Input values outside expected range [-1,1], normalizing...")
-                pixel_values = torch.clamp(pixel_values, -1, 1)
-
+            # Get VAE dtype
+            dtype = next(self.vae.parameters()).dtype
+            
+            # Convert input to correct dtype and device
+            pixel_values = pixel_values.to(device=self.device, dtype=dtype)
+            
             # Log input tensor stats
             logger.debug("VAE input tensor stats:", extra={
                 'input_shape': tuple(pixel_values.shape),
                 'input_dtype': str(pixel_values.dtype),
                 'input_device': str(pixel_values.device),
-                'input_min': pixel_values.min().item(),
-                'input_max': pixel_values.max().item(),
-                'input_mean': pixel_values.mean().item(),
-                'input_std': pixel_values.std().item()
+                'input_range': {
+                    'min': pixel_values.min().item(),
+                    'max': pixel_values.max().item(),
+                    'mean': pixel_values.mean().item(),
+                    'std': pixel_values.std().item()
+                }
             })
 
-            # Move to device and cast to correct dtype
-            pixel_values = pixel_values.to(device=self.device, dtype=self.dtype)
-            
-            # Use context managers inside try block
+            # Process with error handling
             with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
-                # Add gradient clipping for stability
-                with torch.no_grad():
-                    # Get VAE output with added stability measures
+                if output_hidden_states:
+                    # Get hidden states
+                    vae_output = self.vae(pixel_values, output_hidden_states=True)
+                    hidden_states = vae_output.hidden_states[-2]
+                    
+                    # Generate unconditioned hidden states
+                    uncond_output = self.vae(
+                        torch.zeros_like(pixel_values), 
+                        output_hidden_states=True
+                    )
+                    uncond_hidden_states = uncond_output.hidden_states[-2]
+                    
+                    # Repeat for each requested image
+                    hidden_states = hidden_states.repeat_interleave(num_images_per_prompt, dim=0)
+                    uncond_hidden_states = uncond_hidden_states.repeat_interleave(
+                        num_images_per_prompt, dim=0
+                    )
+                    
+                    # Validate outputs
+                    for tensor, name in [(hidden_states, "hidden_states"), 
+                                       (uncond_hidden_states, "uncond_hidden_states")]:
+                        if torch.isnan(tensor).any():
+                            nan_count = torch.isnan(tensor).sum().item()
+                            raise ValueError(f"NaN values detected in {name}: {nan_count} NaNs")
+                        if torch.isinf(tensor).any():
+                            tensor = torch.clamp(tensor, -1e6, 1e6)
+                            
+                    return {
+                        "hidden_states": hidden_states,
+                        "uncond_hidden_states": uncond_hidden_states
+                    }
+                    
+                else:
+                    # Get latent distribution
                     vae_output = self.vae.encode(pixel_values)
                     
-                    # Handle different output formats
                     if hasattr(vae_output, 'latent_dist'):
-                        latents = vae_output.latent_dist
-                        if hasattr(latents, 'sample'):
-                            latents = latents.sample()
-                    elif hasattr(vae_output, 'sample'):
-                        latents = vae_output.sample()
+                        latents = vae_output.latent_dist.sample()
                     else:
-                        latents = vae_output
-
-                    # Add numerical stability checks
-                    if torch.isnan(latents).any():
-                        # Try to recover from NaNs
-                        logger.warning("NaN values detected in latents, attempting recovery...")
-                        mask = torch.isnan(latents)
-                        latents[mask] = 0.0  # Replace NaNs with zeros
+                        latents = vae_output.sample()
                         
-                        # If still have NaNs after recovery attempt, raise error
-                        if torch.isnan(latents).any():
-                            nan_locations = torch.isnan(latents)
-                            nan_count = nan_locations.sum().item()
-                            nan_indices = torch.where(nan_locations)
-                            raise ValueError(
-                                f"VAE produced {nan_count} NaN values in latents that couldn't be recovered. "
-                                f"First NaN at index: {[idx[0].item() for idx in nan_indices]}"
-                            )
-                    
-                    # Check for infinities
-                    if torch.isinf(latents).any():
-                        logger.warning("Infinite values detected in latents, clipping...")
-                        latents = torch.clamp(latents, -1e6, 1e6)
-
-                    # Apply scaling factor with stability check
+                    # Apply scaling factor
                     scaling_factor = getattr(self.vae.config, 'scaling_factor', 0.18215)
                     latents = latents * scaling_factor
                     
-                    # Final validation
-                    if not torch.isfinite(latents).all():
-                        raise ValueError("Non-finite values in final latents after scaling")
+                    # Generate unconditioned latents
+                    uncond_latents = torch.zeros_like(latents)
+                    
+                    # Repeat for each requested image
+                    latents = latents.repeat_interleave(num_images_per_prompt, dim=0)
+                    uncond_latents = uncond_latents.repeat_interleave(num_images_per_prompt, dim=0)
+                    
+                    # Validate outputs
+                    for tensor, name in [(latents, "latents"), (uncond_latents, "uncond_latents")]:
+                        if torch.isnan(tensor).any():
+                            nan_count = torch.isnan(tensor).sum().item()
+                            nan_indices = torch.where(torch.isnan(tensor))
+                            raise ValueError(
+                                f"VAE produced {nan_count} NaN values in {name}. "
+                                f"First NaN at index: {[idx[0].item() for idx in nan_indices]}"
+                            )
+                        if torch.isinf(tensor).any():
+                            tensor = torch.clamp(tensor, -1e6, 1e6)
 
                     logger.debug("VAE encoding complete", extra={
                         'output_shape': tuple(latents.shape),
@@ -119,8 +149,11 @@ class VAEEncoder:
                         }
                     })
                     
-                    return {"latent_dist": latents}
-                    
+                    return {
+                        "latent_dist": latents,
+                        "uncond_latents": uncond_latents
+                    }
+
         except Exception as e:
             logger.error("VAE encoding failed", extra={
                 'error_type': type(e).__name__,
