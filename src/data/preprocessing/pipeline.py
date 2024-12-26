@@ -459,10 +459,13 @@ class PreprocessingPipeline:
 
                                 self.cache_manager.save_preprocessed_data(
                                     image_latent=None,
-                                    text_embeddings=embeddings,
+                                    text_latent={
+                                        "embeddings": embeddings,
+                                        "caption": item["caption"],
+                                        "processed_text": metadata.get("processed_caption", "")
+                                    },
                                     metadata=metadata,
-                                    file_path=item["img_id"],  # Use image ID for cache consistency
-                                    caption=item["caption"]
+                                    file_path=item["img_id"]  # Use image ID for cache consistency
                                 )
                                 self.stats.successful += 1
 
