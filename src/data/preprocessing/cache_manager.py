@@ -144,35 +144,73 @@ class CacheManager(TensorValidator):
             "statistics": {
                 "total_files": 0,
                 "total_image_latents": 0,
-                "total_text_latents": 0
+                "total_text_latents": 0,
+                "last_scan": None
             }
         }
-        self._save_index()
+        
+        # Ensure the index file's parent directory exists
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            self._save_index()
+        except Exception as e:
+            logger.error(f"Failed to initialize cache index: {e}")
+            raise
 
     def _save_index(self):
         """Save the cache index with updated metadata."""
         try:
+            if not hasattr(self, 'cache_index') or not isinstance(self.cache_index, dict):
+                self._initialize_empty_index()
+                return
+                
+            # Ensure required top-level keys exist
+            required_keys = ["metadata", "files", "statistics"]
+            for key in required_keys:
+                if key not in self.cache_index:
+                    self.cache_index[key] = {}
+                    
             # Update metadata
-            self.cache_index["metadata"]["last_updated"] = time.time()
+            if "metadata" not in self.cache_index:
+                self.cache_index["metadata"] = {}
+                
+            self.cache_index["metadata"].update({
+                "last_updated": time.time(),
+                "cache_dir": str(self.cache_dir),
+                "image_latents_dir": str(self.image_latents_dir),
+                "text_latents_dir": str(self.text_latents_dir)
+            })
             
             # Update statistics
+            if "statistics" not in self.cache_index:
+                self.cache_index["statistics"] = {}
+                
             stats = self.cache_index["statistics"]
-            stats["total_files"] = len(self.cache_index["files"])
-            stats["total_image_latents"] = sum(
-                1 for f in self.cache_index["files"].values() 
-                if "image_latent_path" in f
-            )
-            stats["total_text_latents"] = sum(
-                1 for f in self.cache_index["files"].values() 
-                if "text_latent_path" in f
-            )
+            stats.update({
+                "total_files": len(self.cache_index.get("files", {})),
+                "total_image_latents": sum(
+                    1 for f in self.cache_index.get("files", {}).values() 
+                    if "image_latent_path" in f
+                ),
+                "total_text_latents": sum(
+                    1 for f in self.cache_index.get("files", {}).values() 
+                    if "text_latent_path" in f
+                ),
+                "last_updated": time.time()
+            })
             
+            # Ensure files dict exists
+            if "files" not in self.cache_index:
+                self.cache_index["files"] = {}
+                
             # Save with proper formatting
             with open(self.index_path, 'w') as f:
                 json.dump(self.cache_index, f, indent=2, ensure_ascii=False)
                 
         except Exception as e:
             logger.error(f"Failed to save cache index: {e}")
+            raise
 
     def _process_latents(self, data: Union[Dict, torch.Tensor], prefix: str) -> Union[Dict, torch.Tensor]:
         if isinstance(data, dict):
