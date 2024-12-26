@@ -1,3 +1,4 @@
+"""StableDiffusionXL model implementation with extreme speedups and optimizations."""
 import logging
 import torch
 import torch.backends.cudnn
@@ -28,7 +29,9 @@ from src.core.memory.tensor import (
     torch_sync,
     torch_gc,
     create_stream_context,
-    tensors_record_stream
+    tensors_record_stream,
+    pin_tensor_,
+    unpin_tensor_
 )
 from src.models.encoders.vae import VAEEncoder
 from src.core.types import DataType, ModelWeightDtypes
