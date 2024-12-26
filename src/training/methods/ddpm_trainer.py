@@ -70,6 +70,25 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
 
+            # Get target size from first item in batch
+            target_height, target_width = latents[0].shape[-2:]
+            
+            # Resize all latents to match first item's dimensions
+            if any(lat.shape[-2:] != (target_height, target_width) for lat in latents):
+                resized_latents = []
+                for lat in latents:
+                    if lat.shape[-2:] != (target_height, target_width):
+                        lat = F.interpolate(
+                            lat,
+                            size=(target_height, target_width),
+                            mode='bilinear',
+                            align_corners=False
+                        )
+                    resized_latents.append(lat)
+                latents = torch.cat(resized_latents, dim=0)
+            else:
+                latents = torch.cat([lat for lat in latents], dim=0)
+
             # Get noise and timesteps
             noise = torch.randn(
                 latents.shape,
