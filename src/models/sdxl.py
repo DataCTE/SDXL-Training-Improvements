@@ -127,6 +127,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         enable_sequential_cpu_offload: bool = False
     ):
         torch.nn.Module.__init__(self)
+        self._dtype = DataType.FLOAT_32  # Set dtype before BaseModel init
         BaseModel.__init__(self, model_type)
 
         # Initialize components
