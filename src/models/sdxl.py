@@ -463,16 +463,105 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         return self.unet.parameters()
 
     def add_embeddings_to_prompt(self, prompt: str) -> str:
+        """Inject custom embeddings into a prompt string.
+        
+        Args:
+            prompt: Original prompt text
+            
+        Returns:
+            Modified prompt with embedding tokens injected
+            
+        Example:
+            If prompt is "a photo of a cat" and there's a custom embedding
+            with placeholder "<style-modern>", the result might be:
+            "<style-modern> a photo of a cat"
         """
-        Optionally inject custom embeddings into a prompt string.
+        try:
+            if not prompt:
+                return prompt
+                
+            # Start with original prompt
+            modified_prompt = prompt
+            
+            # Add LoRA embeddings if present
+            if hasattr(self, 'additional_embeddings') and self.additional_embeddings:
+                for embedding in self.additional_embeddings:
+                    if isinstance(embedding, StableDiffusionXLModelEmbedding):
+                        # Add placeholder token to prompt
+                        modified_prompt = f"{embedding.placeholder} {modified_prompt}"
+                        
+            # Add base embedding if present
+            if hasattr(self, 'embedding') and self.embedding:
+                if isinstance(self.embedding, StableDiffusionXLModelEmbedding):
+                    # Add base embedding placeholder to start
+                    modified_prompt = f"{self.embedding.placeholder} {modified_prompt}"
+                    
+            # Remove extra whitespace
+            modified_prompt = " ".join(modified_prompt.split())
+            
+            logger.debug("Modified prompt with embeddings", extra={
+                'original_prompt': prompt,
+                'modified_prompt': modified_prompt,
+                'has_additional': hasattr(self, 'additional_embeddings'),
+                'has_base': hasattr(self, 'embedding')
+            })
+            
+            return modified_prompt
+            
+        except Exception as e:
+            logger.error("Failed to add embeddings to prompt", extra={
+                'error': str(e),
+                'prompt': prompt,
+                'stack_trace': True
+            })
+            # Return original prompt on error
+            return prompt
+
+    def _add_embeddings_to_prompt(
+        self,
+        additional_embeddings: Optional[List[StableDiffusionXLModelEmbedding]] = None,
+        base_embedding: Optional[StableDiffusionXLModelEmbedding] = None,
+        prompt: str = ""
+    ) -> str:
+        """Internal method to add embeddings to prompt with more control.
+        
+        Args:
+            additional_embeddings: List of additional embeddings to inject
+            base_embedding: Base embedding to inject
+            prompt: Original prompt text
+            
+        Returns:
+            Modified prompt with embedding tokens injected
         """
-        # This method references self.additional_embeddings or self.embedding,
-        # which you may need to implement. It's kept for completeness:
-        return self._add_embeddings_to_prompt(
-            self.additional_embeddings,
-            self.embedding,
-            prompt
-        )
+        try:
+            if not prompt:
+                return prompt
+                
+            # Start with original prompt
+            modified_prompt = prompt
+            
+            # Add additional embeddings
+            if additional_embeddings:
+                for embedding in additional_embeddings:
+                    if isinstance(embedding, StableDiffusionXLModelEmbedding):
+                        modified_prompt = f"{embedding.placeholder} {modified_prompt}"
+                        
+            # Add base embedding
+            if base_embedding and isinstance(base_embedding, StableDiffusionXLModelEmbedding):
+                modified_prompt = f"{base_embedding.placeholder} {modified_prompt}"
+                
+            # Clean up whitespace
+            modified_prompt = " ".join(modified_prompt.split())
+            
+            return modified_prompt
+            
+        except Exception as e:
+            logger.error("Failed to add embeddings to prompt", extra={
+                'error': str(e),
+                'prompt': prompt,
+                'stack_trace': True
+            })
+            return prompt
 
     def encode_clip(
         self,
