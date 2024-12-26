@@ -66,7 +66,7 @@ class CLIPEncoder:
         if hasattr(torch, "compile") and self.device.type == "cuda":
             self.text_encoder = torch.compile(
                 self.text_encoder,
-                mode="reduce-reduce-overhead",
+                mode="reduce-overhead",
                 fullgraph=False
             )
 
