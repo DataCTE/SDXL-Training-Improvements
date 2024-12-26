@@ -10,7 +10,6 @@ from diffusers import (
     UNet2DConditionModel
 )
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
-from .encoders.embedding import TextEmbeddingProcessor
 
 # Force maximal speed
 torch.backends.cudnn.benchmark = True

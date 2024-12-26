@@ -45,12 +45,8 @@ class LatentPreprocessor:
             self.model = sdxl_model
             self.device = torch.device(device) if isinstance(device, str) else device
             
-            # Initialize embedding processor
-            self.embedding_processor = TextEmbeddingProcessor(
-                device=self.device,
-                dtype=next(sdxl_model.text_encoder_1.parameters()).dtype,
-                enable_memory_tracking=True
-            )
+            # Use CLIP encoder's embedding processor
+            self.embedding_processor = sdxl_model.clip_encoder_1
             
             # Initialize VAE encoder
             self.vae_encoder = VAEEncoder(
@@ -59,20 +55,9 @@ class LatentPreprocessor:
                 dtype=next(sdxl_model.vae.parameters()).dtype
             )
             
-            # Initialize CLIP encoders
-            self.clip_encoder_1 = CLIPEncoder(
-                text_encoder=sdxl_model.text_encoder_1,
-                tokenizer=sdxl_model.tokenizer_1,
-                device=self.device,
-                dtype=next(sdxl_model.text_encoder_1.parameters()).dtype
-            )
-            
-            self.clip_encoder_2 = CLIPEncoder(
-                text_encoder=sdxl_model.text_encoder_2,
-                tokenizer=sdxl_model.tokenizer_2,
-                device=self.device,
-                dtype=next(sdxl_model.text_encoder_2.parameters()).dtype
-            )
+            # Use model's CLIP encoders
+            self.clip_encoder_1 = sdxl_model.clip_encoder_1
+            self.clip_encoder_2 = sdxl_model.clip_encoder_2
             
             self.max_retries = max_retries
             self.chunk_size = chunk_size
