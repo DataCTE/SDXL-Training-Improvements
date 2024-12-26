@@ -45,6 +45,13 @@ class LatentPreprocessor:
             self.model = sdxl_model
             self.device = torch.device(device) if isinstance(device, str) else device
             
+            # Initialize embedding processor
+            self.embedding_processor = TextEmbeddingProcessor(
+                device=self.device,
+                dtype=next(sdxl_model.text_encoder_1.parameters()).dtype,
+                enable_memory_tracking=True
+            )
+            
             # Initialize VAE encoder
             self.vae_encoder = VAEEncoder(
                 vae=sdxl_model.vae,
@@ -131,7 +138,14 @@ class LatentPreprocessor:
             self.use_cache = False
 
     def encode_prompt(self, prompt_batch: List[str]) -> Dict[str, torch.Tensor]:
-        """Enhanced prompt encoding with embedding processing."""
+        """Enhanced prompt encoding with embedding processing.
+        
+        Args:
+            prompt_batch: List of text prompts to encode
+            
+        Returns:
+            Dictionary containing text embeddings and metadata
+        """
         try:
             # Process prompts with embedding processor
             processed_prompts = []
@@ -151,11 +165,25 @@ class LatentPreprocessor:
                 "pooled_prompt_embeds_2": encoder_2_output["pooled_embeds"]
             }
 
-            # Validate embeddings
+            # Validate embeddings using embedding processor
             if not self.embedding_processor.validate_embeddings(embeddings):
                 raise ValueError("Invalid embeddings detected")
 
-            return embeddings
+            # Add metadata
+            metadata = {
+                "num_prompts": len(prompt_batch),
+                "device": str(self.device),
+                "dtype": str(next(iter(embeddings.values())).dtype),
+                "timestamp": time.time(),
+                "embedding_shapes": {
+                    k: tuple(v.shape) for k, v in embeddings.items()
+                }
+            }
+
+            return {
+                "text_embeddings": embeddings,
+                "metadata": metadata
+            }
             
         except Exception as e:
             logger.error("Failed to encode prompts", extra={
