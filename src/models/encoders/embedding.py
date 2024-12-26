@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 import logging
 from src.core.logging.logging import setup_logging
-from src.models.base import BaseModelEmbedding
+from src.models.embeddings import BaseModelEmbedding
 
 logger = setup_logging(__name__)
 

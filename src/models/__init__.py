@@ -1,4 +1,5 @@
-from .base import BaseModel, BaseModelEmbedding, ModelType
+from .base import BaseModel, ModelType
+from .embeddings import BaseModelEmbedding
 from .sdxl import StableDiffusionXLModel, StableDiffusionXLModelEmbedding
 from .adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 from .encoders.clip import CLIPEncoder
