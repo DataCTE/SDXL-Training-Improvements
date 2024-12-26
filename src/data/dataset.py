@@ -275,7 +275,7 @@ class AspectBucketDataset(Dataset):
             caption = self.captions[idx]
             bucket_idx = self.bucket_indices[idx]
 
-            # Get from cache - required since we're using precomputed latents
+            # Get cached data
             if not (self.cache_manager and self.config.global_config.cache.use_cache):
                 raise RuntimeError("Cache manager not initialized or caching disabled")
                 
@@ -284,76 +284,28 @@ class AspectBucketDataset(Dataset):
                 raise RuntimeError(f"No cached data found for {image_path}. Run preprocessing first.")
                 
             self.stats.cache_hits += 1
-            
-            # Debug logging
-            logger.debug(f"Cached data keys: {cached_data.keys()}")
-            
-            # Handle latent data with proper dictionary unpacking
-            latent_data = cached_data.get("latent")
-            if latent_data is None:
-                raise ValueError(f"No latent data found in cache for {image_path}")
 
-            # Debug logging for investigation
-            logger.debug(f"Cached data keys: {cached_data.keys()}")
-            if isinstance(latent_data, dict):
-                logger.debug(f"Latent data keys: {latent_data.keys()}")
-                if "latent_dist" in latent_data:
-                    logger.debug(f"Latent dist structure: {latent_data['latent_dist']}")
-
-            # Handle nested dictionary formats
-            if isinstance(latent_data, dict):
-                if "latent_dist" in latent_data:
-                    # Handle case where latent_dist is a tensor directly
-                    latent_tensor = latent_data["latent_dist"]
-                    if isinstance(latent_tensor, torch.Tensor):
-                        latent_dist = {
-                            "sample": latent_tensor,
-                            "mean": latent_tensor.clone(),
-                            "std": torch.ones_like(latent_tensor)
-                        }
-                    else:
-                        raise ValueError(f"Invalid latent_dist type for {image_path}, expected tensor got {type(latent_tensor)}")
-                elif "sample" in latent_data:
-                    latent_tensor = latent_data["sample"]
-                    latent_dist = {
-                        "sample": latent_tensor,
-                        "mean": latent_tensor.clone(),
-                        "std": torch.ones_like(latent_tensor)
-                    }
-                else:
-                    raise ValueError(f"Invalid latent data format for {image_path}")
-            elif isinstance(latent_data, torch.Tensor):
-                latent_tensor = latent_data
-                latent_dist = {
-                    "sample": latent_tensor,
-                    "mean": latent_tensor.clone(),
-                    "std": torch.ones_like(latent_tensor)
-                }
-            else:
-                raise TypeError(f"Expected latent to be tensor or dict, got {type(latent_data)}")
+            # Get the latent tensor directly - it's already the VAE output
+            latent_tensor = cached_data.get("latent")
+            if latent_tensor is None:
+                raise ValueError(f"No latent found in cache for {image_path}")
 
             # Check for NaN values in latent tensor
             if torch.isnan(latent_tensor).any():
                 raise ValueError(f"NaN values detected in latent tensor for {image_path}")
 
-            logger.debug(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
-            
-            # Get metadata for size information
+            # Get metadata
             metadata = cached_data.get("metadata", {})
-            original_size = metadata.get("original_size", (1024, 1024))
-            crop_top_left = metadata.get("crop_top_left", (0, 0))
-            target_size = metadata.get("target_size", (1024, 1024))
             
-            # Create result with required fields
+            # Create result dictionary
             result = {
-                "latent_dist": latent_dist,
-                "model_input": latent_tensor,
+                "model_input": latent_tensor,  # Use latent directly as model input
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
-                "original_sizes": [original_size],
-                "crop_top_lefts": [crop_top_left],
-                "target_sizes": [target_size]
+                "original_sizes": [metadata.get("original_size", (1024, 1024))],
+                "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
+                "target_sizes": [metadata.get("target_size", (1024, 1024))]
             }
             
             # Add text embeddings if available
@@ -372,17 +324,10 @@ class AspectBucketDataset(Dataset):
 
         except Exception as e:
             logger.error(f"Error getting dataset item {idx}: {str(e)}")
-            # Add more context to the error
             logger.error(f"Image path: {image_path}")
             if 'cached_data' in locals():
                 logger.error(f"Cached data keys: {cached_data.keys()}")
-            if 'latent_data' in locals():
-                logger.error(f"Latent data type: {type(latent_data)}")
-                if isinstance(latent_data, dict):
-                    logger.error(f"Latent data keys: {latent_data.keys()}")
-                    if "latent_dist" in latent_data:
-                        logger.error(f"Latent dist keys: {latent_data['latent_dist'].keys()}")
-            if 'latent_tensor' in locals() and latent_tensor is not None:
+            if 'latent_tensor' in locals():
                 logger.error(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
             raise
 
