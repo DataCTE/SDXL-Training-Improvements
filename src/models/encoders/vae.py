@@ -1,5 +1,6 @@
 """VAE encoder implementation with extreme speedups."""
 from typing import Dict, Optional, Union
+import sys
 import torch
 from diffusers import AutoencoderKL
 from src.core.logging.logging import setup_logging
