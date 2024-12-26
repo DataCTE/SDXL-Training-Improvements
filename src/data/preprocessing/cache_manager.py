@@ -64,12 +64,17 @@ class CacheManager(TensorValidator):
 
         with ThreadPoolExecutor() as executor:
             for file_path, info in self.cache_index["files"].items():
+                # Extract or create base_name from file_path if not in info
+                if "base_name" not in info:
+                    info["base_name"] = Path(file_path).stem
+                    
                 base_name = info["base_name"]
                 
                 # Get paths from cache entry or construct default paths
                 image_latent_path = Path(info.get("image_latent_path", self.image_latents_dir / f"{base_name}.pt"))
                 text_latent_path = Path(info.get("text_latent_path", self.text_latents_dir / f"{base_name}.pt"))
                 
+                # Validate files in parallel
                 latent_future = executor.submit(validate_file, image_latent_path)
                 text_future = executor.submit(validate_file, text_latent_path)
                 
@@ -80,19 +85,23 @@ class CacheManager(TensorValidator):
                     missing_latents.append(file_path)
                 if not valid_text:
                     missing_text.append(file_path)
+                    
+                # Only keep valid entries
                 if valid_latent or valid_text:
                     valid_files[file_path] = {
                         "base_name": base_name,
-                        "timestamp": info["timestamp"]
+                        "timestamp": info.get("timestamp", time.time())
                     }
                     if valid_latent:
                         valid_files[file_path]["image_latent_path"] = str(image_latent_path)
                     if valid_text:
                         valid_files[file_path]["text_latent_path"] = str(text_latent_path)
 
+        # Update cache index with only valid entries
         self.cache_index["files"] = valid_files
         self._save_index()
         
+        logger.info(f"Cache validation complete. Found {len(missing_latents)} missing image latents and {len(missing_text)} missing text latents")
         return missing_text, missing_latents
 
     def _load_index(self):
