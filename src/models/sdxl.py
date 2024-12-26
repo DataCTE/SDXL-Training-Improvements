@@ -679,75 +679,75 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             # Encode with first text encoder
             text_encoder_1_output, _ = self.encode_clip(
-            text_encoder=self.text_encoder_1,
-            tokens=tokens_1,
-            default_layer=-2,
-            layer_skip=text_encoder_1_layer_skip,
-            text_encoder_output=text_encoder_1_output,
-            add_pooled_output=False,
-            use_attention_mask=False,
-            add_layer_norm=False
-        )
-
-        # Encode with second text encoder
-        text_encoder_2_output, pooled_text_encoder_2_output = self.encode_clip(
-            text_encoder=self.text_encoder_2,
-            tokens=tokens_2,
-            default_layer=-2,
-            layer_skip=text_encoder_2_layer_skip,
-            text_encoder_output=text_encoder_2_output,
-            add_pooled_output=True,
-            pooled_text_encoder_output=pooled_text_encoder_2_output,
-            use_attention_mask=False,
-            add_layer_norm=False
-        )
-
-        # Apply optional dropout to text_encoder_1 output
-        if text_encoder_1_dropout_probability is not None:
-            dropout_text_encoder_1_mask = torch.tensor(
-                [rand.random() > text_encoder_1_dropout_probability for _ in range(batch_size)],
-                device=train_device
-            ).float()
-            text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
-
-        # Apply optional dropout to text_encoder_2 output
-        if text_encoder_2_dropout_probability is not None:
-            dropout_text_encoder_2_mask = torch.tensor(
-                [rand.random() > text_encoder_2_dropout_probability for _ in range(batch_size)],
-                device=train_device
-            ).float()
-            pooled_text_encoder_2_output = pooled_text_encoder_2_output * dropout_text_encoder_2_mask[:, None]
-            text_encoder_2_output = text_encoder_2_output * dropout_text_encoder_2_mask[:, None, None]
-
-        # Concatenate final embeddings
-        text_encoder_output = torch.cat([text_encoder_1_output, text_encoder_2_output], dim=-1)
-
-        # Combine with custom embeddings if present
-        if additional_embeddings or base_embedding:
-            text_encoder_output = self.embedding_processor.combine_embeddings(
-                text_encoder_output,
-                additional_embeddings=additional_embeddings,
-                base_embedding=base_embedding
+                text_encoder=self.text_encoder_1,
+                tokens=tokens_1,
+                default_layer=-2,
+                layer_skip=text_encoder_1_layer_skip,
+                text_encoder_output=text_encoder_1_output,
+                add_pooled_output=False,
+                use_attention_mask=False,
+                add_layer_norm=False
             )
 
-        # Validate final embeddings
-        if not self.embedding_processor.validate_embeddings({
-            'text_encoder_output': text_encoder_output,
-            'pooled_output': pooled_text_encoder_2_output
-        }):
-            raise ValueError("Invalid embeddings detected")
+            # Encode with second text encoder
+            text_encoder_2_output, pooled_text_encoder_2_output = self.encode_clip(
+                text_encoder=self.text_encoder_2,
+                tokens=tokens_2,
+                default_layer=-2,
+                layer_skip=text_encoder_2_layer_skip,
+                text_encoder_output=text_encoder_2_output,
+                add_pooled_output=True,
+                pooled_text_encoder_output=pooled_text_encoder_2_output,
+                use_attention_mask=False,
+                add_layer_norm=False
+            )
 
-        return text_encoder_output, pooled_text_encoder_2_output
+            # Apply optional dropout to text_encoder_1 output
+            if text_encoder_1_dropout_probability is not None:
+                dropout_text_encoder_1_mask = torch.tensor(
+                    [rand.random() > text_encoder_1_dropout_probability for _ in range(batch_size)],
+                    device=train_device
+                ).float()
+                text_encoder_1_output = text_encoder_1_output * dropout_text_encoder_1_mask[:, None, None]
 
-    except Exception as e:
-        logger.error("Text encoding failed", extra={
-            'error': str(e),
-            'text': text,
-            'has_additional': bool(additional_embeddings),
-            'has_base': bool(base_embedding),
-            'stack_trace': True
-        })
-        raise
+            # Apply optional dropout to text_encoder_2 output
+            if text_encoder_2_dropout_probability is not None:
+                dropout_text_encoder_2_mask = torch.tensor(
+                    [rand.random() > text_encoder_2_dropout_probability for _ in range(batch_size)],
+                    device=train_device
+                ).float()
+                pooled_text_encoder_2_output = pooled_text_encoder_2_output * dropout_text_encoder_2_mask[:, None]
+                text_encoder_2_output = text_encoder_2_output * dropout_text_encoder_2_mask[:, None, None]
+
+            # Concatenate final embeddings
+            text_encoder_output = torch.cat([text_encoder_1_output, text_encoder_2_output], dim=-1)
+
+            # Combine with custom embeddings if present
+            if additional_embeddings or base_embedding:
+                text_encoder_output = self.embedding_processor.combine_embeddings(
+                    text_encoder_output,
+                    additional_embeddings=additional_embeddings,
+                    base_embedding=base_embedding
+                )
+
+            # Validate final embeddings
+            if not self.embedding_processor.validate_embeddings({
+                'text_encoder_output': text_encoder_output,
+                'pooled_output': pooled_text_encoder_2_output
+            }):
+                raise ValueError("Invalid embeddings detected")
+
+            return text_encoder_output, pooled_text_encoder_2_output
+
+        except Exception as e:
+            logger.error("Text encoding failed", extra={
+                'error': str(e),
+                'text': text,
+                'has_additional': bool(additional_embeddings),
+                'has_base': bool(base_embedding),
+                'stack_trace': True
+            })
+            raise
 
     def to(self, device: torch.device) -> None:
         """
