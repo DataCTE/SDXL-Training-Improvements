@@ -1,3 +1,3 @@
-from .embedding import TextEmbeddingProcessor
+from .clip import CLIPEncoder
 
-__all__ = ['TextEmbeddingProcessor']
+__all__ = ['CLIPEncoder']

@@ -1,10 +1,12 @@
-"""CLIP encoder implementation with extreme speedups."""
-from typing import Dict, List, Optional, Tuple, Union
+"""CLIP encoder implementation with extreme speedups and embedding support."""
+from typing import Dict, List, Optional, Tuple, Union, Any
 import logging
+import time
 import torch
 from torch import Tensor
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from src.core.logging.logging import setup_logging
+from src.models.embeddings import BaseModelEmbedding
 
 # Initialize logger with debug disabled by default
 logger = setup_logging(__name__, level=logging.INFO)
