@@ -36,10 +36,35 @@ from src.models.base import BaseModel, BaseModelEmbedding, ModelType
 from src.models.encoders.clip import CLIPEncoder
 from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 
-logger = logging.getLogger(__name__)
+from src.core.logging.logging import setup_logging
+
+logger = setup_logging(__name__)
+
+class ModelError(Exception):
+    """Base exception for model errors."""
+    def __init__(self, message: str, context: Optional[Dict] = None):
+        super().__init__(message)
+        self.context = context or {}
+        logger.error(self.format_error())
+
+    def format_error(self) -> str:
+        """Format error message with context."""
+        msg = str(self)
+        if self.context:
+            msg += "\nContext:\n" + "\n".join(f"  {k}: {v}" for k, v in self.context.items())
+        return msg
+
+class DeviceError(ModelError):
+    """Raised for device-related errors."""
+    pass
+
+class EncodingError(ModelError):
+    """Raised for encoding-related errors."""
+    pass
 
 
 class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
+    """Enhanced embedding implementation for SDXL."""
     def __init__(
         self,
         uuid: str,
@@ -47,6 +72,9 @@ class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
         text_encoder_2_vector: Tensor,
         placeholder: str,
     ):
+        if not isinstance(text_encoder_1_vector, Tensor) or not isinstance(text_encoder_2_vector, Tensor):
+            raise ValueError("Embedding vectors must be tensors")
+            
         super().__init__(
             uuid=uuid,
             token_count=text_encoder_1_vector.shape[0],
@@ -54,6 +82,12 @@ class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
         )
         self.text_encoder_1_vector = text_encoder_1_vector
         self.text_encoder_2_vector = text_encoder_2_vector
+
+    def to(self, device: torch.device) -> 'StableDiffusionXLModelEmbedding':
+        """Move embeddings to specified device."""
+        self.text_encoder_1_vector = self.text_encoder_1_vector.to(device)
+        self.text_encoder_2_vector = self.text_encoder_2_vector.to(device)
+        return self
 
 
 class StableDiffusionXLPipeline(BasePipeline):
@@ -81,10 +115,18 @@ class StableDiffusionXLPipeline(BasePipeline):
 class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     """StableDiffusionXL model with training optimizations and memory handling."""
 
-    def __init__(self, model_type: ModelType):
+    def __init__(
+        self, 
+        model_type: ModelType,
+        enable_memory_efficient_attention: bool = True,
+        enable_vae_slicing: bool = False,
+        enable_model_cpu_offload: bool = False,
+        enable_sequential_cpu_offload: bool = False
+    ):
         torch.nn.Module.__init__(self)
         BaseModel.__init__(self, model_type)
 
+        # Initialize components
         self.vae = None
         self.text_encoder_1 = None
         self.text_encoder_2 = None
@@ -93,6 +135,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         self.unet = None
         self.noise_scheduler = None
 
+        # Initialize LoRA adapters
         self.text_encoder_1_lora = None
         self.text_encoder_2_lora = None
         self.unet_lora = None
@@ -100,9 +143,33 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         self.model_type = model_type
         self._dtype = DataType.FLOAT_32
 
-        # Optimized encoder wrappers
+        # Store optimization flags
+        self.enable_memory_efficient_attention = enable_memory_efficient_attention
+        self.enable_vae_slicing = enable_vae_slicing
+        self.enable_model_cpu_offload = enable_model_cpu_offload
+        self.enable_sequential_cpu_offload = enable_sequential_cpu_offload
+
+        # Initialize optimized encoder wrappers
         self.clip_encoder_1 = None
         self.clip_encoder_2 = None
+        self.vae_encoder = None
+
+        # Initialize memory tracking
+        self.memory_stats = {
+            'peak_allocated': 0,
+            'current_allocated': 0,
+            'num_allocations': 0
+        }
+
+        logger.info("Initialized SDXL model", extra={
+            'model_type': str(model_type),
+            'optimizations': {
+                'memory_efficient_attention': enable_memory_efficient_attention,
+                'vae_slicing': enable_vae_slicing,
+                'model_cpu_offload': enable_model_cpu_offload,
+                'sequential_cpu_offload': enable_sequential_cpu_offload
+            }
+        })
 
     @property
     def dtype(self) -> DataType:
