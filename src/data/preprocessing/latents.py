@@ -5,6 +5,7 @@ import torch
 from pathlib import Path
 
 from src.core.logging.logging import setup_logging
+from src.models.encoders.vae import VAEEncoder
 from src.models.encoders.vae import VAEEncoder 
 from src.models.encoders.clip import CLIPEncoder
 from src.models import StableDiffusionXLModel
@@ -19,7 +20,7 @@ class LatentPreprocessor:
     def __init__(
         self,
         config: Config,
-        sdxl_model: StableDiffusionXLModel, 
+        sdxl_model: StableDiffusionXLModel,
         device: Union[str, torch.device] = "cuda",
         max_retries: int = 3,
         chunk_size: int = 1000,
@@ -49,6 +50,7 @@ class LatentPreprocessor:
             self._setup_cache(config)
             
         except Exception as e:
+           
             logger.error("Failed to initialize latent preprocessor", 
                         extra={'error': str(e), 'device': str(device)})
             raise
@@ -156,6 +158,7 @@ class LatentPreprocessor:
             }
             
         except Exception as e:
+           
             logger.error("Failed to encode prompts", 
                         extra={'error': str(e), 'batch_size': len(prompt_batch)})
             raise
@@ -168,6 +171,7 @@ class LatentPreprocessor:
             
         try:
             cache_dir = Path(convert_windows_path(
+                config.global_config.cache.cache_dir,
                 config.global_config.cache.cache_dir, 
                 make_absolute=True
             ))

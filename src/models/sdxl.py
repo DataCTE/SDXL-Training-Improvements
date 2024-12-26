@@ -76,7 +76,7 @@ class StableDiffusionXLModelEmbedding(BaseModelEmbedding):
     ):
         if not isinstance(text_encoder_1_vector, Tensor) or not isinstance(text_encoder_2_vector, Tensor):
             raise ValueError("Embedding vectors must be tensors")
-            
+
         super().__init__(
             uuid=uuid,
             token_count=text_encoder_1_vector.shape[0],
@@ -118,7 +118,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
     """StableDiffusionXL model with training optimizations and memory handling."""
 
     def __init__(
-        self, 
+        self,
         model_type: ModelType,
         enable_memory_efficient_attention: bool = True,
         enable_vae_slicing: bool = False,
@@ -154,7 +154,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
         # Initialize optimized encoder wrappers
         self.clip_encoder_1: Optional[CLIPEncoder] = None
-        self.clip_encoder_2: Optional[CLIPEncoder] = None 
+        self.clip_encoder_2: Optional[CLIPEncoder] = None
         self.vae_encoder: Optional[VAEEncoder] = None
 
         # Initialize memory tracking
@@ -238,7 +238,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             logger.info("Loading text encoder 2...")
             try:
-                self.text_encoder_2 = CLIPTextModel.from_pretrained(
+                self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(
                     pretrained_model_name,
                     subfolder="text_encoder_2",
                     torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
