@@ -288,25 +288,32 @@ class AspectBucketDataset(Dataset):
             # Debug logging
             logger.debug(f"Cached data keys: {cached_data.keys()}")
             
-            # Handle latent data with explicit type checking
-            latent_tensor = None
-            if "latent" in cached_data:
-                latent_tensor = cached_data["latent"]
-                if not isinstance(latent_tensor, torch.Tensor):
-                    raise TypeError(f"Expected latent to be tensor, got {type(latent_tensor)}")
-                    
-                logger.debug(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
-                
-                # Create latent distribution with explicit tensor creation
-                latent_dist = {
-                    "sample": latent_tensor,
-                    "mean": latent_tensor.clone(),  # Use clone to ensure independent tensor
-                    "std": torch.ones(latent_tensor.shape, 
-                                    dtype=latent_tensor.dtype,
-                                    device=latent_tensor.device)
-                }
-            else:
+            # Handle latent data with proper dictionary unpacking
+            latent_data = cached_data.get("latent")
+            if latent_data is None:
                 raise ValueError(f"No latent data found in cache for {image_path}")
+                
+            # Handle both tensor and dictionary formats
+            if isinstance(latent_data, dict):
+                if "sample" in latent_data:
+                    latent_tensor = latent_data["sample"]
+                else:
+                    raise ValueError(f"Invalid latent data format for {image_path}")
+            elif isinstance(latent_data, torch.Tensor):
+                latent_tensor = latent_data
+            else:
+                raise TypeError(f"Expected latent to be tensor or dict, got {type(latent_data)}")
+                    
+            logger.debug(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
+            
+            # Create latent distribution with explicit tensor creation
+            latent_dist = {
+                "sample": latent_tensor,
+                "mean": latent_tensor.clone(),  # Use clone to ensure independent tensor
+                "std": torch.ones(latent_tensor.shape, 
+                                dtype=latent_tensor.dtype,
+                                device=latent_tensor.device)
+            }
             
             # Get metadata for size information
             metadata = cached_data.get("metadata", {})
@@ -346,6 +353,10 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Image path: {image_path}")
             if 'cached_data' in locals():
                 logger.error(f"Cached data keys: {cached_data.keys()}")
+            if 'latent_data' in locals():
+                logger.error(f"Latent data type: {type(latent_data)}")
+                if isinstance(latent_data, dict):
+                    logger.error(f"Latent data keys: {latent_data.keys()}")
             if 'latent_tensor' in locals() and latent_tensor is not None:
                 logger.error(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
             raise
