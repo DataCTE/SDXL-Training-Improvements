@@ -175,8 +175,7 @@ class VAEEncoder:
              logger.error("VAE encoding failed", extra={
                  'error_type': type(e).__name__,
                  'error': str(e),
-                 'input_shape': tuple(pixel_values.shape) if isinstance(pixel_values, torch.Tensor)   
- else None,
+                 'input_shape': tuple(pixel_values.shape) if isinstance(pixel_values, torch.Tensor) else None,
                  'stack_trace': True
              })
              raise
