@@ -292,23 +292,27 @@ class AspectBucketDataset(Dataset):
             latent_data = cached_data.get("latent")
             if latent_data is None:
                 raise ValueError(f"No latent data found in cache for {image_path}")
-                
+
             # Debug logging for investigation
             logger.debug(f"Cached data keys: {cached_data.keys()}")
-            if isinstance(latent_data, dict) and "latent_dist" in latent_data:
-                logger.debug(f"Latent dist structure: {latent_data['latent_dist']}")
-            
+            if isinstance(latent_data, dict):
+                logger.debug(f"Latent data keys: {latent_data.keys()}")
+                if "latent_dist" in latent_data:
+                    logger.debug(f"Latent dist structure: {latent_data['latent_dist']}")
+
             # Handle nested dictionary formats
             if isinstance(latent_data, dict):
                 if "latent_dist" in latent_data:
-                    # Use the latent_dist directly since it should already be in the correct format
-                    latent_dist = latent_data["latent_dist"]
-                    if not isinstance(latent_dist, dict):
-                        raise ValueError(f"Invalid latent_dist type for {image_path}, expected dict got {type(latent_dist)}")
-                    # Ensure required keys exist
-                    if not all(k in latent_dist for k in ["sample", "mean", "std"]):
-                        raise ValueError(f"Missing required keys in latent_dist for {image_path}")
-                    latent_tensor = latent_dist["sample"]
+                    # Handle case where latent_dist is a tensor directly
+                    latent_tensor = latent_data["latent_dist"]
+                    if isinstance(latent_tensor, torch.Tensor):
+                        latent_dist = {
+                            "sample": latent_tensor,
+                            "mean": latent_tensor.clone(),
+                            "std": torch.ones_like(latent_tensor)
+                        }
+                    else:
+                        raise ValueError(f"Invalid latent_dist type for {image_path}, expected tensor got {type(latent_tensor)}")
                 elif "sample" in latent_data:
                     latent_tensor = latent_data["sample"]
                     latent_dist = {
@@ -327,7 +331,11 @@ class AspectBucketDataset(Dataset):
                 }
             else:
                 raise TypeError(f"Expected latent to be tensor or dict, got {type(latent_data)}")
-                    
+
+            # Check for NaN values in latent tensor
+            if torch.isnan(latent_tensor).any():
+                raise ValueError(f"NaN values detected in latent tensor for {image_path}")
+
             logger.debug(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
             
             # Get metadata for size information
