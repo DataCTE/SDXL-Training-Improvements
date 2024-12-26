@@ -10,6 +10,7 @@ from diffusers import (
     UNet2DConditionModel
 )
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
+from .encoders.embedding import TextEmbeddingProcessor
 
 # Force maximal speed
 torch.backends.cudnn.benchmark = True
@@ -641,12 +642,24 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         text_encoder_1_dropout_probability: Optional[float] = None,
         text_encoder_2_dropout_probability: Optional[float] = None,
         pooled_text_encoder_2_output: Optional[Tensor] = None,
+        additional_embeddings: Optional[List[StableDiffusionXLModelEmbedding]] = None,
+        base_embedding: Optional[StableDiffusionXLModelEmbedding] = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Encode text with both text encoders (and optional dropout).
         """
-        # Tokenize if needed
-        if tokens_1 is None and text is not None:
+        try:
+            # Process text with embeddings if provided
+            if text is not None:
+                processed = self.embedding_processor.process_embeddings(
+                    text,
+                    additional_embeddings=additional_embeddings,
+                    base_embedding=base_embedding
+                )
+                text = processed["processed_text"]
+
+            # Tokenize if needed
+            if tokens_1 is None and text is not None:
             tokens_1 = self.tokenizer_1(
                 text,
                 padding='max_length',
@@ -708,7 +721,33 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
         # Concatenate final embeddings
         text_encoder_output = torch.cat([text_encoder_1_output, text_encoder_2_output], dim=-1)
+
+        # Combine with custom embeddings if present
+        if additional_embeddings or base_embedding:
+            text_encoder_output = self.embedding_processor.combine_embeddings(
+                text_encoder_output,
+                additional_embeddings=additional_embeddings,
+                base_embedding=base_embedding
+            )
+
+        # Validate final embeddings
+        if not self.embedding_processor.validate_embeddings({
+            'text_encoder_output': text_encoder_output,
+            'pooled_output': pooled_text_encoder_2_output
+        }):
+            raise ValueError("Invalid embeddings detected")
+
         return text_encoder_output, pooled_text_encoder_2_output
+
+    except Exception as e:
+        logger.error("Text encoding failed", extra={
+            'error': str(e),
+            'text': text,
+            'has_additional': bool(additional_embeddings),
+            'has_base': bool(base_embedding),
+            'stack_trace': True
+        })
+        raise
 
     def to(self, device: torch.device) -> None:
         """

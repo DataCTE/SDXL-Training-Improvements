@@ -45,6 +45,13 @@ class BaseModel(ABC):
         self.model_type = model_type
         self.training = True
         self._device = torch.device("cuda")
+        
+        # Initialize embedding processor
+        self.embedding_processor = TextEmbeddingProcessor(
+            device=self._device,
+            dtype=self._dtype.to_torch_dtype(),
+            enable_memory_tracking=True
+        )
 
     @property
     def device(self) -> torch.device:
