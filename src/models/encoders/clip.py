@@ -192,10 +192,10 @@ class CLIPEncoder:
              })
              raise
 
-     def validate_embeddings(
-         self,
-         embeddings: Union[torch.Tensor, Dict[str, torch.Tensor]]
-     ) -> bool:
+    def validate_embeddings(
+        self,
+        embeddings: Union[torch.Tensor, Dict[str, torch.Tensor]]
+    ) -> bool:
          """Validate embedding tensors.
 
          Args:
