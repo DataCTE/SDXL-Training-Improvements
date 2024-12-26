@@ -523,22 +523,22 @@ class CacheManager:
                     "metadata": {**metadata, "type": "text_caption"}
                 }, caption_path)
 
-                # Process results and update file info
-                for future, (data_type, path) in zip(futures, [
-                    ("latent", self.image_dir / f"{base_name}.pt"),
-                    ("text", self.text_dir / f"{base_name}.pt")
-                ][:len(futures)]):
-                    if saved_path := future.result():
-                        if data_type == "latent":
-                            file_info.update({
-                                "latent_path": saved_path,
-                                "type": "image"
-                            })
-                        else:
-                            file_info.update({
-                                "text_path": saved_path,
-                                "text_type": "text"
-                            })
+                # Update file info based on saved files
+                if image_latent is not None:
+                    file_info.update({
+                        "latent_path": str(latent_path),
+                        "type": "image_latent"
+                    })
+                if text_embeddings is not None:
+                    file_info.update({
+                        "text_path": str(embedding_path),
+                        "text_type": "text_embedding"
+                    })
+                if text_caption is not None:
+                    file_info.update({
+                        "caption_path": str(caption_path),
+                        "caption_type": "text_caption"
+                    })
 
             # Batch update index
             if file_info.get("latent_path") or file_info.get("text_path"):
