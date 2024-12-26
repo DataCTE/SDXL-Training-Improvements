@@ -124,7 +124,12 @@ class TagWeighter:
                 # Final clamp to ensure bounds
                 weight = min(max(scaled_weight, self.min_weight), self.max_weight)
                 
+                # Save the computed weight for this tag
                 self.tag_weights[tag_type][tag] = float(weight)
+
+            # Save weights if caching is enabled
+            if self.config.tag_weighting.use_cache:
+                self._save_cache()
 
     def get_caption_weight(self, caption: str) -> float:
         """Get combined weight for a caption."""
