@@ -348,17 +348,19 @@ class AspectBucketDataset(Dataset):
             latent_data = cached_data.get("latent")
             if latent_data is None:
                 raise ValueError(f"No latent data found in cache for {image_path}")
-                
-            # Extract the actual tensor from the latent data
+            
+            # Handle both dictionary and direct tensor formats
             if isinstance(latent_data, dict):
-                # Try "model_input" first, then "latent" as fallback
                 latent_tensor = latent_data.get("model_input")
                 if latent_tensor is None:
                     latent_tensor = latent_data.get("latent")
                 if latent_tensor is None:
                     raise ValueError(f"No latent tensor found in latent data for {image_path}")
+            elif isinstance(latent_data, torch.Tensor):
+                # If latent_data is directly a tensor, use it
+                latent_tensor = latent_data
             else:
-                raise TypeError(f"Expected latent to be dict, got {type(latent_data)}")
+                raise TypeError(f"Expected latent to be dict or tensor, got {type(latent_data)}")
 
             # Validate and clean the latent tensor
             try:

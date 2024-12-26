@@ -460,6 +460,12 @@ class CacheManager:
             return False
 
         try:
+            # Ensure image_latent is in the correct format
+            if isinstance(image_latent, torch.Tensor):
+                image_latent = {"latent": image_latent}
+            elif isinstance(image_latent, dict):
+                if "latent" not in image_latent and "model_input" not in image_latent:
+                    image_latent = {"latent": next(iter(image_latent.values()))}
             if self.enable_memory_tracking:
                 self._track_memory("save_start")
                 
