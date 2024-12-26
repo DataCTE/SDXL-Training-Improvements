@@ -227,40 +227,32 @@ class AspectBucketDataset(Dataset):
         caption: str,
         bucket_idx: int
     ) -> Dict[str, Any]:
-        """Process a cached item without tensor validation."""
-        try:
-            # Get latent data directly
-            latent_data = cached_data.get("latent")
-            if latent_data is None:
-                raise ValueError("No latent data in cache")
+        """Process a cached item with zero validation."""
+        # Direct access to latent data
+        latent_data = cached_data["latent"]
+        metadata = cached_data.get("metadata", {})
+        text_latent = cached_data.get("text_latent", {})
 
-            # Get metadata
-            metadata = cached_data.get("metadata", {})
+        # Build result dictionary
+        result = {
+            "model_input": latent_data,
+            "text": caption,
+            "bucket_idx": bucket_idx,
+            "image_path": image_path,
+            "original_sizes": [metadata.get("original_size", (1024, 1024))],
+            "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
+            "target_sizes": [metadata.get("target_size", (1024, 1024))]
+        }
 
-            # Build result dictionary
-            result = {
-                "model_input": latent_data,
-                "text": caption,
-                "bucket_idx": bucket_idx,
-                "image_path": image_path,
-                "original_sizes": [metadata.get("original_size", (1024, 1024))],
-                "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
-                "target_sizes": [metadata.get("target_size", (1024, 1024))]
-            }
+        # Add embeddings if present
+        if "embeddings" in text_latent:
+            embeddings = text_latent["embeddings"]
+            for key in ["prompt_embeds", "pooled_prompt_embeds", 
+                       "prompt_embeds_2", "pooled_prompt_embeds_2"]:
+                if key in embeddings:
+                    result[key] = embeddings[key]
 
-            # Add text embeddings if available
-            text_latent = cached_data.get("text_latent", {})
-            if "embeddings" in text_latent:
-                embeddings = text_latent["embeddings"]
-                for key in ["prompt_embeds", "pooled_prompt_embeds", 
-                           "prompt_embeds_2", "pooled_prompt_embeds_2"]:
-                    if key in embeddings:
-                        result[key] = embeddings[key]
-
-            return result
-
-        except Exception as e:
-            raise ProcessingError(f"Failed to process cached item: {str(e)}")
+        return result
 
 
     def _setup_image_config(self):
