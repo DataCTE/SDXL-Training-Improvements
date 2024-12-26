@@ -212,7 +212,7 @@ class TagWeightingConfig:
     use_cache: bool = True
     default_weight: float = 1.0
     min_weight: float = 0.1
-    max_weight: float = 10.0
+    max_weight: float = 3.0
     smoothing_factor: float = 0.1
 
 @dataclass
