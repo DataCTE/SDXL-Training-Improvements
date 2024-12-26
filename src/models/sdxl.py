@@ -33,9 +33,9 @@ from src.core.memory.tensor import (
     unpin_tensor_
 )
 from src.models.encoders.vae import VAEEncoder
+from src.models.encoders.clip import CLIPEncoder
 from src.core.types import DataType, ModelWeightDtypes
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
-from src.models.encoders.clip import CLIPEncoder
 from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 
 from src.core.logging.logging import setup_logging
