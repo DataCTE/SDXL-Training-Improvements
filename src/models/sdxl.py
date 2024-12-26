@@ -454,6 +454,69 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             prompt
         )
 
+    def encode_clip(
+        self,
+        text_encoder: Union[CLIPTextModel, CLIPTextModelWithProjection],
+        tokens: torch.Tensor,
+        default_layer: int = -2,
+        layer_skip: int = 0,
+        text_encoder_output: Optional[torch.Tensor] = None,
+        add_pooled_output: bool = False,
+        pooled_text_encoder_output: Optional[torch.Tensor] = None,
+        use_attention_mask: bool = False,
+        add_layer_norm: bool = False
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Encode text using CLIP encoder with layer selection and pooling options.
+        
+        Args:
+            text_encoder: CLIP text encoder model
+            tokens: Input token ids
+            default_layer: Default layer to use if no skip
+            layer_skip: Number of layers to skip
+            text_encoder_output: Optional pre-computed encoder output
+            add_pooled_output: Whether to return pooled output
+            pooled_text_encoder_output: Optional pre-computed pooled output
+            use_attention_mask: Whether to use attention mask
+            add_layer_norm: Whether to apply layer norm
+            
+        Returns:
+            Tuple of (text embeddings, optional pooled embeddings)
+        """
+        if text_encoder_output is not None:
+            return text_encoder_output, pooled_text_encoder_output
+            
+        outputs = text_encoder(
+            tokens,
+            output_hidden_states=True,
+            return_dict=True
+        )
+        
+        # Get hidden states
+        if layer_skip > 0:
+            text_encoder_output = outputs.hidden_states[-layer_skip]
+        else:
+            text_encoder_output = outputs.hidden_states[default_layer]
+            
+        # Get pooled output if requested
+        if add_pooled_output:
+            if pooled_text_encoder_output is not None:
+                return text_encoder_output, pooled_text_encoder_output
+            elif hasattr(outputs, "pooler_output"):
+                pooled_text_encoder_output = outputs.pooler_output
+            else:
+                pooled_text_encoder_output = outputs.last_hidden_state.mean(dim=1)
+        else:
+            pooled_text_encoder_output = None
+            
+        # Apply layer norm if requested
+        if add_layer_norm:
+            text_encoder_output = torch.nn.functional.layer_norm(
+                text_encoder_output, 
+                text_encoder_output.shape[-1:]
+            )
+            
+        return text_encoder_output, pooled_text_encoder_output
+
     def encode_text(
         self,
         train_device: torch.device,
@@ -493,7 +556,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             ).input_ids.to(self.text_encoder_2.device)
 
         # Encode with first text encoder
-        text_encoder_1_output, _ = encode_clip(
+        text_encoder_1_output, _ = self.encode_clip(
             text_encoder=self.text_encoder_1,
             tokens=tokens_1,
             default_layer=-2,
@@ -505,7 +568,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         )
 
         # Encode with second text encoder
-        text_encoder_2_output, pooled_text_encoder_2_output = encode_clip(
+        text_encoder_2_output, pooled_text_encoder_2_output = self.encode_clip(
             text_encoder=self.text_encoder_2,
             tokens=tokens_2,
             default_layer=-2,
