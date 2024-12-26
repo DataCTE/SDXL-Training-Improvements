@@ -469,8 +469,8 @@ class CacheManager:
         silent: bool = True
     ) -> bool:
         """Save preprocessed data with proper index updates."""
-        if image_latent is None and text_embeddings is None:
-            logger.error(f"Both image_latent and text_embeddings are None for {file_path}")
+        if image_latent is None and text_latent is None:
+            logger.error(f"Both image_latent and text_latent are None for {file_path}")
             return False
 
         try:
@@ -490,10 +490,8 @@ class CacheManager:
             existing_info = self.cache_index["files"].get(str_path, {})
             
             # Prepare metadata
-            metadata = metadata.copy()
+            metadata = metadata.copy() if metadata else {}
             metadata["timestamp"] = time.time()
-            if caption is not None:
-                metadata["caption"] = caption
 
             # Prepare updated file info
             file_info = {

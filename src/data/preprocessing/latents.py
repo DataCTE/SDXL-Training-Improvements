@@ -1,5 +1,6 @@
 """High-level latent preprocessing with optimized orchestration."""
 from typing import Dict, List, Optional, Union
+import time
 import torch
 from pathlib import Path
 
