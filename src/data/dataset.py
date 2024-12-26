@@ -228,12 +228,23 @@ class AspectBucketDataset(Dataset):
         bucket_idx: int
     ) -> Dict[str, Any]:
         """Process a cached item with zero validation."""
-        # Direct access to latent data
+        # Handle case where cached_data is directly a tensor
+        if isinstance(cached_data, torch.Tensor):
+            return {
+                "model_input": cached_data,
+                "text": caption,
+                "bucket_idx": bucket_idx,
+                "image_path": image_path,
+                "original_sizes": [(1024, 1024)],
+                "crop_top_lefts": [(0, 0)],
+                "target_sizes": [(1024, 1024)]
+            }
+
+        # Handle dictionary case
         latent_data = cached_data["latent"]
         metadata = cached_data.get("metadata", {})
         text_latent = cached_data.get("text_latent", {})
 
-        # Build result dictionary
         result = {
             "model_input": latent_data,
             "text": caption,
@@ -244,7 +255,6 @@ class AspectBucketDataset(Dataset):
             "target_sizes": [metadata.get("target_size", (1024, 1024))]
         }
 
-        # Add embeddings if present
         if "embeddings" in text_latent:
             embeddings = text_latent["embeddings"]
             for key in ["prompt_embeds", "pooled_prompt_embeds", 
