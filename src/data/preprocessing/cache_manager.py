@@ -1044,10 +1044,10 @@ class CacheManager:
                         return False
 
                 # Parallel directory removal
-                with ThreadPoolExecutor(max_workers=3) as executor:
+                with ThreadPoolExecutor(max_workers=2) as executor:
                     results = list(executor.map(
                         remove_directory,
-                        [self.text_embeddings_dir, self.text_captions_dir, self.image_latents_dir]
+                        [self.text_latents_dir, self.image_latents_dir]
                     ))
                     
                     if not all(results):

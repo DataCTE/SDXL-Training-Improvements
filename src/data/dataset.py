@@ -397,21 +397,23 @@ class AspectBucketDataset(Dataset):
                 "target_sizes": [metadata.get("target_size", (1024, 1024))]
             }
 
-            # Add text embeddings if available
-            if "text_embeddings" in cached_data:
-                embeddings = cached_data["text_embeddings"]
-                # Also validate text embeddings
-                for key in ["prompt_embeds", "pooled_prompt_embeds", "prompt_embeds_2", "pooled_prompt_embeds_2"]:
-                    if key in embeddings:
-                        embeddings[key] = self._validate_and_clean_tensor(embeddings[key], image_path)
-                result.update({
-                    "prompt_embeds": embeddings.get("prompt_embeds"),
-                    "pooled_prompt_embeds": embeddings.get("pooled_prompt_embeds"),
-                    "prompt_embeds_2": embeddings.get("prompt_embeds_2"),
-                    "pooled_prompt_embeds_2": embeddings.get("pooled_prompt_embeds_2")
-                })
-            else:
-                raise ValueError(f"No text embeddings found in cache for {image_path}")
+            # Load text data from consolidated location
+            if "text_path" in file_info:
+                text_data = torch.load(Path(file_info["text_path"]), map_location='cpu')
+                if "embeddings" in text_data:
+                    embeddings = text_data["embeddings"]
+                    # Validate text embeddings
+                    for key in ["prompt_embeds", "pooled_prompt_embeds", "prompt_embeds_2", "pooled_prompt_embeds_2"]:
+                        if key in embeddings:
+                            embeddings[key] = self._validate_and_clean_tensor(embeddings[key], image_path)
+                    result.update({
+                        "prompt_embeds": embeddings.get("prompt_embeds"),
+                        "pooled_prompt_embeds": embeddings.get("pooled_prompt_embeds"),
+                        "prompt_embeds_2": embeddings.get("prompt_embeds_2"),
+                        "pooled_prompt_embeds_2": embeddings.get("pooled_prompt_embeds_2")
+                    })
+                else:
+                    raise ValueError(f"No text embeddings found in cache for {image_path}")
 
             return result
 
