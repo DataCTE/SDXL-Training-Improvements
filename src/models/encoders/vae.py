@@ -69,15 +69,21 @@ class VAEEncoder:
                 # Log intermediate values through VAE encoding stages
                 logger.debug("Starting VAE encode pass")
                 
-                # Get initial distribution
-                dist = self.vae.encode(pixel_values)
-                logger.debug("VAE encoder output stats:", extra={
-                    'dist_mean': dist.mean.mean().item(),
-                    'dist_std': dist.std.mean().item() if hasattr(dist, 'std') else None
-                })
+                # Get VAE output
+                vae_output = self.vae.encode(pixel_values)
                 
-                # Sample from distribution
-                latents = dist.latent_dist
+                # Handle different output formats
+                if hasattr(vae_output, 'latent_dist'):
+                    latents = vae_output.latent_dist
+                    if hasattr(latents, 'sample'):
+                        latents = latents.sample()
+                elif hasattr(vae_output, 'sample'):
+                    latents = vae_output.sample()
+                else:
+                    # Assume the output is already the latents
+                    latents = vae_output
+                
+                # Log pre-scaling stats
                 logger.debug("Pre-scaling latent stats:", extra={
                     'latent_shape': tuple(latents.shape),
                     'latent_min': latents.min().item(),
@@ -86,17 +92,8 @@ class VAEEncoder:
                     'latent_std': latents.std().item()
                 })
                 
-                # Sample and scale
-                latents = latents.sample()
-                logger.debug("Post-sample latent stats:", extra={
-                    'sampled_min': latents.min().item(),
-                    'sampled_max': latents.max().item(),
-                    'sampled_mean': latents.mean().item(),
-                    'sampled_std': latents.std().item()
-                })
-                
                 # Apply scaling factor
-                scaling_factor = self.vae.config.scaling_factor
+                scaling_factor = getattr(self.vae.config, 'scaling_factor', 0.18215)
                 latents = latents * scaling_factor
                 
                 # Final validation
