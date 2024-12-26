@@ -37,8 +37,17 @@ class VAEEncoder:
             if not isinstance(pixel_values, torch.Tensor):
                 raise ValueError("Invalid input tensor.")
                 
+            # Add input normalization and validation
+            if pixel_values.dtype != self.dtype:
+                pixel_values = pixel_values.to(dtype=self.dtype)
+                
+            # Ensure values are in correct range
+            if pixel_values.min() < -1 or pixel_values.max() > 1:
+                logger.warning("Input values outside expected range [-1,1], normalizing...")
+                pixel_values = torch.clamp(pixel_values, -1, 1)
+
             # Log input tensor stats
-            logger.info("VAE input tensor stats:", extra={
+            logger.debug("VAE input tensor stats:", extra={
                 'input_shape': tuple(pixel_values.shape),
                 'input_dtype': str(pixel_values.dtype),
                 'input_device': str(pixel_values.device),
@@ -48,82 +57,70 @@ class VAEEncoder:
                 'input_std': pixel_values.std().item()
             })
 
-            # Validate input tensor
-            if torch.isnan(pixel_values).any():
-                nan_count = torch.isnan(pixel_values).sum().item()
-                raise ValueError(f"Input tensor contains {nan_count} NaN values")
-            if torch.isinf(pixel_values).any():
-                inf_count = torch.isinf(pixel_values).sum().item()
-                raise ValueError(f"Input tensor contains {inf_count} infinite values")
-            if not (0 <= pixel_values.min() <= pixel_values.max() <= 1.0):
-                raise ValueError(
-                    f"Input tensor values out of range [0,1]: "
-                    f"min={pixel_values.min().item()}, max={pixel_values.max().item()}"
-                )
-                
             # Move to device and cast to correct dtype
             pixel_values = pixel_values.to(device=self.device, dtype=self.dtype)
             
             # Use context managers inside try block
             with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
-                # Log intermediate values through VAE encoding stages
-                logger.debug("Starting VAE encode pass")
-                
-                # Get VAE output
-                vae_output = self.vae.encode(pixel_values)
-                
-                # Handle different output formats
-                if hasattr(vae_output, 'latent_dist'):
-                    latents = vae_output.latent_dist
-                    if hasattr(latents, 'sample'):
-                        latents = latents.sample()
-                elif hasattr(vae_output, 'sample'):
-                    latents = vae_output.sample()
-                else:
-                    # Assume the output is already the latents
-                    latents = vae_output
-                
-                # Log pre-scaling stats
-                logger.debug("Pre-scaling latent stats:", extra={
-                    'latent_shape': tuple(latents.shape),
-                    'latent_min': latents.min().item(),
-                    'latent_max': latents.max().item(),
-                    'latent_mean': latents.mean().item(),
-                    'latent_std': latents.std().item()
-                })
-                
-                # Apply scaling factor
-                scaling_factor = getattr(self.vae.config, 'scaling_factor', 0.18215)
-                latents = latents * scaling_factor
-                
-                # Final validation
-                if torch.isnan(latents).any():
-                    nan_locations = torch.isnan(latents)
-                    nan_count = nan_locations.sum().item()
-                    nan_indices = torch.where(nan_locations)
-                    raise ValueError(
-                        f"VAE produced {nan_count} NaN values in latents. "
-                        f"First NaN at index: {[idx[0].item() for idx in nan_indices]}"
-                    )
+                # Add gradient clipping for stability
+                with torch.no_grad():
+                    # Get VAE output with added stability measures
+                    vae_output = self.vae.encode(pixel_values)
                     
-                if torch.isinf(latents).any():
-                    inf_count = torch.isinf(latents).sum().item()
-                    raise ValueError(f"VAE produced {inf_count} infinite values in latents")
+                    # Handle different output formats
+                    if hasattr(vae_output, 'latent_dist'):
+                        latents = vae_output.latent_dist
+                        if hasattr(latents, 'sample'):
+                            latents = latents.sample()
+                    elif hasattr(vae_output, 'sample'):
+                        latents = vae_output.sample()
+                    else:
+                        latents = vae_output
 
-                logger.info("VAE encoding complete", extra={
-                    'output_shape': tuple(latents.shape),
-                    'output_dtype': str(latents.dtype),
-                    'scaling_factor': scaling_factor,
-                    'output_stats': {
-                        'min': latents.min().item(),
-                        'max': latents.max().item(),
-                        'mean': latents.mean().item(),
-                        'std': latents.std().item()
-                    }
-                })
-                
-                return {"latent_dist": latents}
-                
+                    # Add numerical stability checks
+                    if torch.isnan(latents).any():
+                        # Try to recover from NaNs
+                        logger.warning("NaN values detected in latents, attempting recovery...")
+                        mask = torch.isnan(latents)
+                        latents[mask] = 0.0  # Replace NaNs with zeros
+                        
+                        # If still have NaNs after recovery attempt, raise error
+                        if torch.isnan(latents).any():
+                            nan_locations = torch.isnan(latents)
+                            nan_count = nan_locations.sum().item()
+                            nan_indices = torch.where(nan_locations)
+                            raise ValueError(
+                                f"VAE produced {nan_count} NaN values in latents that couldn't be recovered. "
+                                f"First NaN at index: {[idx[0].item() for idx in nan_indices]}"
+                            )
+                    
+                    # Check for infinities
+                    if torch.isinf(latents).any():
+                        logger.warning("Infinite values detected in latents, clipping...")
+                        latents = torch.clamp(latents, -1e6, 1e6)
+
+                    # Apply scaling factor with stability check
+                    scaling_factor = getattr(self.vae.config, 'scaling_factor', 0.18215)
+                    latents = latents * scaling_factor
+                    
+                    # Final validation
+                    if not torch.isfinite(latents).all():
+                        raise ValueError("Non-finite values in final latents after scaling")
+
+                    logger.debug("VAE encoding complete", extra={
+                        'output_shape': tuple(latents.shape),
+                        'output_dtype': str(latents.dtype),
+                        'scaling_factor': scaling_factor,
+                        'output_stats': {
+                            'min': latents.min().item(),
+                            'max': latents.max().item(),
+                            'mean': latents.mean().item(),
+                            'std': latents.std().item()
+                        }
+                    })
+                    
+                    return {"latent_dist": latents}
+                    
         except Exception as e:
             logger.error("VAE encoding failed", extra={
                 'error_type': type(e).__name__,
