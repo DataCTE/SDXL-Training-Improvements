@@ -293,33 +293,42 @@ class AspectBucketDataset(Dataset):
             if latent_data is None:
                 raise ValueError(f"No latent data found in cache for {image_path}")
                 
+            # Debug logging for investigation
+            logger.debug(f"Cached data keys: {cached_data.keys()}")
+            if isinstance(latent_data, dict) and "latent_dist" in latent_data:
+                logger.debug(f"Latent dist structure: {latent_data['latent_dist']}")
+            
             # Handle nested dictionary formats
             if isinstance(latent_data, dict):
-                if "sample" in latent_data:
+                if "latent_dist" in latent_data:
+                    # Use the latent_dist directly since it should already be in the correct format
+                    latent_dist = latent_data["latent_dist"]
+                    if not isinstance(latent_dist, dict):
+                        raise ValueError(f"Invalid latent_dist type for {image_path}, expected dict got {type(latent_dist)}")
+                    # Ensure required keys exist
+                    if not all(k in latent_dist for k in ["sample", "mean", "std"]):
+                        raise ValueError(f"Missing required keys in latent_dist for {image_path}")
+                    latent_tensor = latent_dist["sample"]
+                elif "sample" in latent_data:
                     latent_tensor = latent_data["sample"]
-                elif "latent_dist" in latent_data:
-                    latent_dist_data = latent_data["latent_dist"]
-                    if isinstance(latent_dist_data, dict) and "sample" in latent_dist_data:
-                        latent_tensor = latent_dist_data["sample"]
-                    else:
-                        raise ValueError(f"Invalid latent_dist format for {image_path}")
+                    latent_dist = {
+                        "sample": latent_tensor,
+                        "mean": latent_tensor.clone(),
+                        "std": torch.ones_like(latent_tensor)
+                    }
                 else:
                     raise ValueError(f"Invalid latent data format for {image_path}")
             elif isinstance(latent_data, torch.Tensor):
                 latent_tensor = latent_data
+                latent_dist = {
+                    "sample": latent_tensor,
+                    "mean": latent_tensor.clone(),
+                    "std": torch.ones_like(latent_tensor)
+                }
             else:
                 raise TypeError(f"Expected latent to be tensor or dict, got {type(latent_data)}")
                     
             logger.debug(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
-            
-            # Create latent distribution with explicit tensor creation
-            latent_dist = {
-                "sample": latent_tensor,
-                "mean": latent_tensor.clone(),  # Use clone to ensure independent tensor
-                "std": torch.ones(latent_tensor.shape, 
-                                dtype=latent_tensor.dtype,
-                                device=latent_tensor.device)
-            }
             
             # Get metadata for size information
             metadata = cached_data.get("metadata", {})
