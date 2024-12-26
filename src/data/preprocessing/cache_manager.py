@@ -463,11 +463,9 @@ class CacheManager:
     def save_preprocessed_data(
         self,
         image_latent: Optional[Dict[str, torch.Tensor]],
-        text_embeddings: Optional[Dict[str, torch.Tensor]], 
-        text_caption: Optional[str] = None,
+        text_latent: Optional[Dict[str, Any]] = None,  # Combined text data
         metadata: Dict = None,
         file_path: Union[str, Path] = None,
-        caption: Optional[str] = None,
         silent: bool = True
     ) -> bool:
         """Save preprocessed data with proper index updates."""
@@ -521,38 +519,27 @@ class CacheManager:
                     "metadata": {**metadata, "type": "image_latent"}
                 }, latent_path)
                 
-            # Save text embeddings (CLIP encoded)
-            if text_embeddings is not None:
-                embedding_path = self.text_embeddings_dir / f"{base_name}.pt"
-                torch.save({
-                    "embeddings": text_embeddings,
-                    "metadata": {**metadata, "type": "text_embedding"}
-                }, embedding_path)
-                
-            # Save text caption (raw text)
-            if text_caption is not None:
-                caption_path = self.text_captions_dir / f"{base_name}.pt"
-                torch.save({
-                    "caption": text_caption,
-                    "metadata": {**metadata, "type": "text_caption"}
-                }, caption_path)
-
-                # Update file info based on saved files
-                if image_latent is not None:
-                    file_info.update({
-                        "latent_path": str(latent_path),
-                        "type": "image_latent"
-                    })
-                if text_embeddings is not None:
-                    file_info.update({
-                        "text_path": str(embedding_path),
-                        "text_type": "text_embedding"
-                    })
-                if text_caption is not None:
-                    file_info.update({
-                        "caption_path": str(caption_path),
-                        "caption_type": "text_caption"
-                    })
+            # Save consolidated text latent
+            if text_latent is not None:
+                text_path = self.text_embeddings_dir / f"{base_name}.pt"
+                # Ensure all text data is in a consistent format
+                text_data = {
+                    "embeddings": text_latent.get("embeddings", {}),
+                    "caption": text_latent.get("caption", ""),
+                    "processed_text": text_latent.get("processed_text", ""),
+                    "metadata": {
+                        **metadata,
+                        "type": "text_latent",
+                        "has_embeddings": bool(text_latent.get("embeddings")),
+                        "has_caption": bool(text_latent.get("caption")),
+                        "embedding_types": list(text_latent.get("embeddings", {}).keys())
+                    }
+                }
+                torch.save(text_data, text_path)
+                file_info.update({
+                    "text_path": str(text_path),
+                    "text_type": "text_latent"
+                })
 
             # Batch update index
             if file_info.get("latent_path") or file_info.get("text_path"):

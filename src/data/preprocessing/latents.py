@@ -142,33 +142,29 @@ class LatentPreprocessor:
             encoder_1_output = self.clip_encoder_1.encode_prompt(processed_prompts)
             encoder_2_output = self.clip_encoder_2.encode_prompt(processed_prompts)
 
-            # Combine results
-            embeddings = {
-                "prompt_embeds": encoder_1_output["text_embeds"],
-                "pooled_prompt_embeds": encoder_1_output["pooled_embeds"],
-                "prompt_embeds_2": encoder_2_output["text_embeds"],
-                "pooled_prompt_embeds_2": encoder_2_output["pooled_embeds"]
-            }
-
-            # Validate embeddings using embedding processor
-            if not self.embedding_processor.validate_embeddings(embeddings):
-                raise ValueError("Invalid embeddings detected")
-
-            # Add metadata
-            metadata = {
-                "num_prompts": len(prompt_batch),
-                "device": str(self.device),
-                "dtype": str(next(iter(embeddings.values())).dtype),
-                "timestamp": time.time(),
-                "embedding_shapes": {
-                    k: tuple(v.shape) for k, v in embeddings.items()
+            # Combine into consolidated format
+            text_latent = {
+                "embeddings": {
+                    "prompt_embeds": encoder_1_output["text_embeds"],
+                    "pooled_prompt_embeds": encoder_1_output["pooled_embeds"],
+                    "prompt_embeds_2": encoder_2_output["text_embeds"],
+                    "pooled_prompt_embeds_2": encoder_2_output["pooled_embeds"]
+                },
+                "caption": prompt_batch[0] if prompt_batch else "",
+                "processed_text": processed_prompts[0] if processed_prompts else "",
+                "metadata": {
+                    "num_prompts": len(prompt_batch),
+                    "device": str(self.device),
+                    "dtype": str(next(iter(encoder_1_output["text_embeds"])).dtype),
+                    "timestamp": time.time(),
+                    "embedding_shapes": {
+                        k: tuple(v.shape) 
+                        for k, v in encoder_1_output["text_embeds"].items()
+                    }
                 }
             }
 
-            return {
-                "text_embeddings": embeddings,
-                "metadata": metadata
-            }
+            return text_latent
             
         except Exception as e:
             logger.error("Failed to encode prompts", extra={
