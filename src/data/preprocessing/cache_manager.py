@@ -315,8 +315,7 @@ class CacheManager(TensorValidator):
     def scan_and_rebuild_index(self) -> None:
         """Scan cache directories and rebuild index with actual files."""
         try:
-            from concurrent.futures import ThreadPoolExecutor
-            import itertools
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             
             # Initialize new index structure
             new_index = {
@@ -381,7 +380,7 @@ class CacheManager(TensorValidator):
                 })
 
                 # Process results as they complete
-                for future in itertools.as_completed(future_to_path):
+                for future in as_completed(future_to_path):
                     result = future.result()
                     if result:
                         file_path, entry = result
