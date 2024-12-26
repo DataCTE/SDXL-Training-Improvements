@@ -91,6 +91,12 @@ class ModelConfig:
     dtype: str = "bfloat16"
     fallback_dtype: str = "float32"
     enable_bf16_training: bool = True
+    # Model optimization flags
+    enable_memory_efficient_attention: bool = True
+    enable_vae_slicing: bool = False
+    enable_model_cpu_offload: bool = False
+    enable_sequential_cpu_offload: bool = False
+    # Model component dtypes
     unet_dtype: Optional[str] = None
     prior_dtype: Optional[str] = None
     text_encoder_dtype: Optional[str] = None
