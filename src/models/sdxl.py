@@ -675,10 +675,10 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                     truncation=True,
                     max_length=self.tokenizer_2.model_max_length,
                     return_tensors="pt"
-            ).input_ids.to(self.text_encoder_2.device)
+                ).input_ids.to(self.text_encoder_2.device)
 
-        # Encode with first text encoder
-        text_encoder_1_output, _ = self.encode_clip(
+            # Encode with first text encoder
+            text_encoder_1_output, _ = self.encode_clip(
             text_encoder=self.text_encoder_1,
             tokens=tokens_1,
             default_layer=-2,
