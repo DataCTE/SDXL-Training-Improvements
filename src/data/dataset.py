@@ -285,10 +285,18 @@ class AspectBucketDataset(Dataset):
                 
             self.stats.cache_hits += 1
 
-            # Get the latent tensor directly - it's already the VAE output
-            latent_tensor = cached_data.get("latent")
-            if latent_tensor is None:
-                raise ValueError(f"No latent found in cache for {image_path}")
+            # Get the latent tensor from the latent dictionary
+            latent_data = cached_data.get("latent")
+            if latent_data is None:
+                raise ValueError(f"No latent data found in cache for {image_path}")
+                
+            # Extract the actual tensor from the latent data
+            if isinstance(latent_data, dict):
+                latent_tensor = latent_data.get("latent")
+                if latent_tensor is None:
+                    raise ValueError(f"No latent tensor found in latent data for {image_path}")
+            else:
+                raise TypeError(f"Expected latent to be dict, got {type(latent_data)}")
 
             # Check for NaN values in latent tensor
             if torch.isnan(latent_tensor).any():
@@ -299,7 +307,7 @@ class AspectBucketDataset(Dataset):
             
             # Create result dictionary
             result = {
-                "model_input": latent_tensor,  # Use latent directly as model input
+                "model_input": latent_tensor,  # Use latent tensor as model input
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
@@ -327,8 +335,10 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Image path: {image_path}")
             if 'cached_data' in locals():
                 logger.error(f"Cached data keys: {cached_data.keys()}")
-            if 'latent_tensor' in locals():
-                logger.error(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
+            if 'latent_data' in locals():
+                logger.error(f"Latent data type: {type(latent_data)}")
+                if isinstance(latent_data, dict):
+                    logger.error(f"Latent data keys: {latent_data.keys()}")
             raise
 
     def __enter__(self):
