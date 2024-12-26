@@ -66,37 +66,37 @@ class DDPMTrainer(TrainingMethod):
     ) -> Dict[str, Tensor]:
         try:
             # Direct access since data is already validated
-            latents = batch["model_input"]
+            latents = batch["model_input"]  # This is already a concatenated tensor
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
 
-            # Get dimensions from first item and ensure landscape orientation
-            h0, w0 = latents[0].shape[-2:]
-            target_height = min(h0, w0)
-            target_width = max(h0, w0)
+            # Get batch size and dimensions
+            batch_size, channels, h, w = latents.shape
             
-            # Resize and rotate latents to match target dimensions
-            resized_latents = []
-            for lat in latents:
-                h, w = lat.shape[-2:]
-                # Check if we need to rotate
-                needs_rotation = (h > w) != (target_height > target_width)
-                
-                if needs_rotation:
-                    # Transpose the last two dimensions
-                    lat = lat.transpose(-1, -2)
-                
-                # Resize if dimensions don't match
-                if lat.shape[-2:] != (target_height, target_width):
-                    lat = F.interpolate(
-                        lat,
-                        size=(target_height, target_width),
-                        mode='bilinear',
-                        align_corners=False
-                    )
-                resized_latents.append(lat)
+            logger.debug(f"Initial latents shape: {latents.shape}")
             
-            latents = torch.cat(resized_latents, dim=0)
+            # Determine if we need to rotate the entire batch
+            should_rotate = h > w
+            
+            if should_rotate:
+                # Transpose the entire batch at once
+                latents = latents.transpose(-1, -2)
+                logger.debug(f"Rotating latents. New shape: {latents.shape}")
+                
+            # Now h and w are correctly oriented (width > height)
+            target_height = min(latents.shape[-2], latents.shape[-1])
+            target_width = max(latents.shape[-2], latents.shape[-1])
+            
+            # Resize if needed
+            if latents.shape[-2:] != (target_height, target_width):
+                latents = F.interpolate(
+                    latents,
+                    size=(target_height, target_width),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                
+            logger.debug(f"Final latents shape: {latents.shape}")
 
             # Get noise and timesteps
             noise = torch.randn(
