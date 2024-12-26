@@ -107,6 +107,7 @@ def setup_device_and_logging(config: Config) -> torch.device:
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     """Initialize SDXL model components."""
     logger.info("Loading models...")
+    model = None  # Initialize model variable outside try block
     try:
         model = StableDiffusionXLModel(ModelType.BASE)
         initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
