@@ -65,9 +65,18 @@ class GlobalConfig:
         cache_text_embeddings: bool = True
         cache_latents: bool = True
         cache_validation: bool = True
+
+    @dataclass 
+    class LoggingConfig:
+        """Logging configuration."""
+        console_level: str = "INFO"
+        file_level: str = "DEBUG"
+        log_dir: str = "outputs/wslref/logs"
+        filename: str = "train.log"
         
     image: ImageConfig = field(default_factory=ImageConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     seed: Optional[int] = None
     output_dir: str = "outputs"
 
@@ -306,6 +315,7 @@ class Config:
             global_config = GlobalConfig(
                 image=GlobalConfig.ImageConfig(**global_config_dict.get("image", {})),
                 cache=GlobalConfig.CacheConfig(**global_config_dict.get("cache", {})),
+                logging=GlobalConfig.LoggingConfig(**global_config_dict.get("logging", {})),
                 seed=global_config_dict.get("seed"),
                 output_dir=global_config_dict.get("output_dir", "outputs"),
             )
