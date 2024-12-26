@@ -95,7 +95,7 @@ class TagWeighter:
             self._save_cache()
 
     def _compute_weights(self) -> None:
-        """Compute tag weights based on frequency."""
+        """Compute tag weights based on frequency with proper scaling."""
         for tag_type in self.tag_counts:
             type_counts = self.tag_counts[tag_type]
             total_type_count = sum(type_counts.values())
@@ -104,10 +104,26 @@ class TagWeighter:
                 continue
                 
             for tag, count in type_counts.items():
+                # Calculate normalized frequency (0 to 1 range)
                 frequency = count / self.total_samples
-                weight = 1.0 / (frequency + self.smoothing_factor)
-                # Explicitly clamp between min_weight and max_weight
-                weight = min(max(weight, self.min_weight), self.max_weight)
+                
+                # Apply inverse frequency with smoothing
+                raw_weight = 1.0 / (frequency + self.smoothing_factor)
+                
+                # Scale the weight to our desired range (0.01 to 3.0)
+                # First normalize to 0-1 range
+                max_possible_weight = 1.0 / self.smoothing_factor  # Theoretical maximum when frequency = 0
+                normalized_weight = (raw_weight - 1.0) / (max_possible_weight - 1.0)
+                
+                # Then scale to our desired range
+                scaled_weight = (
+                    self.min_weight + 
+                    (normalized_weight * (self.max_weight - self.min_weight))
+                )
+                
+                # Final clamp to ensure bounds
+                weight = min(max(scaled_weight, self.min_weight), self.max_weight)
+                
                 self.tag_weights[tag_type][tag] = float(weight)
 
     def get_caption_weight(self, caption: str) -> float:
