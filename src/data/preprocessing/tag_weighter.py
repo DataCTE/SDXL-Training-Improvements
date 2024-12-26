@@ -240,13 +240,39 @@ class TagWeighter:
                 "default_weight": self.default_weight,
                 "min_weight": self.min_weight,
                 "max_weight": self.max_weight,
-                "smoothing_factor": self.smoothing_factor
+                "smoothing_factor": self.smoothing_factor,
+                "tag_types": self.tag_types
             },
-            "tag_types": self.tag_types,
-            "tag_statistics": self.get_tag_statistics(),
-            "image_tags": image_tags
+            "statistics": {
+                "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
+                "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
+                "type_statistics": self.get_tag_statistics()
+            },
+            "images": {}
         }
         
+        # Process each image's tags and weights
+        for image_path, image_data in image_tags.items():
+            caption = image_data["caption"]
+            weight_details = image_data["weight_details"]
+            
+            index_data["images"][image_path] = {
+                "caption": caption,
+                "total_weight": weight_details["total_weight"],
+                "tags": {
+                    tag_type: [
+                        {
+                            "tag": tag_info["tag"],
+                            "weight": tag_info["weight"],
+                            "frequency": tag_info["frequency"]
+                        }
+                        for tag_info in tags_list
+                    ]
+                    for tag_type, tags_list in weight_details["tags"].items()
+                }
+            }
+        
+        # Save with proper formatting
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(index_data, f, indent=2, ensure_ascii=False)
     
@@ -254,13 +280,29 @@ class TagWeighter:
         """Process all image captions and return detailed tag information."""
         image_tags = {}
         
-        for image_id, caption in image_captions.items():
+        for image_path, caption in image_captions.items():
+            # Get detailed tag analysis
             tag_details = self.get_caption_weight_details(caption)
-            image_tags[image_id] = {
-                "caption": caption,
-                "weight_details": tag_details
-            }
             
+            # Store comprehensive information
+            image_tags[image_path] = {
+                "caption": caption,
+                "weight_details": {
+                    "total_weight": tag_details["total_weight"],
+                    "tags": {
+                        tag_type: [
+                            {
+                                "tag": tag_info["tag"],
+                                "weight": tag_info["weight"],
+                                "frequency": tag_info["frequency"]
+                            }
+                            for tag_info in tags_list
+                        ]
+                        for tag_type, tags_list in tag_details["tags"].items()
+                    }
+                }
+            }
+        
         return image_tags
 
 def create_tag_weighter(

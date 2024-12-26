@@ -105,16 +105,89 @@ class CacheManager(TensorValidator):
         return missing_text, missing_latents
 
     def _load_index(self):
+        """Load or initialize the cache index."""
         try:
-            with open(self.index_path) as f:
-                self.cache_index = json.load(f)
-        except:
-            self.cache_index = {"files": {}}
-            self._save_index()
+            if self.index_path.exists():
+                with open(self.index_path) as f:
+                    self.cache_index = json.load(f)
+                    
+                # Validate and repair index structure if needed
+                if "files" not in self.cache_index:
+                    self.cache_index["files"] = {}
+                if "metadata" not in self.cache_index:
+                    self.cache_index["metadata"] = {
+                        "created_at": time.time(),
+                        "last_updated": time.time(),
+                        "version": "1.0"
+                    }
+            else:
+                # Initialize new index with metadata
+                self.cache_index = {
+                    "metadata": {
+                        "created_at": time.time(),
+                        "last_updated": time.time(),
+                        "version": "1.0",
+                        "cache_dir": str(self.cache_dir),
+                        "image_latents_dir": str(self.image_latents_dir),
+                        "text_latents_dir": str(self.text_latents_dir)
+                    },
+                    "files": {},
+                    "statistics": {
+                        "total_files": 0,
+                        "total_image_latents": 0,
+                        "total_text_latents": 0
+                    }
+                }
+                self._save_index()
+                
+        except Exception as e:
+            logger.error(f"Failed to load cache index: {e}")
+            self._initialize_empty_index()
+
+    def _initialize_empty_index(self):
+        """Initialize a new empty cache index with proper structure."""
+        self.cache_index = {
+            "metadata": {
+                "created_at": time.time(),
+                "last_updated": time.time(),
+                "version": "1.0",
+                "cache_dir": str(self.cache_dir),
+                "image_latents_dir": str(self.image_latents_dir),
+                "text_latents_dir": str(self.text_latents_dir)
+            },
+            "files": {},
+            "statistics": {
+                "total_files": 0,
+                "total_image_latents": 0,
+                "total_text_latents": 0
+            }
+        }
+        self._save_index()
 
     def _save_index(self):
-        with open(self.index_path, 'w') as f:
-            json.dump(self.cache_index, f, indent=2)
+        """Save the cache index with updated metadata."""
+        try:
+            # Update metadata
+            self.cache_index["metadata"]["last_updated"] = time.time()
+            
+            # Update statistics
+            stats = self.cache_index["statistics"]
+            stats["total_files"] = len(self.cache_index["files"])
+            stats["total_image_latents"] = sum(
+                1 for f in self.cache_index["files"].values() 
+                if "image_latent_path" in f
+            )
+            stats["total_text_latents"] = sum(
+                1 for f in self.cache_index["files"].values() 
+                if "text_latent_path" in f
+            )
+            
+            # Save with proper formatting
+            with open(self.index_path, 'w') as f:
+                json.dump(self.cache_index, f, indent=2, ensure_ascii=False)
+                
+        except Exception as e:
+            logger.error(f"Failed to save cache index: {e}")
 
     def _process_latents(self, data: Union[Dict, torch.Tensor], prefix: str) -> Union[Dict, torch.Tensor]:
         if isinstance(data, dict):
@@ -144,9 +217,18 @@ class CacheManager(TensorValidator):
             if image_latent is not None:
                 image_latent = self._process_latents(image_latent, "image")
                 latent_path = self.image_latents_dir / f"{base_name}.pt"
+                # Format compatible with dataset._process_cached_item
                 torch.save({
-                    "latent": image_latent,
-                    "metadata": metadata
+                    "latent": {
+                        "model_input": image_latent.get("image_latent", image_latent),
+                        "latent": image_latent
+                    },
+                    "metadata": {
+                        "original_size": metadata.get("original_size", (1024, 1024)),
+                        "crop_top_left": metadata.get("crop_top_left", (0, 0)),
+                        "target_size": metadata.get("target_size", (1024, 1024)),
+                        **metadata
+                    }
                 }, latent_path)
                 cache_entry["image_latent_path"] = str(latent_path)
 
@@ -181,8 +263,17 @@ class CacheManager(TensorValidator):
                     return None
                     
                 data = torch.load(path, map_location='cpu')
+                
+                # Process latents and ensure format compatibility
                 if "latent" in data:
-                    data["latent"] = self._process_latents(data["latent"], "cached_latent")
+                    latent_data = data["latent"]
+                    if isinstance(latent_data, dict):
+                        for k, v in latent_data.items():
+                            if isinstance(v, torch.Tensor):
+                                latent_data[k] = self._process_latents(v, f"cached_latent_{k}")
+                    else:
+                        data["latent"] = self._process_latents(latent_data, "cached_latent")
+                    
                 if "embeddings" in data:
                     data["embeddings"] = self._process_latents(data["embeddings"], "cached_emb")
                 return data
