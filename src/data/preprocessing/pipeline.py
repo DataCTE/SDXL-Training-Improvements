@@ -401,7 +401,7 @@ class PreprocessingPipeline:
         cached_text_files = set(p.stem for p in text_latents_dir.glob("*.pt"))
         
         # Build verified index
-        new_index = {"files": {}, "chunks": {}}
+        new_index = {"files": {}}
         for img_path in image_paths:
             base_name = Path(img_path).stem
             file_info = {}
@@ -414,8 +414,10 @@ class PreprocessingPipeline:
                 
             if file_info:
                 new_index["files"][str(img_path)] = file_info
-        
-        self.cache_manager._save_cache_index(new_index)
+
+        # Update cache index
+        self.cache_manager.cache_index = new_index
+        self.cache_manager._save_index()
         
         # Process image latents
         if process_latents:
@@ -459,12 +461,12 @@ class PreprocessingPipeline:
                         
                         # Periodic saves and cleanup
                         if i - last_save >= save_interval:
-                            self.cache_manager._save_cache_index(silent=True)
+                            self.cache_manager._save_index()
                             last_save = i
                         if torch.cuda.is_available() and i % 100 == 0:
                             torch.cuda.empty_cache()
 
-                self.cache_manager._save_cache_index()
+                self.cache_manager._save_index()
             else:
                 logger.info("All image latents already cached")
 
@@ -527,7 +529,7 @@ class PreprocessingPipeline:
                 logger.info("All text embeddings already cached")
 
         logger.info(f"Precomputation complete. Successful: {self.stats.successful}, Failed: {self.stats.failed}")
-
+        
     def get_valid_image_paths(self) -> List[str]:
         """Return list of valid image paths found during bucketing."""
         if not hasattr(self, 'valid_image_paths'):

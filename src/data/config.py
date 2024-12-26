@@ -43,7 +43,7 @@ class GlobalConfig:
             (640, 1536),
         ])
         max_size: Tuple[int, int] = (1536, 1536)
-        min_size: Tuple[int, int] = (640, 640)
+        min_size: Tuple[int, int] = (256, 256)
         max_dim: int = 1536 * 1536  # Max total pixels
         bucket_step: int = 64       # Step size for bucketing dimensions
         max_aspect_ratio: float = 2.0
