@@ -232,19 +232,27 @@ class CacheManager:
 
             # Fast parallel file scanning using sets
             with ThreadPoolExecutor(max_workers=self.num_proc) as executor:
-                image_future = executor.submit(lambda: {p.stem for p in self.image_dir.glob("*.pt")})
-                text_future = executor.submit(lambda: {p.stem for p in self.text_dir.glob("*.pt")})
-                image_stems = image_future.result()
+                # Use correct directory attributes
+                latent_future = executor.submit(lambda: {p.stem for p in self.image_latents_dir.glob("*.pt")})
+                text_future = executor.submit(lambda: {p.stem for p in self.text_embeddings_dir.glob("*.pt")})
+                caption_future = executor.submit(lambda: {p.stem for p in self.text_captions_dir.glob("*.pt")})
+                
+                latent_stems = latent_future.result()
                 text_stems = text_future.result()
+                caption_stems = caption_future.result()
 
             # Pre-compute file paths for O(1) lookup
-            image_files = {
-                stem: self.image_dir / f"{stem}.pt"
-                for stem in image_stems
+            latent_files = {
+                stem: self.image_latents_dir / f"{stem}.pt"
+                for stem in latent_stems
             }
             text_files = {
-                stem: self.text_dir / f"{stem}.pt"
-                for stem in text_stems & image_stems  # Intersection for only valid pairs
+                stem: self.text_embeddings_dir / f"{stem}.pt"
+                for stem in text_stems & latent_stems  # Intersection for only valid pairs
+            }
+            caption_files = {
+                stem: self.text_captions_dir / f"{stem}.pt"
+                for stem in caption_stems & latent_stems  # Intersection for only valid pairs
             }
 
             # Load index with error handling
@@ -257,7 +265,7 @@ class CacheManager:
             # Fast batch processing of entries
             valid_files = {}
             existing_stems = {Path(p).stem for p in index_data.get("files", {})}
-            new_stems = image_stems - existing_stems
+            new_stems = latent_stems - existing_stems
 
             # Process existing entries in batches
             batch_size = 1000
@@ -266,25 +274,29 @@ class CacheManager:
                 
                 for file_path, file_info in batch_items:
                     base_name = Path(file_path).stem
-                    if base_name in image_stems:
+                    if base_name in latent_stems:
                         file_info.update({
-                            "latent_path": str(image_files[base_name]),
+                            "latent_path": str(latent_files[base_name]),
                             "type": "image",
                             "text_path": str(text_files[base_name]) if base_name in text_stems else None,
-                            "text_type": "text" if base_name in text_stems else None
+                            "text_type": "text" if base_name in text_stems else None,
+                            "caption_path": str(caption_files[base_name]) if base_name in caption_stems else None,
+                            "caption_type": "caption" if base_name in caption_stems else None
                         })
                         valid_files[file_path] = file_info
 
             # Process new entries in parallel
             def process_new_stem(stem):
-                original_path = str(image_files[stem]).replace(".pt", ".jpg")
+                original_path = str(latent_files[stem]).replace(".pt", ".jpg")
                 return original_path, {
                     "base_name": stem,
-                    "latent_path": str(image_files[stem]),
+                    "latent_path": str(latent_files[stem]),
                     "type": "image",
                     "timestamp": time.time(),
                     "text_path": str(text_files[stem]) if stem in text_stems else None,
-                    "text_type": "text" if stem in text_stems else None
+                    "text_type": "text" if stem in text_stems else None,
+                    "caption_path": str(caption_files[stem]) if stem in caption_stems else None,
+                    "caption_type": "caption" if stem in caption_stems else None
                 }
 
             with ThreadPoolExecutor(max_workers=self.num_proc) as executor:
