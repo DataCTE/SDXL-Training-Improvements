@@ -384,7 +384,7 @@ class CLIPEncoder:
             })
             raise
 
-     def encode(
+    def encode(
         self,
         tokens: Tensor,
         output_hidden_states: bool = True,
