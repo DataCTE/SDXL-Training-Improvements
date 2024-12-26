@@ -224,7 +224,7 @@ class PreprocessingPipeline:
         """Validate image dimensions against configuration.
         
         Args:
-            size: Tuple of (height, width)
+            size: Tuple of (width, height)  # Note: PIL Image.size returns (width, height)
             min_size: Optional minimum dimensions
             max_size: Optional maximum dimensions
             
@@ -234,23 +234,33 @@ class PreprocessingPipeline:
         min_size = min_size or self.config.global_config.image.min_size
         max_size = max_size or self.config.global_config.image.max_size
         
-        h, w = size
+        w, h = size  # PIL returns (width, height)
         min_h, min_w = min_size
         max_h, max_w = max_size
         
-        # Check absolute dimensions
-        if h < min_h or w < min_w:
-            return False
-        if h > max_h or w > max_w:
+        # Calculate total pixels
+        total_pixels = w * h
+        max_pixels = self.config.global_config.image.max_dim
+        
+        # Check total pixels first
+        if total_pixels > max_pixels:
+            logger.debug(f"Image too large: {w}x{h} = {total_pixels} pixels > {max_pixels}")
             return False
             
+        # Check minimum dimensions - both width and height must be at least min_size
+        if w < min_w or h < min_h:
+            logger.debug(f"Image too small: {w}x{h} < minimum {min_w}x{min_h}")
+            return False
+                
         # Check aspect ratio
         aspect = w / h
-        if aspect < 1/self.config.global_config.image.max_aspect_ratio:
+        max_aspect = self.config.global_config.image.max_aspect_ratio
+        min_aspect = 1.0 / max_aspect
+        
+        if aspect < min_aspect or aspect > max_aspect:
+            logger.debug(f"Invalid aspect ratio: {aspect:.2f} (allowed range: {min_aspect:.2f}-{max_aspect:.2f})")
             return False
-        if aspect > self.config.global_config.image.max_aspect_ratio:
-            return False
-            
+                
         return True
     
     def assign_aspect_buckets(self, image_paths: Union[str, Path, Config], tolerance: float = 0.1) -> List[int]:
@@ -503,10 +513,17 @@ class PreprocessingPipeline:
         """Process a single image."""
         try:
             img = Image.open(img_path).convert('RGB')
+            w, h = img.size
             
-            # Validate image size first
+            # Validate image size with detailed error
             if not self.validate_image_size(img.size):
-                raise ValueError(f"Invalid image size: {img.size}")
+                logger.warning(
+                    f"Invalid image size for {img_path}: {w}x{h} "
+                    f"(max pixels: {self.config.global_config.image.max_dim}, "
+                    f"min size: {self.config.global_config.image.min_size}, "
+                    f"max aspect ratio: {self.config.global_config.image.max_aspect_ratio})"
+                )
+                return None
                 
             # Get bucket assignment and resize image
             resized_img, bucket_idx = self.resize_to_bucket(img)
@@ -533,7 +550,7 @@ class PreprocessingPipeline:
             }
             
         except Exception as e:
-            logger.warning(f"Failed to process {img_path}: {e}")
+            logger.warning(f"Failed to process {img_path}: {str(e)}")
             return None
     
     def encode_prompt(self, caption: str) -> Dict[str, torch.Tensor]:
