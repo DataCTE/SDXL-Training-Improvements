@@ -292,7 +292,10 @@ class AspectBucketDataset(Dataset):
                 
             # Extract the actual tensor from the latent data
             if isinstance(latent_data, dict):
-                latent_tensor = latent_data.get("latent")
+                # Try "model_input" first, then "latent" as fallback
+                latent_tensor = latent_data.get("model_input")
+                if latent_tensor is None:
+                    latent_tensor = latent_data.get("latent")
                 if latent_tensor is None:
                     raise ValueError(f"No latent tensor found in latent data for {image_path}")
             else:
