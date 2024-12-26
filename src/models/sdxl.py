@@ -284,8 +284,6 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
         except Exception as e:
             error_context = {
-                'model_name': pretrained_model_name,
-                'dtype': str(dtype),
                 'error': str(e),
                 'component': 'unknown'
             }
