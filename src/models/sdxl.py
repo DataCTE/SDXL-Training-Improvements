@@ -334,6 +334,9 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 enable_memory_efficient_attention=self.enable_memory_efficient_attention
             )
 
+            # Use CLIP encoder's embedding processor
+            self.embedding_processor = self.clip_encoder_1
+
         except Exception as e:
             raise ModelError("Failed to initialize encoders", {
                 'error': str(e),
