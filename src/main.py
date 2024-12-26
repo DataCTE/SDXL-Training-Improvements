@@ -285,7 +285,7 @@ def setup_training(
             raise
         
         # Create tag weighter with proper configuration
-        if config.training.use_tag_weighting:
+        if config.tag_weighting.enable_tag_weighting:
             logger.info("Initializing tag weighter...")
             tag_weighter = create_tag_weighter_with_index(
                 config=config,
