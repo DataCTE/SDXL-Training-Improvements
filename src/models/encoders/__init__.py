@@ -1,3 +1,5 @@
 from .clip import CLIPEncoder
+from .vae import VAEEncoder
 
-__all__ = ['CLIPEncoder']
+__all__ = ['CLIPEncoder', 'VAEEncoder']
+

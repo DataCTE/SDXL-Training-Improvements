@@ -14,7 +14,7 @@ global_config:
     max_size: [1536, 1536]
     min_size: [640, 640]
     max_dim: 2359296  # 1536 * 1536
-    max_aspect_ratio: 2.0  # Maximum allowed aspect ratio for images
+    max_aspect_ratio: 2.5  # Maximum allowed aspect ratio for images
   cache:
     cache_dir: "cache"
     use_cache: true
