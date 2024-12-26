@@ -129,7 +129,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         self._dtype = DataType.FLOAT_32  # Set dtype before BaseModel init
         BaseModel.__init__(self, model_type)
 
-        # Initialize components
+        # Initialize components as None
         self.vae = None
         self.text_encoder_1 = None
         self.text_encoder_2 = None
@@ -152,10 +152,11 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         self.enable_model_cpu_offload = enable_model_cpu_offload
         self.enable_sequential_cpu_offload = enable_sequential_cpu_offload
 
-        # Initialize optimized encoder wrappers
-        self.clip_encoder_1: Optional[CLIPEncoder] = None
-        self.clip_encoder_2: Optional[CLIPEncoder] = None
-        self.vae_encoder: Optional[VAEEncoder] = None
+        # Initialize encoder wrappers as None - will be set up after model loading
+        self.clip_encoder_1 = None
+        self.clip_encoder_2 = None
+        self.vae_encoder = None
+        self.embedding_processor = None
 
         # Initialize memory tracking
         self.memory_stats = {
@@ -164,25 +165,13 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
             'num_allocations': 0
         }
 
-        # Initialize encoders
-        self._initialize_encoders()
-        
-        # Validate initialization
-        if not self.clip_encoder_1 or not self.clip_encoder_2 or not self.vae_encoder:
-            raise RuntimeError("Failed to initialize model encoders")
-
-        logger.info("Initialized SDXL model", extra={
+        logger.info("Initialized SDXL model base structure", extra={
             'model_type': str(model_type),
             'optimizations': {
                 'memory_efficient_attention': enable_memory_efficient_attention,
                 'vae_slicing': enable_vae_slicing,
                 'model_cpu_offload': enable_model_cpu_offload,
                 'sequential_cpu_offload': enable_sequential_cpu_offload
-            },
-            'encoders_initialized': {
-                'clip1': self.clip_encoder_1 is not None,
-                'clip2': self.clip_encoder_2 is not None,
-                'vae': self.vae_encoder is not None
             }
         })
 
@@ -205,9 +194,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         use_safetensors: bool = True,
         **kwargs
     ) -> None:
-        """
-        Load pretrained model components for SDXL.
-        """
+        """Load pretrained model components for SDXL."""
         logger.info(f"Loading model components from {pretrained_model_name}")
 
         try:
@@ -224,115 +211,80 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             self.dtype = model_dtypes.train_dtype
 
-            # Reset encoders to ensure clean initialization
-            self.clip_encoder_1 = None
-            self.clip_encoder_2 = None 
-            self.vae_encoder = None
-            self.embedding_processor = None
+            # 2. Load all model components first
+            components_to_load = [
+                ("VAE", AutoencoderKL, "vae", model_dtypes.vae),
+                ("Text Encoder 1", CLIPTextModel, "text_encoder", model_dtypes.text_encoder),
+                ("Text Encoder 2", CLIPTextModelWithProjection, "text_encoder_2", model_dtypes.text_encoder_2),
+                ("UNet", UNet2DConditionModel, "unet", model_dtypes.unet)
+            ]
 
-            # 2. Load VAE with error tracking
-            logger.info("Loading VAE...")
-            try:
-                self.vae = AutoencoderKL.from_pretrained(
-                    pretrained_model_name,
-                    subfolder="vae",
-                    torch_dtype=model_dtypes.vae.to_torch_dtype(),
-                    use_safetensors=use_safetensors
-                )
-            except Exception as e:
-                raise RuntimeError(f"Failed to load VAE: {str(e)}") from e
+            for name, cls, subfolder, dtype in components_to_load:
+                try:
+                    logger.info(f"Loading {name}...")
+                    setattr(self, name.lower().replace(" ", "_"), cls.from_pretrained(
+                        pretrained_model_name,
+                        subfolder=subfolder,
+                        torch_dtype=dtype.to_torch_dtype(),
+                        use_safetensors=use_safetensors
+                    ))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load {name}: {str(e)}") from e
 
-            # 3. Load text encoders with error tracking
-            logger.info("Loading text encoder 1...")
-            try:
-                self.text_encoder_1 = CLIPTextModel.from_pretrained(
-                    pretrained_model_name,
-                    subfolder="text_encoder",
-                    torch_dtype=model_dtypes.text_encoder.to_torch_dtype(),
-                    use_safetensors=use_safetensors
-                )
-            except Exception as e:
-                raise RuntimeError(f"Failed to load text encoder 1: {str(e)}") from e
-
-            logger.info("Loading text encoder 2...")
-            try:
-                self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(
-                    pretrained_model_name,
-                    subfolder="text_encoder_2",
-                    torch_dtype=model_dtypes.text_encoder_2.to_torch_dtype(),
-                    use_safetensors=use_safetensors
-                )
-            except Exception as e:
-                raise RuntimeError(f"Failed to load text encoder 2: {str(e)}") from e
-
-            # 4. Load UNet with error tracking
-            logger.info("Loading UNet...")
-            try:
-                self.unet = UNet2DConditionModel.from_pretrained(
-                    pretrained_model_name,
-                    subfolder="unet",
-                    torch_dtype=model_dtypes.unet.to_torch_dtype(),
-                    use_safetensors=use_safetensors
-                )
-            except Exception as e:
-                raise RuntimeError(f"Failed to load UNet: {str(e)}") from e
-
-            # 5. Load tokenizers
-            logger.info("Loading tokenizer 1...")
+            # 3. Load tokenizers
+            logger.info("Loading tokenizers...")
             self.tokenizer_1 = CLIPTokenizer.from_pretrained(
                 pretrained_model_name,
                 subfolder="tokenizer"
             )
-            logger.info("Loading tokenizer 2...")
             self.tokenizer_2 = CLIPTokenizer.from_pretrained(
                 pretrained_model_name,
                 subfolder="tokenizer_2"
             )
 
-            # 6. Load scheduler
+            # 4. Load scheduler
             logger.info("Loading noise scheduler...")
             self.noise_scheduler = DDPMScheduler.from_pretrained(
                 pretrained_model_name,
                 subfolder="scheduler"
             )
 
-            # Initialize encoders using dedicated implementations
+            # 5. Validate all components are loaded
+            required_components = [
+                'vae', 'text_encoder_1', 'text_encoder_2', 
+                'tokenizer_1', 'tokenizer_2', 'unet', 'noise_scheduler'
+            ]
+            
+            missing = [comp for comp in required_components if getattr(self, comp, None) is None]
+            if missing:
+                raise RuntimeError(f"Missing required components: {', '.join(missing)}")
+
+            # 6. Initialize encoders only after all components are loaded
+            logger.info("Initializing encoders...")
             self._initialize_encoders()
 
-            # Initialize encoders AFTER all components are loaded
-            try:
-                self._initialize_encoders()
-            except Exception as e:
-                raise RuntimeError(f"Failed to initialize encoders: {str(e)}") from e
-
-            if not self.clip_encoder_1 or not self.clip_encoder_2 or not self.vae_encoder:
-                raise RuntimeError("Encoders were not properly initialized")
+            # 7. Validate encoders
+            if not all([self.clip_encoder_1, self.clip_encoder_2, self.vae_encoder]):
+                raise RuntimeError("Failed to initialize one or more encoders")
 
             logger.info("Successfully loaded all model components and initialized encoders.")
 
         except Exception as e:
             error_context = {
                 'error': str(e),
-                'component': 'unknown'
+                'model_name': pretrained_model_name,
+                'components_loaded': {
+                    'vae': self.vae is not None,
+                    'text_encoder_1': self.text_encoder_1 is not None,
+                    'text_encoder_2': self.text_encoder_2 is not None,
+                    'unet': self.unet is not None,
+                    'tokenizer_1': self.tokenizer_1 is not None,
+                    'tokenizer_2': self.tokenizer_2 is not None,
+                    'noise_scheduler': self.noise_scheduler is not None
+                }
             }
-            if self.vae is None:
-                error_context['component'] = 'vae'
-            elif self.text_encoder_1 is None:
-                error_context['component'] = 'text_encoder_1'
-            elif self.text_encoder_2 is None:
-                error_context['component'] = 'text_encoder_2'
-            elif self.unet is None:
-                error_context['component'] = 'unet'
-            elif self.tokenizer_1 is None:
-                error_context['component'] = 'tokenizer_1'
-            elif self.tokenizer_2 is None:
-                error_context['component'] = 'tokenizer_2'
-            elif self.noise_scheduler is None:
-                error_context['component'] = 'noise_scheduler'
-
-            error_msg = f"Failed to load {error_context['component']}: {str(e)}"
-            logger.error(error_msg, extra=error_context)
-            raise ValueError(error_msg) from e
+            logger.error("Failed to load model components", extra=error_context)
+            raise RuntimeError(f"Failed to load models: {str(e)}") from e
 
     def _initialize_encoders(self):
         """Initialize optimized encoder wrappers using imported implementations."""
