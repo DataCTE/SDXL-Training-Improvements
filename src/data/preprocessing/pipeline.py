@@ -328,14 +328,6 @@ class PreprocessingPipeline:
         cached_image_files = set(p.stem for p in image_latents_dir.glob("*.pt"))
         cached_text_files = set(p.stem for p in text_embeddings_dir.glob("*.pt"))
         
-        # Load and verify current cache index
-        try:
-            old_index = self.cache_manager._load_cache_index()  # Load existing index for reference
-            logger.info(f"Found existing cache index with {len(old_index.get('files', {}))} entries")
-        except Exception as e:
-            logger.warning(f"Could not load existing cache index: {e}")
-            old_index = {"files": {}, "chunks": {}}
-        
         # Build new index from actual files
         new_index = {"files": {}, "chunks": {}}
         
@@ -356,9 +348,8 @@ class PreprocessingPipeline:
             if file_info:
                 new_index["files"][str(img_path)] = file_info
         
-        # Save rebuilt index
+        # Save initial index
         self.cache_manager._save_cache_index(new_index)
-        logger.info("Cache index rebuilt successfully")
         
         # First pass: Process image latents if requested
         if process_latents:
@@ -370,6 +361,11 @@ class PreprocessingPipeline:
 
             if missing_latents:
                 logger.info(f"Processing {len(missing_latents)} missing image latents out of {len(image_paths)} total")
+                
+                # Track when to save cache index
+                save_interval = max(100, len(missing_latents) // 20)  # Save every 5% or 100 items
+                last_save = 0
+                
                 with tqdm(total=len(missing_latents), desc="Processing image latents") as pbar:
                     for i in range(0, len(missing_latents), batch_size):
                         batch_paths = missing_latents[i:i+batch_size]
@@ -394,12 +390,23 @@ class PreprocessingPipeline:
                                     
                             except Exception as e:
                                 self.stats.failed += 1
-                                logger.error(f"Failed to process image {img_path}: {e}", exc_info=True)
+                                # Only log serious errors, not validation failures
+                                if not isinstance(e, ValueError):
+                                    logger.error(f"Failed to process image {img_path}: {e}", exc_info=True)
                             finally:
                                 pbar.update(1)
                         
+                        # Save cache index periodically instead of every iteration
+                        if i - last_save >= save_interval:
+                            self.cache_manager._save_cache_index()
+                            last_save = i
+                        
                         if torch.cuda.is_available() and i % 100 == 0:
                             torch.cuda.empty_cache()
+                            
+                # Final save after processing
+                self.cache_manager._save_cache_index()
+                logger.info(f"Completed processing {len(missing_latents)} images")
             else:
                 logger.info("All image latents already cached")
 
