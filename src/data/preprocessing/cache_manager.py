@@ -217,8 +217,9 @@ class CacheManager(TensorValidator):
             if image_latent is not None:
                 image_latent = self._process_latents(image_latent, "image")
                 latent_path = self.image_latents_dir / f"{base_name}.pt"
-                # Format compatible with dataset._process_cached_item
-                torch.save({
+                
+                # Structure the latent data properly
+                latent_data = {
                     "latent": {
                         "model_input": image_latent.get("image_latent", image_latent),
                         "latent": image_latent
@@ -227,9 +228,11 @@ class CacheManager(TensorValidator):
                         "original_size": metadata.get("original_size", (1024, 1024)),
                         "crop_top_left": metadata.get("crop_top_left", (0, 0)),
                         "target_size": metadata.get("target_size", (1024, 1024)),
-                        **metadata
+                        **{k: v for k, v in metadata.items() if k not in ["original_size", "crop_top_left", "target_size"]}
                     }
-                }, latent_path)
+                }
+                
+                torch.save(latent_data, latent_path)
                 cache_entry["image_latent_path"] = str(latent_path)
 
             if text_latent is not None:

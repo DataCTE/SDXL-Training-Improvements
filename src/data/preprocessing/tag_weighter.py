@@ -233,7 +233,7 @@ class TagWeighter:
         return stats
 
     def save_to_index(self, output_path: Path, image_tags: Dict[str, Dict[str, any]]) -> None:
-        """Save tag weights and statistics to a JSON index file."""
+        """Save tag weights and statistics to a JSON index file with proper structure."""
         index_data = {
             "metadata": {
                 "total_samples": self.total_samples,
@@ -244,34 +244,48 @@ class TagWeighter:
                 "tag_types": self.tag_types
             },
             "statistics": {
-                "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
-                "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
+                "tag_counts": {
+                    tag_type: dict(counts) 
+                    for tag_type, counts in self.tag_counts.items()
+                },
+                "tag_weights": {
+                    tag_type: dict(weights)
+                    for tag_type, weights in self.tag_weights.items()
+                },
                 "type_statistics": self.get_tag_statistics()
             },
-            "images": {}
-        }
-        
-        # Process each image's tags and weights
-        for image_path, image_data in image_tags.items():
-            caption = image_data["caption"]
-            weight_details = image_data["weight_details"]
-            
-            index_data["images"][image_path] = {
-                "caption": caption,
-                "total_weight": weight_details["total_weight"],
-                "tags": {
-                    tag_type: [
-                        {
-                            "tag": tag_info["tag"],
-                            "weight": tag_info["weight"],
-                            "frequency": tag_info["frequency"]
-                        }
-                        for tag_info in tags_list
-                    ]
-                    for tag_type, tags_list in weight_details["tags"].items()
+            "images": {
+                str(image_path): {
+                    "caption": image_data["caption"],
+                    "total_weight": image_data["weight_details"]["total_weight"],
+                    "tags": {
+                        tag_type: [
+                            {
+                                "tag": tag_info["tag"],
+                                "weight": float(tag_info["weight"]),
+                                "frequency": float(tag_info["frequency"])
+                            }
+                            for tag_info in tags_list
+                        ]
+                        for tag_type, tags_list in image_data["weight_details"]["tags"].items()
+                    }
                 }
+                for image_path, image_data in image_tags.items()
             }
-        
+        }
+
+        # Ensure all numeric values are properly formatted
+        def clean_numeric(obj):
+            if isinstance(obj, (torch.Tensor, np.ndarray)):
+                return float(obj)
+            elif isinstance(obj, dict):
+                return {k: clean_numeric(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [clean_numeric(x) for x in obj]
+            return obj
+
+        index_data = clean_numeric(index_data)
+
         # Save with proper formatting
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(index_data, f, indent=2, ensure_ascii=False)
