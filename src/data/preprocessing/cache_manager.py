@@ -170,10 +170,11 @@ class CacheManager:
                 'num_allocations': 0,
                 'oom_events': 0
             }
-            # Setup directories
-            self.text_dir = self.cache_dir / "text"
-            self.image_dir = self.cache_dir / "image"
-            for directory in [self.text_dir, self.image_dir]:
+            # Setup separate directories for different types
+            self.text_captions_dir = self.cache_dir / "text_captions"
+            self.text_embeddings_dir = self.cache_dir / "text_embeddings" 
+            self.image_latents_dir = self.cache_dir / "image_latents"
+            for directory in [self.text_captions_dir, self.text_embeddings_dir, self.image_latents_dir]:
                 directory.mkdir(exist_ok=True)
                 
             self.index_path = self.cache_dir / "cache_index.json"
@@ -448,9 +449,10 @@ class CacheManager:
     def save_preprocessed_data(
         self,
         image_latent: Optional[Dict[str, torch.Tensor]],
-        text_embeddings: Optional[Dict[str, torch.Tensor]],
-        metadata: Dict,
-        file_path: Union[str, Path],
+        text_embeddings: Optional[Dict[str, torch.Tensor]], 
+        text_caption: Optional[str] = None,
+        metadata: Dict = None,
+        file_path: Union[str, Path] = None,
         caption: Optional[str] = None,
         silent: bool = True
     ) -> bool:
@@ -497,27 +499,29 @@ class CacheManager:
                     logger.error(f"Failed to save {key} data: {e}")
                     return None
 
-            # Parallel saving of latent and text data
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = []
+            # Save image latents
+            if image_latent is not None:
+                latent_path = self.image_latents_dir / f"{base_name}.pt"
+                torch.save({
+                    "latent": image_latent,
+                    "metadata": {**metadata, "type": "image_latent"}
+                }, latent_path)
                 
-                if image_latent is not None:
-                    latent_path = self.image_dir / f"{base_name}.pt"
-                    futures.append(
-                        executor.submit(save_tensor_file, 
-                            {"latent": image_latent, "metadata": metadata},
-                            latent_path, "latent"
-                        )
-                    )
-                    
-                if text_embeddings is not None:
-                    text_path = self.text_dir / f"{base_name}.pt"
-                    futures.append(
-                        executor.submit(save_tensor_file,
-                            {"embeddings": text_embeddings, "metadata": metadata},
-                            text_path, "text"
-                        )
-                    )
+            # Save text embeddings (CLIP encoded)
+            if text_embeddings is not None:
+                embedding_path = self.text_embeddings_dir / f"{base_name}.pt"
+                torch.save({
+                    "embeddings": text_embeddings,
+                    "metadata": {**metadata, "type": "text_embedding"}
+                }, embedding_path)
+                
+            # Save text caption (raw text)
+            if text_caption is not None:
+                caption_path = self.text_captions_dir / f"{base_name}.pt"
+                torch.save({
+                    "caption": text_caption,
+                    "metadata": {**metadata, "type": "text_caption"}
+                }, caption_path)
 
                 # Process results and update file info
                 for future, (data_type, path) in zip(futures, [
@@ -575,8 +579,11 @@ class CacheManager:
     def get_cached_item(
         self,
         file_path: Union[str, Path],
-        device: Optional[torch.device] = None
-    ) -> Optional[Dict[str, torch.Tensor]]:
+        device: Optional[torch.device] = None,
+        load_caption: bool = True,
+        load_embeddings: bool = True,
+        load_latents: bool = True
+    ) -> Optional[Dict[str, Any]]:
         """Get cached item with optimized memory and speed."""
         try:
             str_path = str(file_path)
