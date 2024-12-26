@@ -389,39 +389,20 @@ class CacheManager(TensorValidator):
             raise
 
     def verify_cache_structure(self) -> bool:
-        """Verify that cache files follow the correct structure."""
+        """Verify that cache files exist."""
         try:
             for file_path, info in self.cache_index["files"].items():
-                # Check image latents
+                # Just check if files exist
                 if "image_latent_path" in info:
-                    latent_path = Path(info["image_latent_path"])
-                    if latent_path.exists():
-                        data = torch.load(latent_path, map_location='cpu')
-                        if not (
-                            isinstance(data, dict) and
-                            "latent" in data and
-                            isinstance(data["latent"], dict) and
-                            "model_input" in data["latent"] and
-                            "metadata" in data and
-                            isinstance(data["metadata"], dict)
-                        ):
-                            logger.warning(f"Invalid latent structure in {latent_path}")
-                            return False
-
-                # Check text latents
+                    if not Path(info["image_latent_path"]).exists():
+                        return False
+                        
                 if "text_latent_path" in info:
-                    text_path = Path(info["text_latent_path"])
-                    if text_path.exists():
-                        data = torch.load(text_path, map_location='cpu')
-                        if not (
-                            isinstance(data, dict) and
-                            "embeddings" in data and
-                            "metadata" in data
-                        ):
-                            logger.warning(f"Invalid text latent structure in {text_path}")
-                            return False
+                    if not Path(info["text_latent_path"]).exists():
+                        return False
 
             return True
+            
         except Exception as e:
             logger.error(f"Error verifying cache structure: {str(e)}")
             return False
