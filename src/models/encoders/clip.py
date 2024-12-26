@@ -25,68 +25,68 @@ class CLIPEncoder:
         enable_model_cpu_offload: bool = False,
         debug: bool = False
     ):
-         """Initialize CLIP encoder with optimizations.
+        """Initialize CLIP encoder with optimizations.
 
-         Args:
-             text_encoder: CLIP text encoder model
-             tokenizer: CLIP tokenizer
-             device: Target device
-             dtype: Model dtype
-             enable_memory_efficient_attention: Whether to use memory efficient attention
-             enable_vae_slicing: Whether to enable VAE slicing
-             enable_model_cpu_offload: Whether to enable CPU offloading
-             debug: Enable debug logging
-         """
-         self.text_encoder = text_encoder
-         self.tokenizer = tokenizer
-         self.device = torch.device(device)
-         self.dtype = dtype
-         self.debug = debug
+        Args:
+            text_encoder: CLIP text encoder model
+            tokenizer: CLIP tokenizer
+            device: Target device
+            dtype: Model dtype
+            enable_memory_efficient_attention: Whether to use memory efficient attention
+            enable_vae_slicing: Whether to enable VAE slicing
+            enable_model_cpu_offload: Whether to enable CPU offloading
+            debug: Enable debug logging
+        """
+        self.text_encoder = text_encoder
+        self.tokenizer = tokenizer
+        self.device = torch.device(device)
+        self.dtype = dtype
+        self.debug = debug
 
-         # Memory tracking
-         self.memory_stats = {
-             'peak_allocated': 0,
-             'current_allocated': 0,
-             'num_allocations': 0
-         }
+        # Memory tracking
+        self.memory_stats = {
+            'peak_allocated': 0,
+            'current_allocated': 0,
+            'num_allocations': 0
+        }
 
-         # Store configuration
-         self.enable_memory_efficient_attention = enable_memory_efficient_attention
-         self.enable_vae_slicing = enable_vae_slicing
-         self.enable_model_cpu_offload = enable_model_cpu_offload
+        # Store configuration
+        self.enable_memory_efficient_attention = enable_memory_efficient_attention
+        self.enable_vae_slicing = enable_vae_slicing
+        self.enable_model_cpu_offload = enable_model_cpu_offload
 
-         # Apply optimizations
-         self.text_encoder.to(device=self.device, dtype=self.dtype)
+        # Apply optimizations
+        self.text_encoder.to(device=self.device, dtype=self.dtype)
 
-         # Enable memory efficient attention if requested
-         if enable_memory_efficient_attention and hasattr(self.text_encoder, "set_attention_slice"):
-             self.text_encoder.set_attention_slice(True)
+        # Enable memory efficient attention if requested
+        if enable_memory_efficient_attention and hasattr(self.text_encoder, "set_attention_slice"):
+            self.text_encoder.set_attention_slice(True)
 
-         # Apply torch compile optimization for CUDA devices
-         if hasattr(torch, "compile") and self.device.type == "cuda":
-             self.text_encoder = torch.compile(
-                 self.text_encoder,
-                 mode="reduce-reduce-overhead",
-                 fullgraph=False
-             )
+        # Apply torch compile optimization for CUDA devices
+        if hasattr(torch, "compile") and self.device.type == "cuda":
+            self.text_encoder = torch.compile(
+                self.text_encoder,
+                mode="reduce-reduce-overhead",
+                fullgraph=False
+            )
 
-         if self.debug:
-             logger.setLevel("DEBUG")
-             logger.debug("CLIP encoder debug logging enabled")
+        if self.debug:
+            logger.setLevel("DEBUG")
+            logger.debug("CLIP encoder debug logging enabled")
 
-         logger.info("CLIP encoder initialized", extra={
-             'device': str(self.device),
-             'dtype': str(self.dtype),
-             'model_type': type(self.text_encoder).__name__,
-             'optimizations': {
-                 'memory_efficient_attention': enable_memory_efficient_attention,
-                 'vae_slicing': enable_vae_slicing,
-                 'model_cpu_offload': enable_model_cpu_offload,
-                 'torch_compile': hasattr(torch, "compile")
-             }
-         })
+        logger.info("CLIP encoder initialized", extra={
+            'device': str(self.device),
+            'dtype': str(self.dtype),
+            'model_type': type(self.text_encoder).__name__,
+            'optimizations': {
+                'memory_efficient_attention': enable_memory_efficient_attention,
+                'vae_slicing': enable_vae_slicing,
+                'model_cpu_offload': enable_model_cpu_offload,
+                'torch_compile': hasattr(torch, "compile")
+            }
+        })
 
-     def process_embeddings(
+    def process_embeddings(
          self,
          prompt: str,
          additional_embeddings: Optional[List[BaseModelEmbedding]] = None,
