@@ -372,8 +372,8 @@ class AspectBucketDataset(Dataset):
                 logger.error(f"Latent data type: {type(latent_data)}")
                 if isinstance(latent_data, dict):
                     logger.error(f"Latent data keys: {latent_data.keys()}")
-                    if 'latent_dist_data' in locals() and isinstance(latent_dist_data, dict):
-                        logger.error(f"Latent dist data keys: {latent_dist_data.keys()}")
+                    if "latent_dist" in latent_data:
+                        logger.error(f"Latent dist keys: {latent_data['latent_dist'].keys()}")
             if 'latent_tensor' in locals() and latent_tensor is not None:
                 logger.error(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
             raise
