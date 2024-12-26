@@ -106,7 +106,8 @@ class TagWeighter:
             for tag, count in type_counts.items():
                 frequency = count / self.total_samples
                 weight = 1.0 / (frequency + self.smoothing_factor)
-                weight = np.clip(weight, self.min_weight, self.max_weight)
+                # Explicitly clamp between min_weight and max_weight
+                weight = min(max(weight, self.min_weight), self.max_weight)
                 self.tag_weights[tag_type][tag] = float(weight)
 
     def get_caption_weight(self, caption: str) -> float:
