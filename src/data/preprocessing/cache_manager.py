@@ -116,34 +116,14 @@ class CacheManager(TensorValidator):
                 with open(self.index_path) as f:
                     self.cache_index = json.load(f)
                     
-                # Validate and repair index structure if needed
-                if "files" not in self.cache_index:
-                    self.cache_index["files"] = {}
-                if "metadata" not in self.cache_index:
-                    self.cache_index["metadata"] = {
-                        "created_at": time.time(),
-                        "last_updated": time.time(),
-                        "version": "1.0"
-                    }
+                # Check if index is empty or invalid
+                if not self.cache_index.get("files"):
+                    logger.info("Empty or invalid cache index found - rebuilding from scan")
+                    self.scan_and_rebuild_index()
             else:
-                # Initialize new index with metadata
-                self.cache_index = {
-                    "metadata": {
-                        "created_at": time.time(),
-                        "last_updated": time.time(),
-                        "version": "1.0",
-                        "cache_dir": str(self.cache_dir),
-                        "image_latents_dir": str(self.image_latents_dir),
-                        "text_latents_dir": str(self.text_latents_dir)
-                    },
-                    "files": {},
-                    "statistics": {
-                        "total_files": 0,
-                        "total_image_latents": 0,
-                        "total_text_latents": 0
-                    }
-                }
-                self._save_index()
+                # Initialize new index and scan directories
+                logger.info("No cache index found - creating new one from directory scan") 
+                self.scan_and_rebuild_index()
                 
         except Exception as e:
             logger.error(f"Failed to load cache index: {e}")
@@ -332,6 +312,82 @@ class CacheManager(TensorValidator):
                 torch.cuda.empty_cache()
         except Exception as e:
             logger.error(f"Error in cleanup: {str(e)}")
+    def scan_and_rebuild_index(self) -> None:
+        """Scan cache directories and rebuild index with actual files."""
+        try:
+            # Initialize new index structure
+            new_index = {
+                "metadata": {
+                    "created_at": time.time(),
+                    "last_updated": time.time(),
+                    "version": "1.0",
+                    "cache_dir": str(self.cache_dir),
+                    "image_latents_dir": str(self.image_latents_dir),
+                    "text_latents_dir": str(self.text_latents_dir)
+                },
+                "files": {},
+                "statistics": {
+                    "total_files": 0,
+                    "total_image_latents": 0,
+                    "total_text_latents": 0
+                }
+            }
+
+            # Scan image latents directory
+            for latent_path in self.image_latents_dir.glob("*.pt"):
+                try:
+                    data = torch.load(latent_path, map_location='cpu')
+                    if isinstance(data, dict) and "latent" in data and "metadata" in data:
+                        base_name = latent_path.stem
+                        file_path = data["metadata"].get("path", str(latent_path))
+                        
+                        if file_path not in new_index["files"]:
+                            new_index["files"][file_path] = {
+                                "base_name": base_name,
+                                "timestamp": data["metadata"].get("timestamp", time.time())
+                            }
+                        
+                        new_index["files"][file_path]["image_latent_path"] = str(latent_path)
+                        new_index["statistics"]["total_image_latents"] += 1
+                except Exception as e:
+                    logger.warning(f"Failed to process image latent {latent_path}: {e}")
+
+            # Scan text latents directory
+            for text_path in self.text_latents_dir.glob("*.pt"):
+                try:
+                    data = torch.load(text_path, map_location='cpu')
+                    if isinstance(data, dict) and "embeddings" in data and "metadata" in data:
+                        base_name = text_path.stem
+                        file_path = data["metadata"].get("image_path", str(text_path))
+                        
+                        if file_path not in new_index["files"]:
+                            new_index["files"][file_path] = {
+                                "base_name": base_name,
+                                "timestamp": data["metadata"].get("timestamp", time.time())
+                            }
+                        
+                        new_index["files"][file_path]["text_latent_path"] = str(text_path)
+                        new_index["statistics"]["total_text_latents"] += 1
+                except Exception as e:
+                    logger.warning(f"Failed to process text latent {text_path}: {e}")
+
+            # Update total files count
+            new_index["statistics"]["total_files"] = len(new_index["files"])
+
+            # Update cache index and save
+            self.cache_index = new_index
+            self._save_index()
+
+            logger.info(
+                f"Cache index rebuilt with {new_index['statistics']['total_files']} files "
+                f"({new_index['statistics']['total_image_latents']} image latents, "
+                f"{new_index['statistics']['total_text_latents']} text latents)"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to rebuild cache index: {e}")
+            raise
+
     def verify_cache_structure(self) -> bool:
         """Verify that cache files follow the correct structure."""
         try:
