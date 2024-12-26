@@ -398,8 +398,9 @@ class AspectBucketDataset(Dataset):
             }
 
             # Load text data from consolidated location
-            if "text_path" in file_info:
-                text_data = torch.load(Path(file_info["text_path"]), map_location='cpu')
+            cached_file_info = cached_data.get("metadata", {})
+            if "text_path" in cached_file_info:
+                text_data = torch.load(Path(cached_file_info["text_path"]), map_location='cpu')
                 if "embeddings" in text_data:
                     embeddings = text_data["embeddings"]
                     # Validate text embeddings
