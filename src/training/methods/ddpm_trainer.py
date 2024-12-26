@@ -65,18 +65,11 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
-            # Extract latents - handle both direct latents and VAE output formats
-            if "model_input" in batch:
-                latents = batch["model_input"]
-            elif "latent_dist" in batch:
-                # Handle VAE output format
-                latents = batch["latent_dist"].sample()
-            else:
-                raise ValueError("No latent data found in batch")
-                
+            # Direct access since data is already validated
+            latents = batch["model_input"]
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-            
+
             # Get noise and timesteps
             noise = torch.randn(
                 latents.shape,
@@ -90,10 +83,10 @@ class DDPMTrainer(TrainingMethod):
                 (latents.shape[0],),
                 device=latents.device
             )
-            
+
             # Add noise to latents
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-            
+
             # Get time embeddings
             add_time_ids = get_add_time_ids(
                 batch["original_sizes"],
@@ -126,10 +119,10 @@ class DDPMTrainer(TrainingMethod):
             if "loss_weights" in batch:
                 loss = loss * batch["loss_weights"]
             loss = loss.mean()
-            
+
             torch_sync()
             return {"loss": loss}
-            
+
         except Exception as e:
             logger.error(f"Error computing DDPM loss: {str(e)}", exc_info=True)
             torch_sync()
