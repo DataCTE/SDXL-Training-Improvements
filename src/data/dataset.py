@@ -293,10 +293,16 @@ class AspectBucketDataset(Dataset):
             if latent_data is None:
                 raise ValueError(f"No latent data found in cache for {image_path}")
                 
-            # Handle both tensor and dictionary formats
+            # Handle nested dictionary formats
             if isinstance(latent_data, dict):
                 if "sample" in latent_data:
                     latent_tensor = latent_data["sample"]
+                elif "latent_dist" in latent_data:
+                    latent_dist_data = latent_data["latent_dist"]
+                    if isinstance(latent_dist_data, dict) and "sample" in latent_dist_data:
+                        latent_tensor = latent_dist_data["sample"]
+                    else:
+                        raise ValueError(f"Invalid latent_dist format for {image_path}")
                 else:
                     raise ValueError(f"Invalid latent data format for {image_path}")
             elif isinstance(latent_data, torch.Tensor):
@@ -357,6 +363,8 @@ class AspectBucketDataset(Dataset):
                 logger.error(f"Latent data type: {type(latent_data)}")
                 if isinstance(latent_data, dict):
                     logger.error(f"Latent data keys: {latent_data.keys()}")
+                    if 'latent_dist_data' in locals() and isinstance(latent_dist_data, dict):
+                        logger.error(f"Latent dist data keys: {latent_dist_data.keys()}")
             if 'latent_tensor' in locals() and latent_tensor is not None:
                 logger.error(f"Latent tensor shape: {latent_tensor.shape}, dtype: {latent_tensor.dtype}")
             raise
