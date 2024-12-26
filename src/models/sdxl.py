@@ -660,12 +660,12 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
 
             # Tokenize if needed
             if tokens_1 is None and text is not None:
-            tokens_1 = self.tokenizer_1(
-                text,
-                padding='max_length',
-                truncation=True,
-                max_length=self.tokenizer_1.model_max_length,
-                return_tensors="pt"
+                tokens_1 = self.tokenizer_1(
+                    text,
+                    padding='max_length',
+                    truncation=True,
+                    max_length=self.tokenizer_1.model_max_length,
+                    return_tensors="pt"
             ).input_ids.to(self.text_encoder_1.device)
 
         if tokens_2 is None and text is not None:

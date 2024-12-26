@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.backends.cudnn
 from torch import Tensor
+from .encoders.embedding import TextEmbeddingProcessor
 
 # Force maximum speed
 torch.backends.cudnn.benchmark = True
