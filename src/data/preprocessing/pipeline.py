@@ -384,7 +384,7 @@ class PreprocessingPipeline:
                                     
                                     self.cache_manager.save_preprocessed_data(
                                         image_latent=processed["image_latent"],
-                                        text_embeddings=None,
+                                        text_latent=None,
                                         metadata=metadata,
                                         file_path=img_path
                                     )
