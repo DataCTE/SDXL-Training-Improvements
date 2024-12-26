@@ -176,68 +176,33 @@ class LatentPreprocessor:
             Dictionary containing encoded latents
         """
         try:
-            # 1. Input validation and normalization
-            if not isinstance(pixel_values, torch.Tensor):
-                raise ValueError("Input must be a tensor")
+            # Use the VAE encoder's encode method directly
+            encoded_output = self.vae_encoder.encode(
+                pixel_values=pixel_values,
+                num_images_per_prompt=1,
+                output_hidden_states=False
+            )
+            
+            # Extract latents from the output
+            latents = encoded_output.get("latent_dist")
+            if latents is None:
+                raise ValueError("VAE encoder did not return latent distribution")
                 
-            # Ensure input is in [0, 1] range
-            if pixel_values.min() < -0.1 or pixel_values.max() > 1.1:
-                logger.warning(
-                    f"Input tensor out of range: min={pixel_values.min().item():.3f}, "
-                    f"max={pixel_values.max().item():.3f}"
-                )
-                pixel_values = torch.clamp(pixel_values, 0, 1)
-
-            # Convert to [-1, 1] range
-            pixel_values = 2 * pixel_values - 1
-                
-            # 2. Proper dtype handling
-            dtype = next(self.vae_encoder.vae.parameters()).dtype
-            pixel_values = pixel_values.to(device=self.device, dtype=dtype)
-                
-            # 3. Process with error handling
-            with torch.no_grad(), torch.cuda.amp.autocast(enabled=self.device.type == "cuda"):
-                # Get latent distribution
-                vae_output = self.vae_encoder.vae.encode(pixel_values)
-                    
-                if hasattr(vae_output, 'latent_dist'):
-                    # Sample from distribution with scaling
-                    latents = vae_output.latent_dist.sample() * 0.18215
-                else:
-                    latents = vae_output.sample() * 0.18215
-                        
-                # 4. Validate outputs
-                if torch.isnan(latents).any():
-                    # Try to recover from NaNs
-                    logger.warning("NaN values detected in latents, attempting recovery...")
-                    latents = torch.nan_to_num(latents, nan=0.0)
-                    latents = torch.clamp(latents, -1e6, 1e6)
-                    
-                    # Check if recovery worked
-                    if torch.isnan(latents).any():
-                        nan_count = torch.isnan(latents).sum().item()
-                        nan_indices = torch.where(torch.isnan(latents))
-                        raise ValueError(
-                            f"VAE produced {nan_count} NaN values in latents. "
-                            f"First NaN at index: {[idx[0].item() for idx in nan_indices]}"
-                        )
-                        
-                if torch.isinf(latents).any():
-                    latents = torch.clamp(latents, -1e6, 1e6)
-
-                # Log successful encoding
-                logger.debug("VAE encoding complete", extra={
-                    'output_shape': tuple(latents.shape),
-                    'output_dtype': str(latents.dtype),
-                    'output_stats': {
-                        'min': latents.min().item(),
-                        'max': latents.max().item(),
-                        'mean': latents.mean().item(),
-                        'std': latents.std().item()
+            # Return in expected format for cache manager
+            return {
+                "image_latent": latents,
+                "metadata": {
+                    "shape": tuple(latents.shape),
+                    "dtype": str(latents.dtype),
+                    "device": str(latents.device),
+                    "stats": {
+                        "min": latents.min().item(),
+                        "max": latents.max().item(),
+                        "mean": latents.mean().item(),
+                        "std": latents.std().item()
                     }
-                })
-                    
-                return {"image_latent": latents}
+                }
+            }
 
         except Exception as e:
             logger.error("VAE encoding failed", extra={
