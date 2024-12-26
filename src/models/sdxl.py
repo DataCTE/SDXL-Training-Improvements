@@ -19,8 +19,7 @@ torch.set_float32_matmul_precision('medium')
 
 from contextlib import nullcontext
 from random import Random
-from typing import Dict, List, Optional, Tuple, Union
-
+from typing import Dict, List, Optional, Tuple, Union, Any, Iterator
 import gc
 from src.core.memory.tensor import (
     tensors_to_device_,
@@ -153,9 +152,9 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         self.enable_sequential_cpu_offload = enable_sequential_cpu_offload
 
         # Initialize optimized encoder wrappers
-        self.clip_encoder_1 = None
-        self.clip_encoder_2 = None
-        self.vae_encoder = None
+        self.clip_encoder_1: Optional[CLIPEncoder] = None
+        self.clip_encoder_2: Optional[CLIPEncoder] = None 
+        self.vae_encoder: Optional[VAEEncoder] = None
 
         # Initialize memory tracking
         self.memory_stats = {
@@ -278,22 +277,43 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 subfolder="scheduler"
             )
 
-            # After loading text encoders and tokenizers, initialize CLIP encoders
+            # Initialize encoders using dedicated implementations
+            self._initialize_encoders()
+
+            logger.info("Successfully loaded all model components.")
+
+    def _initialize_encoders(self):
+        """Initialize optimized encoder wrappers using imported implementations."""
+        try:
+            # Initialize VAE encoder using imported VAEEncoder
+            self.vae_encoder = VAEEncoder(
+                vae=self.vae,
+                device=self.device,
+                dtype=next(self.vae.parameters()).dtype
+            )
+
+            # Initialize CLIP encoders using imported CLIPEncoder
             self.clip_encoder_1 = CLIPEncoder(
                 text_encoder=self.text_encoder_1,
                 tokenizer=self.tokenizer_1,
-                device=self.text_encoder_1.device,
-                dtype=model_dtypes.text_encoder.to_torch_dtype()
+                device=self.device,
+                dtype=next(self.text_encoder_1.parameters()).dtype,
+                enable_memory_efficient_attention=self.enable_memory_efficient_attention
             )
             
             self.clip_encoder_2 = CLIPEncoder(
                 text_encoder=self.text_encoder_2,
                 tokenizer=self.tokenizer_2,
-                device=self.text_encoder_2.device,
-                dtype=model_dtypes.text_encoder_2.to_torch_dtype()
+                device=self.device,
+                dtype=next(self.text_encoder_2.parameters()).dtype,
+                enable_memory_efficient_attention=self.enable_memory_efficient_attention
             )
 
-            logger.info("Successfully loaded all model components.")
+        except Exception as e:
+            raise ModelError("Failed to initialize encoders", {
+                'error': str(e),
+                'device': str(self.device)
+            })
 
         except Exception as e:
             error_context = {
