@@ -227,27 +227,19 @@ class AspectBucketDataset(Dataset):
         caption: str,
         bucket_idx: int
     ) -> Dict[str, Any]:
-        """Process a cached item with validation."""
+        """Process a cached item without tensor validation."""
         try:
-            # Get latent data with proper structure
+            # Get latent data directly
             latent_data = cached_data.get("latent")
             if latent_data is None:
                 raise ValueError("No latent data in cache")
 
-            # The latent data is already a tensor in this case
-            latent_tensor = latent_data if isinstance(latent_data, torch.Tensor) else latent_data.get("model_input")
-            if latent_tensor is None:
-                raise ValueError("No valid model input tensor found")
-
-            # Clean tensor
-            latent_tensor = self._validate_and_clean_tensor(latent_tensor, image_path)
-
-            # Get metadata from proper structure
+            # Get metadata
             metadata = cached_data.get("metadata", {})
 
             # Build result dictionary
             result = {
-                "model_input": latent_tensor,
+                "model_input": latent_data,
                 "text": caption,
                 "bucket_idx": bucket_idx,
                 "image_path": image_path,
@@ -258,54 +250,18 @@ class AspectBucketDataset(Dataset):
 
             # Add text embeddings if available
             text_latent = cached_data.get("text_latent", {})
-            if isinstance(text_latent, dict) and "embeddings" in text_latent:
+            if "embeddings" in text_latent:
                 embeddings = text_latent["embeddings"]
                 for key in ["prompt_embeds", "pooled_prompt_embeds", 
                            "prompt_embeds_2", "pooled_prompt_embeds_2"]:
                     if key in embeddings:
-                        embedding_tensor = embeddings[key]
-                        if isinstance(embedding_tensor, torch.Tensor):
-                            result[key] = self._validate_and_clean_tensor(
-                                embedding_tensor, image_path
-                            )
+                        result[key] = embeddings[key]
 
             return result
 
         except Exception as e:
             raise ProcessingError(f"Failed to process cached item: {str(e)}")
 
-    def _validate_and_clean_tensor(self, tensor: torch.Tensor, image_path: str) -> torch.Tensor:
-        """Validate and clean a tensor, handling NaN and infinite values."""
-        if tensor is None:
-            raise ValueError(f"Tensor is None for {image_path}")
-            
-        # Check for NaN values
-        nan_mask = torch.isnan(tensor)
-        if nan_mask.any():
-            # Count NaN values
-            nan_count = nan_mask.sum().item()
-            total_elements = tensor.numel()
-            nan_percentage = (nan_count / total_elements) * 100
-            
-            # If too many NaNs, raise error
-            if nan_percentage > 10:  # More than 10% NaNs
-                raise ValueError(
-                    f"Too many NaN values ({nan_percentage:.2f}%) in tensor for {image_path}"
-                )
-                
-            # Replace NaNs with zeros
-            tensor = torch.nan_to_num(tensor, nan=0.0)
-            
-        # Check for infinite values
-        inf_mask = torch.isinf(tensor)
-        if inf_mask.any():
-            tensor = torch.clamp(tensor, -1e6, 1e6)  # Clip to reasonable range
-            
-        # Ensure tensor is contiguous
-        if not tensor.is_contiguous():
-            tensor = tensor.contiguous()
-            
-        return tensor
 
     def _setup_image_config(self):
         """Set up image configuration parameters."""
