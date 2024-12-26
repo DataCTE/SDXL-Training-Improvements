@@ -172,8 +172,6 @@ class LatentPreprocessor:
         try:
             cache_dir = Path(convert_windows_path(
                 config.global_config.cache.cache_dir,
-                config.global_config.cache.cache_dir, 
-                make_absolute=True
             ))
             cache_dir.mkdir(parents=True, exist_ok=True)
             
