@@ -32,7 +32,7 @@ class VAEEncoder:
         })
             
     def encode(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Encode images to latent space with extreme optimization."""
+        """Encode images to latent space with validation and proper error handling."""
         try:
             if not isinstance(pixel_values, torch.Tensor):
                 raise ValueError("Invalid input tensor.")
@@ -42,17 +42,39 @@ class VAEEncoder:
                 'input_dtype': str(pixel_values.dtype),
                 'input_device': str(pixel_values.device)
             })
+
+            # Validate input tensor before encoding
+            if torch.isnan(pixel_values).any():
+                raise ValueError("Input tensor contains NaN values")
+            if torch.isinf(pixel_values).any():
+                raise ValueError("Input tensor contains infinite values")
+            if not (0 <= pixel_values.min() <= pixel_values.max() <= 1.0):
+                raise ValueError(f"Input tensor values out of range [0,1]: min={pixel_values.min()}, max={pixel_values.max()}")
                 
             # Move to device and cast to correct dtype
             pixel_values = pixel_values.to(device=self.device, dtype=self.dtype)
             
             # Use context managers inside try block
             with torch.inference_mode(), torch.amp.autocast(device_type=self.device.type):
+                # Encode with VAE
                 latents = self.vae.encode(pixel_values).latent_dist
                 latents = latents.sample() * self.vae.config.scaling_factor
+                
+                # Validate output latents
+                if torch.isnan(latents).any():
+                    raise ValueError("VAE produced NaN values in latents")
+                if torch.isinf(latents).any():
+                    raise ValueError("VAE produced infinite values in latents")
+
                 logger.debug("VAE encoding complete", extra={
                     'output_shape': tuple(latents.shape),
                     'output_dtype': str(latents.dtype),
+                    'output_stats': {
+                        'min': latents.min().item(),
+                        'max': latents.max().item(),
+                        'mean': latents.mean().item(),
+                        'std': latents.std().item()
+                    },
                     'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
                 })
                 
