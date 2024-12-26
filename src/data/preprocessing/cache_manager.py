@@ -313,10 +313,12 @@ class CacheManager:
         
         # Parallel file scanning using ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=self.num_proc) as executor:
-            latent_future = executor.submit(lambda: {p.stem for p in self.image_dir.glob("*.pt")})
-            text_future = executor.submit(lambda: {p.stem for p in self.text_dir.glob("*.pt")})
+            latent_future = executor.submit(lambda: {p.stem for p in self.image_latents_dir.glob("*.pt")})
+            text_future = executor.submit(lambda: {p.stem for p in self.text_embeddings_dir.glob("*.pt")})
+            caption_future = executor.submit(lambda: {p.stem for p in self.text_captions_dir.glob("*.pt")})
             latent_stems = latent_future.result()
             text_stems = text_future.result()
+            caption_stems = caption_future.result()
 
         # Fast lookup preparation
         index_stems = {Path(p).stem for p in self.cache_index.get("files", {})}
@@ -593,8 +595,8 @@ class CacheManager:
             file_info = self.cache_index["files"].get(str_path)
             if not file_info:
                 # Quick lookup using pre-computed paths
-                latent_path = self.image_dir / f"{base_name}.pt"
-                text_path = self.text_dir / f"{base_name}.pt"
+                latent_path = self.image_latents_dir / f"{base_name}.pt"
+                text_path = self.text_embeddings_dir / f"{base_name}.pt"
                 
                 if latent_path.exists() and text_path.exists():
                     file_info = {
@@ -755,12 +757,14 @@ class CacheManager:
             if not required_fields.issubset(file_info.keys()):
                 return False
             
-            # Batch existence check for both paths
+            # Batch existence check for all paths
             paths_to_check = []
             if "latent_path" in file_info:
                 paths_to_check.append(Path(file_info["latent_path"]))
             if "text_path" in file_info:
                 paths_to_check.append(Path(file_info["text_path"]))
+            if "caption_path" in file_info:
+                paths_to_check.append(Path(file_info["caption_path"]))
                 
             # Fast existence check using any()
             return all(path.exists() for path in paths_to_check)
@@ -1046,10 +1050,10 @@ class CacheManager:
                         return False
 
                 # Parallel directory removal
-                with ThreadPoolExecutor(max_workers=2) as executor:
+                with ThreadPoolExecutor(max_workers=3) as executor:
                     results = list(executor.map(
                         remove_directory,
-                        [self.text_dir, self.image_dir]
+                        [self.text_embeddings_dir, self.text_captions_dir, self.image_latents_dir]
                     ))
                     
                     if not all(results):
