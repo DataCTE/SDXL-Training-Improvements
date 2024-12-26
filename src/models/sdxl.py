@@ -666,15 +666,15 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                     truncation=True,
                     max_length=self.tokenizer_1.model_max_length,
                     return_tensors="pt"
-            ).input_ids.to(self.text_encoder_1.device)
+                ).input_ids.to(self.text_encoder_1.device)
 
-        if tokens_2 is None and text is not None:
-            tokens_2 = self.tokenizer_2(
-                text,
-                padding='max_length',
-                truncation=True,
-                max_length=self.tokenizer_2.model_max_length,
-                return_tensors="pt"
+            if tokens_2 is None and text is not None:
+                tokens_2 = self.tokenizer_2(
+                    text,
+                    padding='max_length',
+                    truncation=True,
+                    max_length=self.tokenizer_2.model_max_length,
+                    return_tensors="pt"
             ).input_ids.to(self.text_encoder_2.device)
 
         # Encode with first text encoder
