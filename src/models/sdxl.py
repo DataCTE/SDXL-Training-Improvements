@@ -596,8 +596,14 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
         if text_encoder_output is not None:
             return text_encoder_output, pooled_text_encoder_output
             
+        # Create attention mask if enabled
+        attention_mask = None
+        if use_attention_mask:
+            attention_mask = (tokens != self.tokenizer_1.pad_token_id).long()
+            
         outputs = text_encoder(
             tokens,
+            attention_mask=attention_mask,
             output_hidden_states=True,
             return_dict=True
         )
