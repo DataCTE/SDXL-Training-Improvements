@@ -54,8 +54,10 @@ class VAEEncoder:
 
              # Ensure input is in correct range [0, 1]
              if pixel_values.min() < -0.1 or pixel_values.max() > 1.1:
-                 logger.warning(f"Input tensor out of range: min={pixel_values.min().item():.3f},     
- max={pixel_values.max().item():.3f}")
+                 logger.warning(
+                     f"Input tensor out of range: min={pixel_values.min().item():.3f}, "
+                     f"max={pixel_values.max().item():.3f}"
+                 )
                  pixel_values = torch.clamp(pixel_values, 0, 1)
 
              # Normalize to [-1, 1] range expected by VAE
