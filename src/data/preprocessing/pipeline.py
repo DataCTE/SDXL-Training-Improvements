@@ -246,17 +246,23 @@ class PreprocessingPipeline:
         
         # Check total pixels first
         if total_pixels > max_pixels:
-            logger.debug(f"Image too large: {w}x{h} = {total_pixels} pixels > {max_pixels}")
+            logger.warning(
+                f"Image too large: {w}x{h} = {total_pixels:,} pixels exceeds maximum {max_pixels:,} pixels"
+            )
             return False
             
         # Check minimum dimensions
         if w < min_w or h < min_h:
-            logger.debug(f"Image too small: {w}x{h} < minimum {min_w}x{min_h}")
+            logger.warning(
+                f"Image too small: {w}x{h} is smaller than minimum dimensions {min_w}x{min_h}"
+            )
             return False
         
         # Check maximum dimensions
         if w > max_w or h > max_h:
-            logger.debug(f"Image too large: {w}x{h} > maximum {max_w}x{max_h}")
+            logger.warning(
+                f"Image too large: {w}x{h} exceeds maximum dimensions {max_w}x{max_h}"
+            )
             return False
                 
         # Check aspect ratio
@@ -265,7 +271,9 @@ class PreprocessingPipeline:
         min_aspect = 1.0 / max_aspect
         
         if aspect < min_aspect or aspect > max_aspect:
-            logger.debug(f"Invalid aspect ratio: {aspect:.2f} (allowed range: {min_aspect:.2f}-{max_aspect:.2f})")
+            logger.warning(
+                f"Invalid aspect ratio: {aspect:.2f} (allowed range: {min_aspect:.2f}-{max_aspect:.2f})"
+            )
             return False
                 
         return True
