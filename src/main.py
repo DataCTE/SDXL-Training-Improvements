@@ -29,7 +29,7 @@ from src.core.distributed import setup_distributed, cleanup_distributed, is_main
 from src.core.logging import setup_logging
 from src.core.logging.wandb import WandbLogger
 from src.core.types import DataType, ModelWeightDtypes
-from src.data.preprocessing import CacheManager, PreprocessingPipeline
+from src.data.preprocessing import CacheManager, PreprocessingPipeline, create_tag_weighter_with_index
 from src.data.utils.paths import convert_windows_path
 from src.core.memory.tensor import (
     tensors_to_device_,
