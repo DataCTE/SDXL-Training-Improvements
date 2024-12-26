@@ -339,31 +339,7 @@ class StableDiffusionXLModel(torch.nn.Module, BaseModel):
                 'device': str(self.device)
             })
 
-        except Exception as e:
-            error_context = {
-                'model_name': pretrained_model_name,
-                'dtype': str(dtype),
-                'error': str(e),
-                'component': 'unknown'
-            }
-            if self.vae is None:
-                error_context['component'] = 'vae'
-            elif self.text_encoder_1 is None:
-                error_context['component'] = 'text_encoder_1'
-            elif self.text_encoder_2 is None:
-                error_context['component'] = 'text_encoder_2'
-            elif self.unet is None:
-                error_context['component'] = 'unet'
-            elif self.tokenizer_1 is None:
-                error_context['component'] = 'tokenizer_1'
-            elif self.tokenizer_2 is None:
-                error_context['component'] = 'tokenizer_2'
-            elif self.noise_scheduler is None:
-                error_context['component'] = 'noise_scheduler'
-
-            error_msg = f"Failed to load {error_context['component']}: {str(e)}"
-            logger.error(error_msg, extra=error_context)
-            raise ValueError(error_msg) from e
+        
 
     def vae_to(self, device: torch.device) -> None:
         """
