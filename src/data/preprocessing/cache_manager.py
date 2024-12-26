@@ -170,11 +170,10 @@ class CacheManager:
                 'num_allocations': 0,
                 'oom_events': 0
             }
-            # Setup separate directories for different types
-            self.text_captions_dir = self.cache_dir / "text_captions"
-            self.text_embeddings_dir = self.cache_dir / "text_embeddings" 
+            # Setup cache directories
             self.image_latents_dir = self.cache_dir / "image_latents"
-            for directory in [self.text_captions_dir, self.text_embeddings_dir, self.image_latents_dir]:
+            self.text_latents_dir = self.cache_dir / "text_latents"  # Single directory for all text data
+            for directory in [self.image_latents_dir, self.text_latents_dir]:
                 directory.mkdir(exist_ok=True)
                 
             self.index_path = self.cache_dir / "cache_index.json"
@@ -326,11 +325,9 @@ class CacheManager:
         # Parallel file scanning using ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=self.num_proc) as executor:
             latent_future = executor.submit(lambda: {p.stem for p in self.image_latents_dir.glob("*.pt")})
-            text_future = executor.submit(lambda: {p.stem for p in self.text_embeddings_dir.glob("*.pt")})
-            caption_future = executor.submit(lambda: {p.stem for p in self.text_captions_dir.glob("*.pt")})
+            text_future = executor.submit(lambda: {p.stem for p in self.text_latents_dir.glob("*.pt")})
             latent_stems = latent_future.result()
             text_stems = text_future.result()
-            caption_stems = caption_future.result()
 
         # Fast lookup preparation
         index_stems = {Path(p).stem for p in self.cache_index.get("files", {})}
