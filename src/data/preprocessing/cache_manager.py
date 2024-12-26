@@ -388,11 +388,12 @@ class CacheManager:
         
         return list(missing_text), list(missing_latents)
 
-    def _save_cache_index(self, index_data: Optional[Dict] = None) -> None:
+    def _save_cache_index(self, index_data: Optional[Dict] = None, silent: bool = False) -> None:
         """Save the cache index while preserving existing entries.
         
         Args:
             index_data: Optional index data to merge with existing index
+            silent: If True, suppress logging messages
         """
         try:
             # Load existing index first
@@ -419,7 +420,8 @@ class CacheManager:
                 json.dump(existing_index, f, indent=2)
             temp_path.rename(self.index_path)
 
-            logger.info(f"Cache index saved with {len(existing_index['files'])} entries")
+            if not silent:
+                logger.info(f"Cache index saved with {len(existing_index['files'])} entries")
 
         except Exception as e:
             logger.error(f"Failed to save cache index: {str(e)}")
@@ -449,7 +451,8 @@ class CacheManager:
         text_embeddings: Optional[Dict[str, torch.Tensor]],
         metadata: Dict,
         file_path: Union[str, Path],
-        caption: Optional[str] = None
+        caption: Optional[str] = None,
+        silent: bool = True
     ) -> bool:
         """Save preprocessed data with proper index updates."""
         if image_latent is None and text_embeddings is None:
@@ -530,7 +533,7 @@ class CacheManager:
             # Batch update index
             if file_info.get("latent_path") or file_info.get("text_path"):
                 self.cache_index["files"][str_path] = file_info
-                self._save_cache_index()
+                self._save_cache_index(silent=silent)
                 return True
                 
             return False

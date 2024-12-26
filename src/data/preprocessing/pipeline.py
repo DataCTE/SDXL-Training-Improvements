@@ -398,14 +398,14 @@ class PreprocessingPipeline:
                         
                         # Save cache index periodically instead of every iteration
                         if i - last_save >= save_interval:
-                            self.cache_manager._save_cache_index()
+                            self.cache_manager._save_cache_index(silent=True)
                             last_save = i
                         
                         if torch.cuda.is_available() and i % 100 == 0:
                             torch.cuda.empty_cache()
                             
-                # Final save after processing
-                self.cache_manager._save_cache_index()
+                # Final save after processing - this one can show the message
+                self.cache_manager._save_cache_index(silent=False)
                 logger.info(f"Completed processing {len(missing_latents)} images")
             else:
                 logger.info("All image latents already cached")
