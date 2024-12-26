@@ -414,10 +414,24 @@ def create_dataset(
     image_paths: List[str],
     captions: List[str],
     preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
+    tag_weighter: Optional['TagWeighter'] = None,
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
 ) -> AspectBucketDataset:
-    """Create and initialize dataset instance."""
+    """Create and initialize dataset instance.
+    
+    Args:
+        config: Configuration object
+        image_paths: List of image file paths
+        captions: List of corresponding captions
+        preprocessing_pipeline: Optional preprocessing pipeline
+        tag_weighter: Optional tag weighting system
+        enable_memory_tracking: Whether to track memory usage
+        max_memory_usage: Maximum memory usage fraction
+        
+    Returns:
+        Initialized dataset instance
+    """
     if preprocessing_pipeline and torch.cuda.is_available():
         torch.cuda.set_device(0)
         logger.info(f"Using GPU device 0: {torch.cuda.get_device_name(0)}")
@@ -427,6 +441,7 @@ def create_dataset(
         image_paths=image_paths,
         captions=captions,
         preprocessing_pipeline=preprocessing_pipeline,
+        tag_weighter=tag_weighter,
         enable_memory_tracking=enable_memory_tracking,
         max_memory_usage=max_memory_usage
     )
