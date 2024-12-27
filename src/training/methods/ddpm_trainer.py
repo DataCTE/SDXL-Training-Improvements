@@ -40,12 +40,16 @@ class DDPMTrainer(TrainingMethod):
         try:
             # Extract latents from cached format
             if "latent" in batch:
-                latents = (batch["latent"].get("model_input", None) or 
-                          batch["latent"].get("latent", {}).get("model_input", None))
+                latents = batch["latent"].get("model_input", None)
+                if latents is None:
+                    latents = batch["latent"].get("latent", {}).get("model_input", None)
                 if latents is None:
                     raise ValueError("Could not find model_input in latent data")
             else:
-                raise KeyError("No latent data found in batch")
+                # Try direct model_input key as fallback
+                latents = batch.get("model_input")
+                if latents is None:
+                    raise KeyError("No latent data found in batch")
 
             # Process noise and timesteps
             noise = torch.randn_like(latents, generator=generator)
@@ -65,10 +69,21 @@ class DDPMTrainer(TrainingMethod):
                 if prompt_embeds is None or pooled_prompt_embeds is None:
                     raise ValueError("Missing required embeddings in cached data")
             else:
-                raise KeyError("No embeddings found in batch")
+                # Try direct keys as fallback
+                prompt_embeds = batch.get("prompt_embeds")
+                pooled_prompt_embeds = batch.get("pooled_prompt_embeds")
+                if prompt_embeds is None or pooled_prompt_embeds is None:
+                    raise KeyError("No embeddings found in batch")
 
             # Continue with model prediction
-            add_time_ids = get_add_time_ids(batch, dtype=prompt_embeds.dtype)
+            add_time_ids = get_add_time_ids(
+                original_sizes=batch.get("original_sizes", [(1024, 1024)]),
+                crop_top_lefts=batch.get("crop_top_lefts", [(0, 0)]),
+                target_sizes=batch.get("target_sizes", [(1024, 1024)]),
+                dtype=prompt_embeds.dtype,
+                device=prompt_embeds.device
+            )
+            
             noise_pred = self.unet(
                 noisy_latents,
                 timesteps,
