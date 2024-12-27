@@ -74,7 +74,7 @@ class ColoredFormatter(logging.Formatter):
                         value_str = str(value)
                     context_parts.append(f"{field}: {value_str}")
         
-        # Add exception info and stack trace
+        # Add exception info and stack trace only when they exist
         if record.exc_info:
             exception_text = self.formatException(record.exc_info)
             record.msg = f"{record.msg}\nException:\n{exception_text}"
@@ -154,7 +154,7 @@ def setup_logging(
         # Create console handler with simplified colored output and INFO level
         console_handler = logging.StreamHandler(sys.stdout)
         console_formatter = ColoredFormatter(
-            '%(asctime)s | %(levelname)s | %(message)s\n%(exc_info)s',  # Add exc_info to format
+            '%(asctime)s | %(levelname)s | %(message)s',  # Remove exc_info from format
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_handler.setFormatter(console_formatter)
