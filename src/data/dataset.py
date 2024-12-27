@@ -485,9 +485,19 @@ class AspectBucketDataset(Dataset):
             return result
 
         except Exception as e:
-            logger.error(f"Failed to collate batch: {str(e)}")
-            logger.error(f"Batch structure: {[list(item.keys()) for item in batch]}")
-            raise RuntimeError(f"Failed to collate batch: {str(e)}")
+            logger.error(
+                "Failed to collate batch", 
+                exc_info=True,  # This ensures full stack trace
+                extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'batch_size': len(batch) if batch else 0,
+                    'batch_keys': [list(item.keys()) for item in batch] if batch else [],
+                    'stack_info': True  # This adds stack info
+                }
+            )
+            # Re-raise with full context
+            raise RuntimeError(f"Failed to collate batch: {str(e)}") from e
     
 
 def create_dataset(

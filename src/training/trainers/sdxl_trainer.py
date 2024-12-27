@@ -144,43 +144,72 @@ class SDXLTrainer:
         generator: Optional[torch.Generator] = None,
         accumulation_step: int = 0
     ) -> Dict[str, float]:
-        loss_dict = self.training_method.compute_loss(self.unet, batch, generator=generator)
-        loss = loss_dict["loss"] / self.gradient_accumulation_steps
-        loss.backward()
-        if accumulation_step == self.gradient_accumulation_steps - 1:
-            if self.config.training.max_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.unet.parameters(),
-                    self.config.training.max_grad_norm
-                )
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-        return {k: v.detach().item() for k, v in loss_dict.items()}
+        try:
+            loss_dict = self.training_method.compute_loss(self.unet, batch, generator=generator)
+            loss = loss_dict["loss"] / self.gradient_accumulation_steps
+            loss.backward()
+            if accumulation_step == self.gradient_accumulation_steps - 1:
+                if self.config.training.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.unet.parameters(),
+                        self.config.training.max_grad_norm
+                    )
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+            return {k: v.detach().item() for k, v in loss_dict.items()}
+        except Exception as e:
+            logger.error(
+                "Error in training step", 
+                exc_info=True,
+                extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
+                    'accumulation_step': accumulation_step,
+                    'stack_info': True
+                }
+            )
+            raise
 
     def train_epoch(self) -> Dict[str, float]:
         epoch_metrics = {}
         self.model.train()
         progress_bar = tqdm(total=len(self.train_dataloader), disable=not is_main_process(), desc=f"Epoch {self.epoch}")
-        for batch in self.train_dataloader:
-            if self.global_step >= self.max_steps:
-                break
-            try:
-                micro_batches = self._prepare_micro_batches(batch)
-                step_metrics = {}
-                for i, micro_batch in enumerate(micro_batches):
-                    metrics = self.train_step(micro_batch, accumulation_step=i)
-                    step_metrics.update(metrics)
-                self.throughput_monitor.update(batch["model_input"].shape[0])
-                step_metrics.update(self.throughput_monitor.get_metrics())
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    logger.error(f"GPU OOM at step {self.global_step}. Attempting recovery...", exc_info=True)
-                    if hasattr(torch.cuda, 'empty_cache'):
-                        torch.cuda.empty_cache()
-                    continue
-                else:
-                    logger.error(f"Error during training step: {str(e)}", exc_info=True)
-                    raise
+        
+        try:
+            for batch in self.train_dataloader:
+                if self.global_step >= self.max_steps:
+                    break
+                try:
+                    micro_batches = self._prepare_micro_batches(batch)
+                    step_metrics = {}
+                    for i, micro_batch in enumerate(micro_batches):
+                        metrics = self.train_step(micro_batch, accumulation_step=i)
+                        step_metrics.update(metrics)
+                    self.throughput_monitor.update(batch["model_input"].shape[0])
+                    step_metrics.update(self.throughput_monitor.get_metrics())
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        logger.error(
+                            "GPU OOM at step %d", 
+                            self.global_step, 
+                            exc_info=True,
+                            extra={'stack_info': True}
+                        )
+                        if hasattr(torch.cuda, 'empty_cache'):
+                            torch.cuda.empty_cache()
+                        continue
+                    else:
+                        logger.error(
+                            "Error during training step", 
+                            exc_info=True,
+                            extra={
+                                'error': str(e),
+                                'step': self.global_step,
+                                'stack_info': True
+                            }
+                        )
+                        raise
 
             for k, v in step_metrics.items():
                 if k not in epoch_metrics:

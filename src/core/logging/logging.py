@@ -154,7 +154,7 @@ def setup_logging(
         # Create console handler with simplified colored output and INFO level
         console_handler = logging.StreamHandler(sys.stdout)
         console_formatter = ColoredFormatter(
-            '%(asctime)s | %(levelname)s | %(message)s',  # Simplified console format
+            '%(asctime)s | %(levelname)s | %(message)s\n%(exc_info)s',  # Add exc_info to format
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_handler.setFormatter(console_formatter)
