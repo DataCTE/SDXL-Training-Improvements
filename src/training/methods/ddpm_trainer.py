@@ -67,31 +67,11 @@ class DDPMTrainer(TrainingMethod):
         try:
             print("\n=== Starting Tensor Processing ===")
             
-            # Validate batch contents
-            print("\nValidating Batch Contents:")
-            required_keys = {
-                'model_input', 'prompt_embeds', 'pooled_prompt_embeds',
-                'original_sizes', 'crop_top_lefts', 'target_sizes'
-            }
-            available_keys = set(batch.keys())
-            print(f"Available batch keys: {available_keys}")
-            print(f"Required batch keys: {required_keys}")
-            
-            missing_keys = required_keys - available_keys
-            if missing_keys:
-                error_msg = f"Missing required keys in batch: {missing_keys}"
-                print(f"\nERROR: {error_msg}")
-                print("\nBatch contents summary:")
-                for key, value in batch.items():
-                    if isinstance(value, torch.Tensor):
-                        print(f"  {key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
-                    elif isinstance(value, list):
-                        print(f"  {key}: list of length {len(value)}")
-                    else:
-                        print(f"  {key}: type={type(value)}")
-                raise KeyError(error_msg)
+            # First validate model input
+            if "model_input" not in batch:
+                raise KeyError("Missing model_input in batch")
 
-            # Initial batch inspection
+            # Process latents first
             if isinstance(batch["model_input"], list):
                 latents_list = batch["model_input"]
             else:
@@ -102,76 +82,50 @@ class DDPMTrainer(TrainingMethod):
             for idx, lat in enumerate(latents_list):
                 print(f"Latent {idx}: shape={lat.shape}, dtype={lat.dtype}, device={lat.device}")
 
-            # Orientation analysis
-            print("\nAnalyzing Orientations:")
-            orientations = []
-            for idx, lat in enumerate(latents_list):
-                h, w = lat.shape[-2:]
-                current_orientation = 'landscape' if w >= h else 'portrait'
-                orientations.append(current_orientation)
-                print(f"Latent {idx}: {h}x{w} -> {current_orientation}")
-            
-            target_orientation = max(set(orientations), key=orientations.count)
-            print(f"\nTarget orientation: {target_orientation}")
+            # Process embeddings - handle both direct and cached formats
+            print("\nProcessing Embeddings:")
+            if "embeddings" in batch:
+                # Handle cached format
+                embeddings = batch["embeddings"]
+                prompt_embeds = embeddings.get("prompt_embeds")
+                pooled_prompt_embeds = embeddings.get("pooled_prompt_embeds")
+            else:
+                # Try direct format
+                prompt_embeds = batch.get("prompt_embeds")
+                pooled_prompt_embeds = batch.get("pooled_prompt_embeds")
 
-            # Normalize orientations
-            print("\nNormalizing Orientations:")
-            oriented_latents = []
-            for idx, lat in enumerate(latents_list):
-                h, w = lat.shape[-2:]
-                current_orientation = 'landscape' if w >= h else 'portrait'
-                
-                if current_orientation != target_orientation:
-                    print(f"Rotating latent {idx} from {current_orientation} to {target_orientation}")
-                    print(f"Before rotation: {lat.shape}")
-                    lat = lat.transpose(-1, -2)
-                    print(f"After rotation: {lat.shape}")
-                else:
-                    print(f"Latent {idx} already in {target_orientation} orientation: {lat.shape}")
-                
-                oriented_latents.append(lat)
+            if prompt_embeds is None or pooled_prompt_embeds is None:
+                print("\nEmbeddings structure:")
+                for key, value in batch.items():
+                    if isinstance(value, dict):
+                        print(f"{key}:")
+                        for subkey, subval in value.items():
+                            if isinstance(subval, torch.Tensor):
+                                print(f"  {subkey}: shape={subval.shape}, dtype={subval.dtype}")
+                            else:
+                                print(f"  {subkey}: type={type(subval)}")
+                    elif isinstance(value, torch.Tensor):
+                        print(f"{key}: shape={value.shape}, dtype={value.dtype}")
+                    else:
+                        print(f"{key}: type={type(value)}")
+                raise KeyError("Missing required embeddings")
 
-            # Target size determination
-            print("\nDetermining Target Size:")
-            shapes = [lat.shape[-2:] for lat in oriented_latents]
-            print(f"Available shapes: {shapes}")
-            target_h = min(min(shape[-2] for shape in shapes), min(shape[-1] for shape in shapes))
-            target_w = max(max(shape[-2] for shape in shapes), max(shape[-1] for shape in shapes))
-            print(f"Target dimensions: {target_h}x{target_w}")
+            print(f"Found embeddings:")
+            print(f"prompt_embeds shape: {prompt_embeds.shape}")
+            print(f"pooled_prompt_embeds shape: {pooled_prompt_embeds.shape}")
 
-            # Resize tensors
-            print("\nResizing Tensors:")
-            processed_latents = []
-            for idx, lat in enumerate(oriented_latents):
-                if lat.shape[-2:] != (target_h, target_w):
-                    print(f"Resizing latent {idx}: {lat.shape[-2:]} -> ({target_h}, {target_w})")
-                    lat = F.interpolate(
-                        lat,
-                        size=(target_h, target_w),
-                        mode='bilinear',
-                        align_corners=False
-                    )
-                processed_latents.append(lat)
-                print(f"Processed latent {idx} final shape: {lat.shape}")
+            # Process sizes
+            original_sizes = batch.get("original_sizes", [(1024, 1024)] * len(latents_list))
+            crop_top_lefts = batch.get("crop_top_lefts", [(0, 0)] * len(latents_list))
+            target_sizes = batch.get("target_sizes", [(1024, 1024)] * len(latents_list))
 
-            # Final verification
-            print("\nFinal Verification:")
-            shapes = [lat.shape for lat in processed_latents]
-            print(f"Final shapes: {shapes}")
-            if len(set(str(s) for s in shapes)) != 1:
-                shape_details = [f"latent_{i}: {s}" for i, s in enumerate(shapes)]
-                error_msg = "Inconsistent shapes after processing:\n" + "\n".join(shape_details)
-                print(f"ERROR: {error_msg}")
-                raise ValueError(error_msg)
+            print("\nSize Information:")
+            print(f"Original sizes: {original_sizes}")
+            print(f"Crop top lefts: {crop_top_lefts}")
+            print(f"Target sizes: {target_sizes}")
 
-            # Stack tensors
-            print("\nStacking Tensors:")
-            latents = torch.stack(processed_latents, dim=0)
-            print(f"Final stacked shape: {latents.shape}")
-            print("\n=== Tensor Processing Complete ===\n")
-
-            prompt_embeds = batch["prompt_embeds"]
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+            # Stack latents if needed
+            latents = torch.stack(latents_list, dim=0) if isinstance(batch["model_input"], list) else batch["model_input"]
 
             # Get noise and timesteps
             noise = torch.randn(
