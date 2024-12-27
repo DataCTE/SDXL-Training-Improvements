@@ -1,5 +1,6 @@
 """DDPM trainer implementation for SDXL with extreme speedups."""
 import logging
+import sys
 import torch
 import torch.nn.functional as F
 from typing import Dict, Optional
@@ -8,12 +9,11 @@ from torch import Tensor
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
+# Add print for immediate verification
+print("Initializing DDPM Trainer logger")
+
+# Get logger but don't configure it here
 logger = logging.getLogger(__name__)
-# Remove any existing handlers
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-logger.setLevel(logging.DEBUG)
-logger.propagate = True  # Ensure propagation to root logger
 
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"
@@ -42,6 +42,12 @@ class DDPMTrainer(TrainingMethod):
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
+        # Add immediate verification print
+        print("Entering _compute_loss_impl")
+        print(f"Logger level: {logger.getEffectiveLevel()}")
+        print(f"Logger handlers: {logger.handlers}")
+        print(f"Logger propagate: {logger.propagate}")
+        
         try:
             logger.debug("=== Starting Batch Processing ===")
             logger.debug(f"Batch keys: {batch.keys()}")
