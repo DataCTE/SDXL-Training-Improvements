@@ -93,7 +93,6 @@ class WandbLogger:
         except Exception as e:
             logger.error(f"Failed to log images: {str(e)}")
 
-    @make_picklable
     def log_model(
         self,
         model: torch.nn.Module,
@@ -107,9 +106,7 @@ class WandbLogger:
             return
             
         try:
-            # Remove the custom log_params function and invalid API call
-            # Use wandb.watch to log the model
-            # Ensure that wandb.watch is called only once
+            # Only watch model once
             if not hasattr(self, 'model_logged') or not self.model_logged:
                 wandb.watch(
                     model,
