@@ -100,17 +100,22 @@ class DDPMTrainer(TrainingMethod):
             for idx, lat in enumerate(latents_list):
                 logger.info(f"Latent {idx}: shape={lat.shape}, dtype={lat.dtype}, device={lat.device}")
 
-            # Process embeddings
+            # Process embeddings - handle both direct and nested formats
             logger.info("\nProcessing Embeddings:")
-            if "embeddings" in batch:
-                logger.info("Found embeddings dictionary")
+            prompt_embeds = None
+            pooled_prompt_embeds = None
+            
+            # Try direct format first
+            if "prompt_embeds" in batch and "pooled_prompt_embeds" in batch:
+                prompt_embeds = batch["prompt_embeds"]
+                pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+                logger.info("Using direct embedding format")
+            # Try nested format
+            elif "embeddings" in batch:
                 embeddings = batch["embeddings"]
                 prompt_embeds = embeddings.get("prompt_embeds")
                 pooled_prompt_embeds = embeddings.get("pooled_prompt_embeds")
-            else:
-                logger.info("Using direct embedding format")
-                prompt_embeds = batch.get("prompt_embeds")
-                pooled_prompt_embeds = batch.get("pooled_prompt_embeds")
+                logger.info("Using nested embedding format")
 
             if prompt_embeds is None or pooled_prompt_embeds is None:
                 logger.error("\nMissing embeddings - Current batch structure:", exc_info=True, stack_info=True)
@@ -126,7 +131,13 @@ class DDPMTrainer(TrainingMethod):
                         logger.error(f"{key}: shape={value.shape}, dtype={value.dtype}")
                     else:
                         logger.error(f"{key}: type={type(value)}")
-                raise KeyError("Missing required embeddings")
+                raise KeyError("Missing required embeddings - checked both direct and nested formats")
+
+            # Validate tensor properties
+            if not isinstance(prompt_embeds, torch.Tensor):
+                raise TypeError(f"prompt_embeds must be a tensor, got {type(prompt_embeds)}")
+            if not isinstance(pooled_prompt_embeds, torch.Tensor):
+                raise TypeError(f"pooled_prompt_embeds must be a tensor, got {type(pooled_prompt_embeds)}")
 
             logger.info(f"Found embeddings:")
             logger.info(f"prompt_embeds shape: {prompt_embeds.shape}, dtype={prompt_embeds.dtype}, device={prompt_embeds.device}")
