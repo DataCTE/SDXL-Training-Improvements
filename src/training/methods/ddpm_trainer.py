@@ -63,9 +63,22 @@ class DDPMTrainer(TrainingMethod):
         model: torch.nn.Module,
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
-    ) -> Dict[str, Tensor]:
+    ) -> Dict[str, torch.Tensor]:
         try:
-            print("\n=== Starting Tensor Processing ===")
+            print("\n=== Starting DDPM Loss Computation ===")
+            print("\nInput Batch Contents:")
+            for key, value in batch.items():
+                if isinstance(value, torch.Tensor):
+                    print(f"{key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
+                elif isinstance(value, dict):
+                    print(f"{key}:")
+                    for k, v in value.items():
+                        if isinstance(v, torch.Tensor):
+                            print(f"  {k}: shape={v.shape}, dtype={v.dtype}, device={v.device}")
+                elif isinstance(value, list):
+                    print(f"{key}: list of length {len(value)}")
+                    if value and isinstance(value[0], torch.Tensor):
+                        print(f"  First element: shape={value[0].shape}, dtype={value[0].dtype}, device={value[0].device}")
             
             # First validate model input
             if "model_input" not in batch:
@@ -111,8 +124,8 @@ class DDPMTrainer(TrainingMethod):
                 raise KeyError("Missing required embeddings")
 
             print(f"Found embeddings:")
-            print(f"prompt_embeds shape: {prompt_embeds.shape}")
-            print(f"pooled_prompt_embeds shape: {pooled_prompt_embeds.shape}")
+            print(f"prompt_embeds shape: {prompt_embeds.shape}, dtype={prompt_embeds.dtype}, device={prompt_embeds.device}")
+            print(f"pooled_prompt_embeds shape: {pooled_prompt_embeds.shape}, dtype={pooled_prompt_embeds.dtype}, device={pooled_prompt_embeds.device}")
 
             # Process sizes
             original_sizes = batch.get("original_sizes", [(1024, 1024)] * len(latents_list))
@@ -124,27 +137,38 @@ class DDPMTrainer(TrainingMethod):
             print(f"Crop top lefts: {crop_top_lefts}")
             print(f"Target sizes: {target_sizes}")
 
-            # Stack latents if needed
+            # Stack latents
+            print("\nStacking Latents:")
             latents = torch.stack(latents_list, dim=0) if isinstance(batch["model_input"], list) else batch["model_input"]
+            print(f"Stacked latents shape: {latents.shape}, dtype={latents.dtype}, device={latents.device}")
 
-            # Get noise and timesteps
+            # Generate noise
+            print("\nGenerating Noise:")
             noise = torch.randn(
                 latents.shape,
                 device=latents.device,
                 dtype=latents.dtype,
                 generator=generator
             )
+            print(f"Generated noise shape: {noise.shape}, dtype={noise.dtype}, device={noise.device}")
+
+            # Get timesteps
+            print("\nGenerating Timesteps:")
             timesteps = torch.randint(
                 0,
                 self.noise_scheduler.config.num_train_timesteps,
                 (latents.shape[0],),
                 device=latents.device
             )
+            print(f"Timesteps shape: {timesteps.shape}, dtype={timesteps.dtype}, device={timesteps.device}")
 
             # Add noise to latents
+            print("\nAdding Noise to Latents:")
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+            print(f"Noisy latents shape: {noisy_latents.shape}, dtype={noisy_latents.dtype}, device={noisy_latents.device}")
 
             # Get time embeddings
+            print("\nGenerating Time Embeddings:")
             add_time_ids = get_add_time_ids(
                 batch["original_sizes"],
                 batch["crop_top_lefts"], 
@@ -152,8 +176,10 @@ class DDPMTrainer(TrainingMethod):
                 dtype=prompt_embeds.dtype,
                 device=latents.device
             )
+            print(f"Time embeddings shape: {add_time_ids.shape}, dtype={add_time_ids.dtype}, device={add_time_ids.device}")
 
             # Get model prediction
+            print("\nGetting Model Prediction:")
             noise_pred = self.unet(
                 noisy_latents,
                 timesteps,
@@ -163,19 +189,31 @@ class DDPMTrainer(TrainingMethod):
                     "time_ids": add_time_ids
                 }
             ).sample
+            print(f"Model prediction shape: {noise_pred.shape}, dtype={noise_pred.dtype}, device={noise_pred.device}")
 
             # Compute loss
+            print("\nComputing Loss:")
             if self.config.training.prediction_type == "epsilon":
+                print("Using epsilon prediction type")
                 target = noise
             elif self.config.training.prediction_type == "v_prediction":
+                print("Using v_prediction type")
                 target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
             else:
                 raise ValueError(f"Unknown prediction type {self.config.training.prediction_type}")
 
+            print(f"Target shape: {target.shape}, dtype={target.dtype}, device={target.device}")
+
             loss = F.mse_loss(noise_pred, target, reduction="none").mean([1, 2, 3])
+            print(f"Initial loss shape: {loss.shape}, dtype={loss.dtype}, device={loss.device}")
+
             if "loss_weights" in batch:
+                print("Applying loss weights")
                 loss = loss * batch["loss_weights"]
+                print(f"Weighted loss shape: {loss.shape}")
+
             loss = loss.mean()
+            print(f"Final loss value: {loss.item()}")
 
             torch_sync()
             return {"loss": loss}
