@@ -87,61 +87,76 @@ class DDPMTrainer(TrainingMethod):
                 logger.error("Missing model_input in batch", exc_info=True, stack_info=True)
                 raise KeyError("Missing model_input in batch")
 
-            # Process latents first
-            logger.info("\nProcessing Latents:")
-            if isinstance(batch["model_input"], list):
-                latents_list = batch["model_input"]
-                logger.info("Model input is a list of tensors")
-            else:
-                latents_list = [lat for lat in batch["model_input"]]
-                logger.info("Model input converted to list")
+            # Process latents with validation
+            try:
+                if isinstance(batch["model_input"], list):
+                    latents_list = batch["model_input"]
+                else:
+                    latents_list = [lat for lat in batch["model_input"]]
 
-            logger.info(f"Number of latents: {len(latents_list)}")
-            for idx, lat in enumerate(latents_list):
-                logger.info(f"Latent {idx}: shape={lat.shape}, dtype={lat.dtype}, device={lat.device}")
+                if not latents_list:
+                    raise ValueError("Empty latents list")
 
-            # Process embeddings - handle both direct and nested formats
-            logger.info("\nProcessing Embeddings:")
-            prompt_embeds = None
-            pooled_prompt_embeds = None
-            
-            # Try direct format first
-            if "prompt_embeds" in batch and "pooled_prompt_embeds" in batch:
-                prompt_embeds = batch["prompt_embeds"]
-                pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-                logger.info("Using direct embedding format")
-            # Try nested format
-            elif "embeddings" in batch:
-                embeddings = batch["embeddings"]
-                prompt_embeds = embeddings.get("prompt_embeds")
-                pooled_prompt_embeds = embeddings.get("pooled_prompt_embeds")
-                logger.info("Using nested embedding format")
+                for idx, lat in enumerate(latents_list):
+                    if not isinstance(lat, torch.Tensor):
+                        raise TypeError(f"Latent {idx} is not a tensor: {type(lat)}")
+                    if lat.dim() != 4:
+                        raise ValueError(f"Latent {idx} has wrong dimensions: {lat.shape}")
 
-            if prompt_embeds is None or pooled_prompt_embeds is None:
-                logger.error("\nMissing embeddings - Current batch structure:", exc_info=True, stack_info=True)
-                for key, value in batch.items():
-                    if isinstance(value, dict):
-                        logger.error(f"{key}:")
-                        for subkey, subval in value.items():
-                            if isinstance(subval, torch.Tensor):
-                                logger.error(f"  {subkey}: shape={subval.shape}, dtype={subval.dtype}")
-                            else:
-                                logger.error(f"  {subkey}: type={type(subval)}")
-                    elif isinstance(value, torch.Tensor):
-                        logger.error(f"{key}: shape={value.shape}, dtype={value.dtype}")
-                    else:
-                        logger.error(f"{key}: type={type(value)}")
-                raise KeyError("Missing required embeddings - checked both direct and nested formats")
+            except Exception as e:
+                logger.error("Latent processing failed", exc_info=True, stack_info=True, extra={
+                    'error_type': type(e).__name__,
+                    'latents_info': {
+                        'type': type(batch["model_input"]).__name__,
+                        'content_type': type(latents_list[0]).__name__ if latents_list else None
+                    }
+                })
+                raise
 
-            # Validate tensor properties
-            if not isinstance(prompt_embeds, torch.Tensor):
-                raise TypeError(f"prompt_embeds must be a tensor, got {type(prompt_embeds)}")
-            if not isinstance(pooled_prompt_embeds, torch.Tensor):
-                raise TypeError(f"pooled_prompt_embeds must be a tensor, got {type(pooled_prompt_embeds)}")
+            # Process embeddings with detailed validation
+            try:
+                prompt_embeds = None
+                pooled_prompt_embeds = None
+                
+                # Try direct format
+                if "prompt_embeds" in batch and "pooled_prompt_embeds" in batch:
+                    prompt_embeds = batch["prompt_embeds"]
+                    pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+                    embedding_source = "direct"
+                # Try nested format
+                elif "embeddings" in batch:
+                    embeddings = batch["embeddings"]
+                    prompt_embeds = embeddings.get("prompt_embeds")
+                    pooled_prompt_embeds = embeddings.get("pooled_prompt_embeds")
+                    embedding_source = "nested"
+                else:
+                    embedding_source = "missing"
 
-            logger.info(f"Found embeddings:")
-            logger.info(f"prompt_embeds shape: {prompt_embeds.shape}, dtype={prompt_embeds.dtype}, device={prompt_embeds.device}")
-            logger.info(f"pooled_prompt_embeds shape: {pooled_prompt_embeds.shape}, dtype={pooled_prompt_embeds.dtype}, device={pooled_prompt_embeds.device}")
+                if prompt_embeds is None or pooled_prompt_embeds is None:
+                    error_context = {
+                        'embedding_source': embedding_source,
+                        'batch_keys': list(batch.keys()),
+                        'embeddings_present': 'embeddings' in batch,
+                        'direct_embeds_present': all(k in batch for k in ['prompt_embeds', 'pooled_prompt_embeds']),
+                        'batch_structure': batch_info
+                    }
+                    logger.error("Missing required embeddings", exc_info=True, stack_info=True, extra=error_context)
+                    raise KeyError("Missing required embeddings - see logs for details")
+
+                # Validate tensor properties
+                for name, tensor in [("prompt_embeds", prompt_embeds), 
+                                   ("pooled_prompt_embeds", pooled_prompt_embeds)]:
+                    if not isinstance(tensor, torch.Tensor):
+                        raise TypeError(f"{name} must be a tensor, got {type(tensor)}")
+
+            except Exception as e:
+                logger.error("Embedding processing failed", exc_info=True, stack_info=True, extra={
+                    'error_type': type(e).__name__,
+                    'error_msg': str(e),
+                    'embedding_source': embedding_source,
+                    'batch_structure': batch_info
+                })
+                raise
 
             # Process sizes
             logger.info("\nProcessing Size Information:")
@@ -236,8 +251,10 @@ class DDPMTrainer(TrainingMethod):
             return {"loss": loss}
 
         except Exception as e:
-            logger.error(f"Error in DDPM loss computation: {str(e)}", exc_info=True, stack_info=True)
-            import traceback
-            logger.error("Full traceback:")
-            logger.error(traceback.format_exc())
+            logger.error(f"DDPM loss computation failed: {str(e)}", exc_info=True, stack_info=True, extra={
+                'error_type': type(e).__name__,
+                'error_msg': str(e),
+                'batch_structure': batch_info if 'batch_info' in locals() else None,
+                'traceback': traceback.format_exc()
+            })
             raise
