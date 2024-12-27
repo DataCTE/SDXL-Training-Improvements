@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 from contextlib import contextmanager, nullcontext
 
 import torch
+import torch.nn.functional as F
 import torch.backends.cudnn
 import torch.nn.functional as F
 from PIL import Image
@@ -221,48 +222,48 @@ class AspectBucketDataset(Dataset):
             return self.__getitem__((idx + 1) % len(self))
 
     def _process_cached_item(
-        self,
-        cached_data: Dict[str, Any],
-        image_path: str,
-        caption: str,
-        bucket_idx: int
-    ) -> Dict[str, Any]:
-        """Process a cached item with zero validation."""
-        # Handle case where cached_data is directly a tensor
-        if isinstance(cached_data, torch.Tensor):
-            return {
-                "model_input": cached_data,
-                "text": caption,
-                "bucket_idx": bucket_idx,
-                "image_path": image_path,
-                "original_sizes": [(1024, 1024)],
-                "crop_top_lefts": [(0, 0)],
-                "target_sizes": [(1024, 1024)]
-            }
+         self,
+         cached_data: Dict[str, Any],
+         image_path: str,
+         caption: str,
+         bucket_idx: int
+     ) -> Dict[str, Any]:
+         """Process a cached item with zero validation."""
+         # Handle case where cached_data is directly a tensor
+         if isinstance(cached_data, torch.Tensor):
+             return {
+                 "model_input": cached_data,
+                 "text": caption,
+                 "bucket_idx": bucket_idx,
+                 "image_path": image_path,
+                 "original_sizes": [(1024, 1024)],
+                 "crop_top_lefts": [(0, 0)],
+                 "target_sizes": [(1024, 1024)]
+             }
 
-        # Handle dictionary case
-        latent_data = cached_data["latent"]
-        metadata = cached_data.get("metadata", {})
-        text_latent = cached_data.get("text_latent", {})
+         # Handle dictionary case
+         latent_data = cached_data["latent"]
+         metadata = cached_data.get("metadata", {})
+         text_latent = cached_data.get("text_latent", {})
 
-        result = {
-            "model_input": latent_data,
-            "text": caption,
-            "bucket_idx": bucket_idx,
-            "image_path": image_path,
-            "original_sizes": [metadata.get("original_size", (1024, 1024))],
-            "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
-            "target_sizes": [metadata.get("target_size", (1024, 1024))]
-        }
+         result = {
+             "model_input": latent_data,
+             "text": caption,
+             "bucket_idx": bucket_idx,
+             "image_path": image_path,
+             "original_sizes": [metadata.get("original_size", (1024, 1024))],
+             "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
+             "target_sizes": [metadata.get("target_size", (1024, 1024))]
+         }
 
-        if "embeddings" in text_latent:
-            embeddings = text_latent["embeddings"]
-            for key in ["prompt_embeds", "pooled_prompt_embeds", 
-                       "prompt_embeds_2", "pooled_prompt_embeds_2"]:
-                if key in embeddings:
-                    result[key] = embeddings[key]
+         if "embeddings" in text_latent:
+             embeddings = text_latent["embeddings"]
+             for key in ["prompt_embeds", "pooled_prompt_embeds",
+                        "prompt_embeds_2", "pooled_prompt_embeds_2"]:
+                 if key in embeddings:
+                     result[key] = embeddings[key]
 
-        return result
+         return result
 
 
     def _setup_image_config(self):

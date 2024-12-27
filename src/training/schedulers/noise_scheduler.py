@@ -1,31 +1,12 @@
 """Noise scheduler implementation for SDXL training."""
 import logging
-from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import torch
 from diffusers import DDPMScheduler
-from diffusers.configuration_utils import ConfigMixin, register_to_config
 from src.data.config import Config
 
 logger = logging.getLogger(__name__)
-
-@dataclass
-class NoiseSchedulerConfig:
-    """Configuration for noise scheduler."""
-    num_train_timesteps: int = 1000
-    beta_start: float = 0.00085
-    beta_end: float = 0.012
-    beta_schedule: str = "scaled_linear"
-    clip_sample: bool = False
-    set_alpha_to_one: bool = False
-    steps_offset: int = 0
-    prediction_type: str = "epsilon"
-    thresholding: bool = False
-    dynamic_thresholding_ratio: float = 0.995
-    sample_max_value: float = 1.0
-    timestep_spacing: str = "leading"
-    rescale_betas_zero_snr: bool = False
 
 def configure_noise_scheduler(
     config: Config,
@@ -40,26 +21,20 @@ def configure_noise_scheduler(
     Returns:
         Configured noise scheduler
     """
-    scheduler_config = NoiseSchedulerConfig(
-        num_train_timesteps=config.model.num_timesteps,
-        prediction_type=config.training.prediction_type,
-        rescale_betas_zero_snr=config.training.zero_terminal_snr
-    )
-    
     scheduler = DDPMScheduler(
-        num_train_timesteps=scheduler_config.num_train_timesteps,
-        beta_start=scheduler_config.beta_start,
-        beta_end=scheduler_config.beta_end,
-        beta_schedule=scheduler_config.beta_schedule,
-        clip_sample=scheduler_config.clip_sample,
-        set_alpha_to_one=scheduler_config.set_alpha_to_one,
-        steps_offset=scheduler_config.steps_offset,
-        prediction_type=scheduler_config.prediction_type,
-        thresholding=scheduler_config.thresholding,
-        dynamic_thresholding_ratio=scheduler_config.dynamic_thresholding_ratio,
-        sample_max_value=scheduler_config.sample_max_value,
-        timestep_spacing=scheduler_config.timestep_spacing,
-        rescale_betas_zero_snr=scheduler_config.rescale_betas_zero_snr
+        num_train_timesteps=config.model.scheduler_config.num_train_timesteps,
+        beta_start=config.model.scheduler_config.beta_start,
+        beta_end=config.model.scheduler_config.beta_end,
+        beta_schedule=config.model.scheduler_config.beta_schedule,
+        clip_sample=config.model.scheduler_config.clip_sample,
+        set_alpha_to_one=config.model.scheduler_config.set_alpha_to_one,
+        steps_offset=config.model.scheduler_config.steps_offset,
+        prediction_type=config.model.scheduler_config.prediction_type,
+        thresholding=config.model.scheduler_config.thresholding,
+        dynamic_thresholding_ratio=config.model.scheduler_config.dynamic_thresholding_ratio,
+        sample_max_value=config.model.scheduler_config.sample_max_value,
+        timestep_spacing=config.model.scheduler_config.timestep_spacing,
+        rescale_betas_zero_snr=config.model.scheduler_config.rescale_betas_zero_snr
     )
     
     scheduler.to(device)

@@ -52,18 +52,41 @@ class CacheManager(TensorValidator):
             logger.warning("Cache structure verification failed - rebuilding index")
             self._initialize_empty_index()
         
+        # Add lookup sets for faster validation
+        self._cached_image_files = set()
+        self._cached_text_files = set()
+        self._update_cache_sets()
+        
+    def _update_cache_sets(self):
+        """Update fast lookup sets from cache index."""
+        self._cached_image_files = {
+            Path(info.get("image_latent_path", "")).stem 
+            for info in self.cache_index.get("files", {}).values()
+            if "image_latent_path" in info
+        }
+        self._cached_text_files = {
+            Path(info.get("text_latent_path", "")).stem 
+            for info in self.cache_index.get("files", {}).values()
+            if "text_latent_path" in info
+        }
+
     def validate_cache_index(self) -> Tuple[List[str], List[str]]:
         """Validate cache index and return missing/invalid entries."""
         missing_text = []
         missing_latents = []
         valid_files = {}
         
+        # Use sets for faster lookups
+        existing_image_files = {p.stem for p in self.image_latents_dir.glob("*.pt")}
+        existing_text_files = {p.stem for p in self.text_latents_dir.glob("*.pt")}
+        
         def validate_file(path: Path) -> bool:
             try:
                 if not path.exists():
                     return False
-                data = torch.load(path, map_location='cpu')
-                return isinstance(data, dict) and ("latent" in data or "embeddings" in data)
+                # Use stem lookup instead of full path comparison
+                return (path.stem in existing_image_files or 
+                       path.stem in existing_text_files)
             except:
                 return False
 
@@ -208,6 +231,9 @@ class CacheManager(TensorValidator):
             with open(self.index_path, 'w') as f:
                 json.dump(self.cache_index, f, indent=2, ensure_ascii=False)
                 
+            # Update lookup sets after saving
+            self._update_cache_sets()
+                
         except Exception as e:
             logger.error(f"Failed to save cache index: {e}")
             raise
@@ -284,11 +310,18 @@ class CacheManager(TensorValidator):
             base_name = Path(file_path).stem
             result = {}
 
+            # Fast path - check if item exists in cache using sets
+            if (base_name not in self._cached_image_files and 
+                base_name not in self._cached_text_files):
+                self.stats.cache_misses += 1
+                return None
+
             def load_file(path: Path) -> Optional[Dict]:
                 if not path.exists():
                     return None
                     
-                data = torch.load(path, map_location='cpu')
+                # Use torch.load with map_location for faster loading
+                data = torch.load(path, map_location='cpu', weights_only=True)
                 
                 # Process latents and ensure format compatibility
                 if "latent" in data:
@@ -304,14 +337,23 @@ class CacheManager(TensorValidator):
                     data["embeddings"] = self._process_latents(data["embeddings"], "cached_emb")
                 return data
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = [
-                    executor.submit(load_file, self.image_latents_dir / f"{base_name}.pt"),
-                    executor.submit(load_file, self.text_latents_dir / f"{base_name}.pt")
-                ]
-
-                for future in futures:
-                    if data := future.result():
+            # Parallel load only if both types exist
+            if base_name in self._cached_image_files and base_name in self._cached_text_files:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = [
+                        executor.submit(load_file, self.image_latents_dir / f"{base_name}.pt"),
+                        executor.submit(load_file, self.text_latents_dir / f"{base_name}.pt")
+                    ]
+                    for future in futures:
+                        if data := future.result():
+                            result.update(data)
+            else:
+                # Single file load
+                if base_name in self._cached_image_files:
+                    if data := load_file(self.image_latents_dir / f"{base_name}.pt"):
+                        result.update(data)
+                if base_name in self._cached_text_files:
+                    if data := load_file(self.text_latents_dir / f"{base_name}.pt"):
                         result.update(data)
 
             if not result:

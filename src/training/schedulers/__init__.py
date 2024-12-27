@@ -1,5 +1,5 @@
+from src.data.config import NoiseSchedulerConfig
 from .noise_scheduler import (
-    NoiseSchedulerConfig,
     configure_noise_scheduler,
     get_karras_sigmas,
     get_sigmas,

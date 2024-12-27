@@ -81,6 +81,23 @@ class GlobalConfig:
     output_dir: str = "outputs"
 
 @dataclass
+class NoiseSchedulerConfig:
+    """Configuration for noise scheduler."""
+    num_train_timesteps: int = 1000
+    beta_start: float = 0.00085
+    beta_end: float = 0.012
+    beta_schedule: str = "scaled_linear"
+    clip_sample: bool = False
+    set_alpha_to_one: bool = False
+    steps_offset: int = 0
+    prediction_type: str = "v_prediction"
+    thresholding: bool = False
+    dynamic_thresholding_ratio: float = 0.995
+    sample_max_value: float = 1.0
+    timestep_spacing: str = "none"
+    rescale_betas_zero_snr: bool = True
+
+@dataclass
 class ModelConfig:
     """Model configuration."""
     pretrained_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
@@ -109,7 +126,7 @@ class ModelConfig:
     lora_dtype: Optional[str] = None
     embedding_dtype: Optional[str] = None
     scheduler_type: str = "ddpm"
-    scheduler_config: Optional[Dict] = None
+    scheduler_config: NoiseSchedulerConfig = field(default_factory=NoiseSchedulerConfig)
 
 @dataclass
 class MemoryConfig:

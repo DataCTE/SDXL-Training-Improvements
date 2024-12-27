@@ -1,6 +1,5 @@
 """SDXL trainer implementation with 100x speedups."""
 import logging
-import multiprocessing
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -15,7 +14,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
-from src.core.distributed import is_main_process, get_world_size
+from src.core.distributed import is_main_process
 from src.core.logging import WandbLogger, log_metrics
 from src.core.memory import (
     tensors_to_device_,
@@ -28,9 +27,7 @@ from src.core.memory import (
     LayerOffloadConfig,
     ThroughputMonitor
 )
-from typing import Dict, List, Optional, Union
 from src.core.types import DataType, ModelWeightDtypes
-from src.core.history import TorchHistory
 from src.data.config import Config
 from src.models import StableDiffusionXLModel
 from src.training.methods.base import TrainingMethod
@@ -41,16 +38,10 @@ class SDXLTrainer:
     """Base trainer class for SDXL with extreme performance."""
 
     @classmethod
-    def create(
-        cls,
-        config: Config,
-        model: StableDiffusionXLModel,
-        optimizer: torch.optim.Optimizer,
-        train_dataloader: DataLoader,
-        device: Union[str, torch.device],
-        wandb_logger: Optional[WandbLogger] = None,
-        validation_prompts: Optional[List[str]] = None
-    ) -> 'SDXLTrainer':
+    def create(cls, config: Config, model: StableDiffusionXLModel, 
+               optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
+               device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
+               validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
         method = config.training.method.lower()
         trainer_cls = TrainingMethod.get_method(method)
         logger.info(f"Creating trainer with method: {trainer_cls.__name__}")
@@ -81,7 +72,6 @@ class SDXLTrainer:
         self.model = model
         self.unet = model.unet
         self.optimizer = optimizer
-        self.history = TorchHistory(self.model)
         # Ensure DataLoader uses a single worker
         self.train_dataloader = DataLoader(
             train_dataloader.dataset,
@@ -230,7 +220,6 @@ class SDXLTrainer:
             self.save_checkpoint()
             if self.global_step >= self.max_steps:
                 break
-        self.history.remove_log_parameters_hook()
         return metrics
 
     def _prepare_micro_batches(self, batch: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:
@@ -238,15 +227,25 @@ class SDXLTrainer:
             return [batch]
             
         micro_batches = []
-        batch_size = batch["model_input"].shape[0]
+        # Get batch size from latent structure
+        if "latent" in batch:
+            model_input = batch["latent"].get("model_input", batch["latent"].get("latent", {}).get("model_input"))
+        else:
+            model_input = batch.get("model_input")
+        
+        if model_input is None:
+            raise ValueError("Could not find model input in batch")
+        
+        batch_size = model_input.shape[0]
         micro_batch_size = batch_size // self.gradient_accumulation_steps
         
+        # Update tensor keys to match cache format
         tensor_keys = [
-            "model_input", 
-            "prompt_embeds",
-            "pooled_prompt_embeds",
-            "prompt_embeds_2",
-            "pooled_prompt_embeds_2"
+            "latent",  # New cache format
+            "embeddings",  # New cache format
+            "model_input",  # Legacy format
+            "prompt_embeds",  # Legacy format
+            "pooled_prompt_embeds"  # Legacy format
         ]
         
         for i in range(self.gradient_accumulation_steps):
@@ -255,8 +254,15 @@ class SDXLTrainer:
             
             micro_batch = {}
             for k, v in batch.items():
-                if k in tensor_keys:
-                    micro_batch[k] = v[start_idx:end_idx]
+                if k in tensor_keys and isinstance(v, (torch.Tensor, dict)):
+                    if isinstance(v, dict):
+                        # Handle nested dictionary structure
+                        micro_batch[k] = {
+                            sub_k: sub_v[start_idx:end_idx] if isinstance(sub_v, torch.Tensor)
+                            else sub_v for sub_k, sub_v in v.items()
+                        }
+                    else:
+                        micro_batch[k] = v[start_idx:end_idx]
                 elif isinstance(v, list):
                     micro_batch[k] = v[start_idx:end_idx]
                 else:
