@@ -40,8 +40,10 @@ class SDXLTrainer:
                optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
                device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
                validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
-        # Fix: Access method through proper config nesting
-        method = config.training.method.method.lower()
+        # Extract method from training configuration
+        print(config.training.method.type.lower())
+        method = config.training.method.type.lower()
+        
         trainer_cls = TrainingMethod.get_method(method)
         logger.info(f"Creating trainer with method: {trainer_cls.__name__}")
         training_method = trainer_cls(unet=model.unet, config=config)
