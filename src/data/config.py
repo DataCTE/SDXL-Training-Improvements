@@ -184,6 +184,7 @@ class TrainingMethodConfig:
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
+    micro_batch_size: Optional[int] = None  # Add this field
     gradient_accumulation_steps: int = 1
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
@@ -214,6 +215,9 @@ class TrainingConfig:
         """Validate training configuration."""
         if self.method not in ["ddpm", "flow_matching"]:
             raise ValueError(f"Invalid training method: {self.method}")
+        # Set micro_batch_size to batch_size if not specified
+        if self.micro_batch_size is None:
+            self.micro_batch_size = self.batch_size
         if self.batch_size < self.gradient_accumulation_steps:
             raise ValueError("batch_size must be >= gradient_accumulation_steps")
         if self.learning_rate <= 0:

@@ -82,6 +82,7 @@ model:
 
 training:
   batch_size: 4
+  micro_batch_size: 4  # Add this line
   gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
