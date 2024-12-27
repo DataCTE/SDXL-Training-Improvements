@@ -70,21 +70,21 @@ class DDPMTrainer(TrainingMethod):
             else:
                 latents_list = [lat for lat in batch["model_input"]]
 
-            # Force print the original shapes
-            print(f"Original shapes: {[lat.shape for lat in latents_list]}")
+            # Log original shapes
+            logger.info(f"Processing latents with shapes: {[lat.shape for lat in latents_list]}")
 
             # First normalize orientation - make all landscape (width > height)
             oriented_latents = []
             for idx, lat in enumerate(latents_list):
                 h, w = lat.shape[-2:]
-                print(f"Processing latent {idx}: h={h}, w={w}")
+                logger.info(f"Latent {idx}: {h}x{w}")
                 
                 # Always make width larger than height
                 if h > w:
-                    print(f"Rotating latent {idx}")
+                    logger.info(f"Rotating latent {idx} to landscape orientation")
                     lat = lat.transpose(-1, -2)
                 
-                print(f"After orientation: {lat.shape}")
+                logger.info(f"Latent {idx} final orientation: {lat.shape}")
                 oriented_latents.append(lat)
 
             # Now all tensors should be in landscape orientation
@@ -92,13 +92,13 @@ class DDPMTrainer(TrainingMethod):
             target_h = min(oriented_latents[0].shape[-2], oriented_latents[0].shape[-1])
             target_w = max(oriented_latents[0].shape[-2], oriented_latents[0].shape[-1])
 
-            print(f"Target dimensions: {target_h}x{target_w}")
+            logger.info(f"Target dimensions for all latents: {target_h}x{target_w}")
 
             # Resize all tensors to match target size
             processed_latents = []
             for idx, lat in enumerate(oriented_latents):
                 if lat.shape[-2:] != (target_h, target_w):
-                    print(f"Resizing latent {idx} from {lat.shape[-2:]} to {(target_h, target_w)}")
+                    logger.info(f"Resizing latent {idx}: {lat.shape[-2:]} → {(target_h, target_w)}")
                     lat = F.interpolate(
                         lat,
                         size=(target_h, target_w),
@@ -106,17 +106,16 @@ class DDPMTrainer(TrainingMethod):
                         align_corners=False
                     )
                 processed_latents.append(lat)
-                print(f"Final shape for latent {idx}: {lat.shape}")
+                logger.info(f"Latent {idx} ready: {lat.shape}")
 
             # Verify shapes before stacking
             shapes = [lat.shape for lat in processed_latents]
-            print(f"Shapes before stacking: {shapes}")
-            if len(set(str(s) for s in shapes)) != 1:  # Convert to string for proper comparison
+            if len(set(str(s) for s in shapes)) != 1:
                 raise ValueError(f"Inconsistent tensor shapes after processing: {shapes}")
 
             # Stack the processed tensors
             latents = torch.stack(processed_latents, dim=0)
-            print(f"Final stacked shape: {latents.shape}")
+            logger.info(f"Successfully stacked latents: {latents.shape}")
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
                 
