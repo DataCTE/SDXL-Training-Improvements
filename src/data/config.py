@@ -151,7 +151,7 @@ class OptimizerConfig:
 @dataclass
 class TrainingMethodConfig:
     """Training method configuration."""
-    method: str = "ddpm"  # Single source of truth for training method: "ddpm" or "flow_matching"
+    method: str = "ddpm"  # Valid values: "ddpm" or "flow_matching"
     num_timesteps: int = 1000
     # DDPM specific
     snr_gamma: float = 5.0

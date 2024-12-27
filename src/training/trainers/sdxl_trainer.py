@@ -41,7 +41,11 @@ class SDXLTrainer:
                device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
                validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
         # Extract method from training configuration
-        method = config.training.method.lower()
+        method = config.training.method
+        if not isinstance(method, str):
+            raise ValueError(f"Training method must be a string, got {type(method)}")
+            
+        method = method.lower()
         logger.info(f"Creating trainer with method: {method}")
         
         trainer_cls = TrainingMethod.get_method(method)
