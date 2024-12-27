@@ -85,25 +85,23 @@ training:
   gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
-  method:
-    type: "ddpm"  # Single source of truth for training method
-    num_timesteps: 1000
-    # DDPM specific settings
-    snr_gamma: 5.0
-    zero_terminal_snr: true
-    sigma_min: 0.002
-    sigma_max: 2000.0
-    rho: 7.0
-    scheduler:
-      num_train_timesteps: 1000
-      beta_start: 0.00085
-      beta_end: 0.012
-      beta_schedule: "scaled_linear"
-      timestep_spacing: "uniform" #options are "leading", "trailing", "uniform"
-      rescale_betas_zero_snr: true
-    # Flow matching specific settings
-    sigma: 1.0
-    time_sampling: "uniform"
+  method: "ddpm"  # Valid values: "ddpm" or "flow_matching"
+  num_timesteps: 1000
+  snr_gamma: 5.0
+  zero_terminal_snr: true
+  sigma_min: 0.002
+  sigma_max: 2000.0
+  rho: 7.0
+  scheduler:
+    num_train_timesteps: 1000
+    beta_start: 0.00085
+    beta_end: 0.012
+    beta_schedule: "scaled_linear"
+    timestep_spacing: "uniform" #options are "leading", "trailing", "uniform"
+    rescale_betas_zero_snr: true
+  # Flow matching specific settings (used only when method is "flow_matching")
+  sigma: 1.0
+  time_sampling: "uniform"
 
 data:
   # Supports both Windows and Unix paths

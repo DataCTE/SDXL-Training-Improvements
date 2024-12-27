@@ -317,7 +317,14 @@ class Config:
             model_config = ModelConfig(**config_dict.get("model", {}))
 
             training_dict = config_dict.get("training", {})
+            # Extract method string from training config
+            training_method = training_dict.get("method", "ddpm")
+            if not isinstance(training_method, str):
+                logger.warning(f"Invalid training method format: {training_method}, defaulting to 'ddpm'")
+                training_method = "ddpm"
+            
             training_config = TrainingConfig(
+                method=training_method,
                 memory=MemoryConfig(**training_dict.get("memory", {})),
                 **{
                     k: v
