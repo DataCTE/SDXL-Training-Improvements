@@ -355,7 +355,7 @@ class PreprocessingPipeline:
                     
                     for item in batch_items:
                         try:
-                            with torch.cuda.amp.autocast():
+                            with torch.amp.autocast('cuda'):
                                 embeddings = self.latent_preprocessor.encode_prompt([item["caption"]])
                             
                             self.cache_manager.save_preprocessed_data(
@@ -445,17 +445,18 @@ class PreprocessingPipeline:
                         
                         for img_path in batch_paths:
                             try:
-                                with torch.cuda.amp.autocast():
+                                with torch.amp.autocast('cuda'):
                                     processed = self._process_image(img_path)
                                     if processed:
                                         metadata = {
-                                            **processed.get("metadata", {}),
+                                            **(processed.get("metadata", {}) if isinstance(processed, dict) else {}),
                                             "path": img_path,
                                             "timestamp": time.time()
                                         }
                                         
+                                        image_latent = processed["image_latent"] if isinstance(processed, dict) else processed
                                         self.cache_manager.save_preprocessed_data(
-                                            image_latent=processed["image_latent"],
+                                            image_latent=image_latent,
                                             metadata=metadata,
                                             file_path=img_path
                                         )

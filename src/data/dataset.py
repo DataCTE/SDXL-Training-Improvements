@@ -353,58 +353,47 @@ class AspectBucketDataset(Dataset):
     def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format using cached data."""
         try:
+            # Group samples by bucket size
+            bucket_groups = {}
+            for item in batch:
+                bucket_idx = item.get("bucket_idx", 0)
+                if bucket_idx not in bucket_groups:
+                    bucket_groups[bucket_idx] = []
+                bucket_groups[bucket_idx].append(item)
+            
+            # Use largest group if multiple buckets present
+            if bucket_groups:
+                largest_bucket = max(bucket_groups.items(), key=lambda x: len(x[1]))
+                batch = largest_bucket[1]
+            
             result = {
                 "original_sizes": [],
                 "crop_top_lefts": [],
                 "target_sizes": []
             }
 
-            # Get example latent shape from first valid item
-            example_shape = None
-            for item in batch:
-                if "latent" in item:
-                    latent = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
-                    if latent is not None:
-                        example_shape = latent.shape
-                        break
-                elif "model_input" in item:
-                    if item["model_input"] is not None:
-                        example_shape = item["model_input"].shape
-                        break
-
-            if example_shape is None:
-                raise ValueError("Could not determine latent shape from batch")
-
-            # Create or get collation buffers
-            buffers = self._create_collate_buffers(len(batch), example_shape)
-
-            # Handle latent data
+            # Process latents from consistent bucket
             latents = []
-            for i, item in enumerate(batch):
-                # Handle both direct and nested latent formats
+            for item in batch:
                 if "latent" in item:
                     latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
                     if latent_data is not None:
                         latents.append(latent_data)
                 else:
-                    # Fallback to direct model_input
                     model_input = item.get("model_input")
                     if model_input is not None:
                         latents.append(model_input)
 
-                # Collect metadata
                 result["original_sizes"].append(item.get("original_sizes", [(1024, 1024)])[0])
                 result["crop_top_lefts"].append(item.get("crop_top_lefts", [(0, 0)])[0])
                 result["target_sizes"].append(item.get("target_sizes", [(1024, 1024)])[0])
 
             if latents:
-                if buffers and 'latent' in buffers:
-                    # Use preallocated buffers
-                    torch.stack(latents, out=buffers['latent']['model_input'][:len(latents)])
-                    torch.stack(latents, out=buffers['latent']['latent'][:len(latents)])
-                    result["latent"] = buffers['latent']
-                else:
-                    # Fallback to regular stacking
+                # Verify all tensors have same shape
+                first_shape = latents[0].shape
+                latents = [lat for lat in latents if lat.shape == first_shape]
+                
+                if len(latents) > 0:
                     stacked_latents = torch.stack(latents)
                     result["latent"] = {
                         "model_input": stacked_latents,
