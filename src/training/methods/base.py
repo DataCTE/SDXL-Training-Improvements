@@ -1,4 +1,5 @@
 """Base classes for SDXL training methods with extreme speedups."""
+import logging
 from abc import ABC, ABCMeta, abstractmethod
 from typing import Dict, Optional, Type
 from src.core.history import TorchHistory
@@ -49,6 +50,19 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
         self.unet = unet
         self.config = config
         self.training = True
+
+        # Setup logging
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s | %(levelname)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # Ensure all loggers are set to DEBUG level
+        for logger_name in logging.root.manager.loggerDict:
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(logging.DEBUG)
+
         self.history = TorchHistory(self.unet)
         self.history.add_log_parameters_hook()
         self.noise_scheduler = DDPMScheduler(
