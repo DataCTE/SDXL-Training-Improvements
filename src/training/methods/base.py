@@ -1,7 +1,7 @@
 """Base classes for SDXL training methods with extreme speedups."""
 import logging
 from abc import ABC, ABCMeta, abstractmethod
-from typing import Dict, Optional, Type
+from typing import Dict, Optional, Type, Tuple
 from src.core.history import TorchHistory
 import torch
 import torch.backends.cudnn
