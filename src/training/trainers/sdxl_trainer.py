@@ -63,16 +63,12 @@ class SDXLTrainer:
         except Exception as e:
             logger.error(f"Failed to initialize training method: {str(e)}", exc_info=True)
             logger.error(
-                "Error in training step",
+                "Error initializing training method",
                 extra={
                     'error_type': type(e).__name__,
                     'error_msg': str(e),
-                    'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                    'accumulation_step': accumulation_step,
-                    'tensor_shapes': {
-                        k: v.shape if isinstance(v, torch.Tensor) else type(v)
-                        for k, v in batch.items()
-                    } if isinstance(batch, dict) else None
+                    'method_name': method,
+                    'config': str(config)
                 },
                 exc_info=True
             )
