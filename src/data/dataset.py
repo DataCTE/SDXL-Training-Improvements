@@ -353,6 +353,9 @@ class AspectBucketDataset(Dataset):
     def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format using cached data."""
         try:
+            logger.debug(f"Starting collate with batch size: {len(batch)}")
+            logger.debug(f"Initial batch structure: {[{k: v.shape if isinstance(v, torch.Tensor) else type(v) for k, v in item.items()} for item in batch]}")
+            
             # Group samples by bucket size
             bucket_groups = {}
             for item in batch:
@@ -361,10 +364,13 @@ class AspectBucketDataset(Dataset):
                     bucket_groups[bucket_idx] = []
                 bucket_groups[bucket_idx].append(item)
             
+            logger.debug(f"Bucket groups: {[(k, len(v)) for k, v in bucket_groups.items()]}")
+            
             # Use largest group if multiple buckets present
             if bucket_groups:
                 largest_bucket = max(bucket_groups.items(), key=lambda x: len(x[1]))
                 batch = largest_bucket[1]
+                logger.debug(f"Selected bucket {largest_bucket[0]} with size {len(batch)}")
             
             result = {
                 "original_sizes": [],
@@ -377,17 +383,28 @@ class AspectBucketDataset(Dataset):
             prompt_embeds = []
             pooled_prompt_embeds = []
 
-            for item in batch:
+            for i, item in enumerate(batch):
+                logger.debug(f"Processing item {i}")
+                
+                # Log item structure
+                logger.debug(f"Item keys: {item.keys()}")
+                if "latent" in item:
+                    logger.debug(f"Latent structure: {type(item['latent'])} with keys: {item['latent'].keys() if isinstance(item['latent'], dict) else 'not dict'}")
+                if "embeddings" in item:
+                    logger.debug(f"Embeddings structure: {type(item['embeddings'])} with keys: {item['embeddings'].keys() if isinstance(item['embeddings'], dict) else 'not dict'}")
+
                 # Handle latents
                 if "latent" in item:
                     latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
                     if latent_data is not None:
+                        logger.debug(f"Found latent with shape: {latent_data.shape}")
                         if latent_data.is_cuda:
                             latent_data = latent_data.cpu()
                         latents.append(latent_data)
                 elif "model_input" in item:
                     model_input = item["model_input"]
                     if model_input is not None:
+                        logger.debug(f"Found model_input with shape: {model_input.shape}")
                         if model_input.is_cuda:
                             model_input = model_input.cpu()
                         latents.append(model_input)
@@ -395,22 +412,26 @@ class AspectBucketDataset(Dataset):
                 # Handle embeddings - check both direct and nested formats
                 if "prompt_embeds" in item:
                     prompt_emb = item["prompt_embeds"]
+                    logger.debug(f"Found direct prompt_embeds with shape: {prompt_emb.shape}")
                     if prompt_emb.is_cuda:
                         prompt_emb = prompt_emb.cpu()
                     prompt_embeds.append(prompt_emb)
                 elif "embeddings" in item and "prompt_embeds" in item["embeddings"]:
                     prompt_emb = item["embeddings"]["prompt_embeds"]
+                    logger.debug(f"Found nested prompt_embeds with shape: {prompt_emb.shape}")
                     if prompt_emb.is_cuda:
                         prompt_emb = prompt_emb.cpu()
                     prompt_embeds.append(prompt_emb)
 
                 if "pooled_prompt_embeds" in item:
                     pooled_emb = item["pooled_prompt_embeds"]
+                    logger.debug(f"Found direct pooled_prompt_embeds with shape: {pooled_emb.shape}")
                     if pooled_emb.is_cuda:
                         pooled_emb = pooled_emb.cpu()
                     pooled_prompt_embeds.append(pooled_emb)
                 elif "embeddings" in item and "pooled_prompt_embeds" in item["embeddings"]:
                     pooled_emb = item["embeddings"]["pooled_prompt_embeds"]
+                    logger.debug(f"Found nested pooled_prompt_embeds with shape: {pooled_emb.shape}")
                     if pooled_emb.is_cuda:
                         pooled_emb = pooled_emb.cpu()
                     pooled_prompt_embeds.append(pooled_emb)
@@ -420,12 +441,16 @@ class AspectBucketDataset(Dataset):
                 result["crop_top_lefts"].append(item.get("crop_top_lefts", [(0, 0)])[0])
                 result["target_sizes"].append(item.get("target_sizes", [(1024, 1024)])[0])
 
+            logger.debug(f"Collected {len(latents)} latents, {len(prompt_embeds)} prompt embeds, {len(pooled_prompt_embeds)} pooled embeds")
+
             # Process latents
             if latents:
                 first_shape = latents[0].shape
+                logger.debug(f"First latent shape: {first_shape}")
                 latents = [lat for lat in latents if lat.shape == first_shape]
                 if len(latents) > 0:
                     stacked_latents = torch.stack(latents)
+                    logger.debug(f"Stacked latents shape: {stacked_latents.shape}")
                     if self.config.data.pin_memory and not stacked_latents.is_cuda:
                         stacked_latents = stacked_latents.pin_memory()
                     result["latent"] = {
@@ -438,6 +463,9 @@ class AspectBucketDataset(Dataset):
                 stacked_prompt_embeds = torch.stack(prompt_embeds)
                 stacked_pooled_embeds = torch.stack(pooled_prompt_embeds)
                 
+                logger.debug(f"Stacked prompt embeds shape: {stacked_prompt_embeds.shape}")
+                logger.debug(f"Stacked pooled embeds shape: {stacked_pooled_embeds.shape}")
+                
                 if self.config.data.pin_memory:
                     if not stacked_prompt_embeds.is_cuda:
                         stacked_prompt_embeds = stacked_prompt_embeds.pin_memory()
@@ -448,12 +476,17 @@ class AspectBucketDataset(Dataset):
                 result["pooled_prompt_embeds"] = stacked_pooled_embeds
 
             if not ("prompt_embeds" in result and "pooled_prompt_embeds" in result):
+                logger.error("Missing embeddings in result")
+                logger.error(f"Result keys: {result.keys()}")
+                logger.error(f"Original batch keys: {[list(item.keys()) for item in batch]}")
                 raise ValueError("Missing required embeddings in batch data")
 
+            logger.debug(f"Final result keys: {result.keys()}")
             return result
 
         except Exception as e:
             logger.error(f"Failed to collate batch: {str(e)}")
+            logger.error(f"Batch structure: {[list(item.keys()) for item in batch]}")
             raise RuntimeError(f"Failed to collate batch: {str(e)}")
     
 
