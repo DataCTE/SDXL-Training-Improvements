@@ -378,10 +378,16 @@ class AspectBucketDataset(Dataset):
                 if "latent" in item:
                     latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
                     if latent_data is not None:
+                        # Move to CPU before pinning if needed
+                        if latent_data.is_cuda:
+                            latent_data = latent_data.cpu()
                         latents.append(latent_data)
                 else:
                     model_input = item.get("model_input")
                     if model_input is not None:
+                        # Move to CPU before pinning if needed
+                        if model_input.is_cuda:
+                            model_input = model_input.cpu()
                         latents.append(model_input)
 
                 result["original_sizes"].append(item.get("original_sizes", [(1024, 1024)])[0])
@@ -395,6 +401,9 @@ class AspectBucketDataset(Dataset):
                 
                 if len(latents) > 0:
                     stacked_latents = torch.stack(latents)
+                    # Pin memory only if tensor is on CPU
+                    if self.config.data.pin_memory and not stacked_latents.is_cuda:
+                        stacked_latents = stacked_latents.pin_memory()
                     result["latent"] = {
                         "model_input": stacked_latents,
                         "latent": stacked_latents
@@ -402,11 +411,16 @@ class AspectBucketDataset(Dataset):
 
             # Handle embeddings
             if all("embeddings" in item for item in batch):
-                embeddings = {
-                    key: torch.stack([item["embeddings"][key] for item in batch])
-                    for key in ["prompt_embeds", "pooled_prompt_embeds"]
-                    if all(key in item["embeddings"] for item in batch)
-                }
+                embeddings = {}
+                for key in ["prompt_embeds", "pooled_prompt_embeds"]:
+                    if all(key in item["embeddings"] for item in batch):
+                        tensors = [item["embeddings"][key] for item in batch]
+                        # Move to CPU before pinning if needed
+                        tensors = [t.cpu() if t.is_cuda else t for t in tensors]
+                        stacked = torch.stack(tensors)
+                        if self.config.data.pin_memory and not stacked.is_cuda:
+                            stacked = stacked.pin_memory()
+                        embeddings[key] = stacked
                 result["embeddings"] = embeddings
 
             return result
