@@ -71,34 +71,42 @@ class DDPMTrainer(TrainingMethod):
                 latents_list = [lat for lat in batch["model_input"]]
 
             # Log original shapes
-            logger.info(f"Processing latents with shapes: {[lat.shape for lat in latents_list]}")
+            logger.info(f"Processing batch with {len(latents_list)} latents")
+            for idx, lat in enumerate(latents_list):
+                logger.info(f"Original latent {idx}: shape={lat.shape}")
 
-            # First normalize orientation - make all landscape (width > height)
+            # Determine target orientation based on majority
+            orientations = []
+            for lat in latents_list:
+                h, w = lat.shape[-2:]
+                orientations.append('landscape' if w >= h else 'portrait')
+            
+            target_orientation = max(set(orientations), key=orientations.count)
+            logger.info(f"Target orientation: {target_orientation}")
+
+            # Normalize orientations
             oriented_latents = []
             for idx, lat in enumerate(latents_list):
                 h, w = lat.shape[-2:]
-                logger.info(f"Latent {idx}: {h}x{w}")
+                current_orientation = 'landscape' if w >= h else 'portrait'
                 
-                # Always make width larger than height
-                if h > w:
-                    logger.info(f"Rotating latent {idx} to landscape orientation")
+                if current_orientation != target_orientation:
+                    logger.info(f"Rotating latent {idx} from {current_orientation} to {target_orientation}")
                     lat = lat.transpose(-1, -2)
                 
-                logger.info(f"Latent {idx} final orientation: {lat.shape}")
                 oriented_latents.append(lat)
+                logger.info(f"Latent {idx} after orientation: shape={lat.shape}")
 
-            # Now all tensors should be in landscape orientation
-            # Get the target size from the first tensor
-            target_h = min(oriented_latents[0].shape[-2], oriented_latents[0].shape[-1])
-            target_w = max(oriented_latents[0].shape[-2], oriented_latents[0].shape[-1])
-
-            logger.info(f"Target dimensions for all latents: {target_h}x{target_w}")
+            # Get target dimensions based on the majority orientation
+            target_h = min(oriented_latents[0].shape[-2:])
+            target_w = max(oriented_latents[0].shape[-2:])
+            logger.info(f"Target dimensions: {target_h}x{target_w}")
 
             # Resize all tensors to match target size
             processed_latents = []
             for idx, lat in enumerate(oriented_latents):
                 if lat.shape[-2:] != (target_h, target_w):
-                    logger.info(f"Resizing latent {idx}: {lat.shape[-2:]} → {(target_h, target_w)}")
+                    logger.info(f"Resizing latent {idx} from {lat.shape[-2:]} to {(target_h, target_w)}")
                     lat = F.interpolate(
                         lat,
                         size=(target_h, target_w),
@@ -106,16 +114,16 @@ class DDPMTrainer(TrainingMethod):
                         align_corners=False
                     )
                 processed_latents.append(lat)
-                logger.info(f"Latent {idx} ready: {lat.shape}")
 
-            # Verify shapes before stacking
+            # Final verification
             shapes = [lat.shape for lat in processed_latents]
             if len(set(str(s) for s in shapes)) != 1:
-                raise ValueError(f"Inconsistent tensor shapes after processing: {shapes}")
+                shape_details = [f"latent_{i}: {s}" for i, s in enumerate(shapes)]
+                raise ValueError(f"Inconsistent shapes after processing:\n" + "\n".join(shape_details))
 
             # Stack the processed tensors
             latents = torch.stack(processed_latents, dim=0)
-            logger.info(f"Successfully stacked latents: {latents.shape}")
+            logger.info(f"Successfully stacked latents to shape: {latents.shape}")
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
                 
