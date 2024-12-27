@@ -321,53 +321,59 @@ class AspectBucketDataset(Dataset):
             return 0
 
     def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Collate batch of samples into training format.
+        """Collate batch of samples into training format using cached data.
         
         Args:
             batch: List of samples from dataset
             
         Returns:
-            Dict containing batched tensors for SDXL training:
-            {
-                'pixel_values': torch.Tensor,          # Image tensors [B, C, H, W]
-                'prompt_embeds': torch.Tensor,         # Combined text embeddings from both encoders
-                'pooled_prompt_embeds': torch.Tensor,  # Pooled embeddings from text encoder 2
-                'model_input': torch.Tensor,           # VAE encoded latents
-            }
+            Dict containing batched tensors for SDXL training
         """
         try:
-            # Use the buffer system for efficient memory handling
-            buffers = self._create_collate_buffers(
-                batch_size=len(batch),
-                example_shape=batch[0]['pixel_values'].shape
-            )
-            
-            # Stack pixel values using pinned memory if available
-            if 'pixel_values' in buffers:
-                # Copy to pinned buffer
-                for i, item in enumerate(batch):
-                    buffers['pixel_values'][i].copy_(item['pixel_values'])
-                # Transfer to device
-                pixel_values = buffers['device_storage'].copy_(buffers['pixel_values'])
-            else:
-                # Fallback to regular stacking
-                pixel_values = torch.stack([item['pixel_values'] for item in batch])
-
-            # Get prompt embeddings using the latent preprocessor
-            prompt_batch = [item['prompt'] for item in batch]
-            encoded_prompts = self.latent_preprocessor.encode_prompt(prompt_batch)
-            
-            # Encode images to latent space
-            model_input = self.latent_preprocessor.encode_images(pixel_values)
-
-            return {
-                'pixel_values': pixel_values,
-                'prompt_embeds': encoded_prompts['prompt_embeds'],
-                'pooled_prompt_embeds': encoded_prompts['pooled_prompt_embeds'],
-                'model_input': model_input['model_input']
+            result = {
+                "original_sizes": [],
+                "crop_top_lefts": [],
+                "target_sizes": []
             }
-            
+
+            # Handle latent data
+            latents = []
+            for item in batch:
+                # Handle both direct and nested latent formats
+                if "latent" in item:
+                    latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
+                    if latent_data is not None:
+                        latents.append(latent_data)
+                else:
+                    # Fallback to direct model_input
+                    model_input = item.get("model_input")
+                    if model_input is not None:
+                        latents.append(model_input)
+
+                # Collect metadata
+                result["original_sizes"].append(item.get("original_sizes", [(1024, 1024)])[0])
+                result["crop_top_lefts"].append(item.get("crop_top_lefts", [(0, 0)])[0])
+                result["target_sizes"].append(item.get("target_sizes", [(1024, 1024)])[0])
+
+            if latents:
+                result["latent"] = {
+                    "model_input": torch.stack(latents),
+                    "latent": torch.stack(latents)
+                }
+
+            # Handle embeddings
+            if all("embeddings" in item for item in batch):
+                embeddings = {
+                    key: torch.stack([item["embeddings"][key] for item in batch])
+                    for key in ["prompt_embeds", "pooled_prompt_embeds"]
+                    if all(key in item["embeddings"] for item in batch)
+                }
+                result["embeddings"] = embeddings
+
+            return result
+
         except Exception as e:
+            logger.error(f"Failed to collate batch: {str(e)}")
             raise RuntimeError(f"Failed to collate batch: {str(e)}")
     
 
