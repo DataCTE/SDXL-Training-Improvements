@@ -201,13 +201,34 @@ class DDPMTrainer(TrainingMethod):
 
         except Exception as e:
             logger.error("=== Error State Tensor Shapes ===")
+            # Log all tensor shapes in the batch
+            logger.error("Batch tensor shapes:")
+            for key, value in batch.items():
+                if isinstance(value, dict):
+                    logger.error(f"{key}:")
+                    for sub_key, sub_value in value.items():
+                        if isinstance(sub_value, torch.Tensor):
+                            logger.error(f"  → {key}.{sub_key}: {sub_value.shape}")
+                elif isinstance(value, torch.Tensor):
+                    logger.error(f"→ {key}: {value.shape}")
+
+            # Log local variables' shapes
+            logger.error("\nLocal variable tensor shapes:")
             local_vars = locals()
-            tensor_shapes = {
-                name: getattr(var, 'shape', None) 
-                for name, var in local_vars.items() 
-                if isinstance(var, torch.Tensor)
-            }
-            for name, shape in tensor_shapes.items():
-                logger.error(f"→ {name}: {shape}")
-            logger.error("=====================================")
-            raise
+            for name, var in local_vars.items():
+                if isinstance(var, torch.Tensor):
+                    logger.error(f"→ {name}: {var.shape}")
+                elif isinstance(var, list) and var and isinstance(var[0], torch.Tensor):
+                    logger.error(f"→ {name}: [list of tensors with shapes: {[t.shape for t in var]}]")
+
+            # Log full traceback
+            logger.error("\nFull traceback:", exc_info=True)
+            
+            # Log additional context
+            logger.error("\nError context:", extra={
+                'error_type': type(e).__name__,
+                'error_msg': str(e),
+                'stack_info': True
+            })
+            
+            raise RuntimeError(f"Loss computation failed with detailed shapes logged above: {str(e)}") from e
