@@ -67,25 +67,47 @@ class DDPMTrainer(TrainingMethod):
         try:
             logger.info("\n=== Starting DDPM Loss Computation ===")
             
-            # Log initial batch contents
-            logger.info("\nInput Batch Contents:")
+            # First validate model input with detailed error
+            if "model_input" not in batch:
+                error_msg = "Missing model_input in batch"
+                logger.error(error_msg, exc_info=True, stack_info=True, extra={
+                    'batch_keys': list(batch.keys()),
+                    'error_type': 'KeyError',
+                    'function': '_compute_loss_impl'
+                })
+                raise KeyError(error_msg)
+
+            # Log initial batch contents with structured logging
+            batch_info = {}
             for key, value in batch.items():
                 if isinstance(value, torch.Tensor):
-                    logger.info(f"{key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
+                    batch_info[key] = {
+                        'type': 'tensor',
+                        'shape': tuple(value.shape),
+                        'dtype': str(value.dtype),
+                        'device': str(value.device)
+                    }
                 elif isinstance(value, dict):
-                    logger.info(f"{key}:")
-                    for k, v in value.items():
-                        if isinstance(v, torch.Tensor):
-                            logger.info(f"  {k}: shape={v.shape}, dtype={v.dtype}, device={v.device}")
+                    batch_info[key] = {
+                        'type': 'dict',
+                        'contents': {
+                            k: {
+                                'type': 'tensor',
+                                'shape': tuple(v.shape),
+                                'dtype': str(v.dtype),
+                                'device': str(v.device)
+                            } if isinstance(v, torch.Tensor) else {'type': str(type(v))}
+                            for k, v in value.items()
+                        }
+                    }
                 elif isinstance(value, list):
-                    logger.info(f"{key}: list of length {len(value)}")
-                    if value and isinstance(value[0], torch.Tensor):
-                        logger.info(f"  First element: shape={value[0].shape}, dtype={value[0].dtype}, device={value[0].device}")
+                    batch_info[key] = {
+                        'type': 'list',
+                        'length': len(value),
+                        'first_element_type': str(type(value[0])) if value else None
+                    }
 
-            # First validate model input
-            if "model_input" not in batch:
-                logger.error("Missing model_input in batch", exc_info=True, stack_info=True)
-                raise KeyError("Missing model_input in batch")
+            logger.info("Batch structure:", extra={'batch_info': batch_info})
 
             # Process latents with validation
             try:
