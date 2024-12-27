@@ -60,34 +60,38 @@ class FlowMatchingTrainer(TrainingMethod):
         try:
             print("\n=== Starting Flow Matching Loss Computation ===")
             
-            # Validate batch contents
-            print("\nValidating Batch Contents:")
-            required_keys = {
-                'model_input', 'prompt_embeds', 'pooled_prompt_embeds',
-                'original_sizes', 'crop_top_lefts', 'target_sizes'
-            }
-            available_keys = set(batch.keys())
-            print(f"Available batch keys: {available_keys}")
-            print(f"Required batch keys: {required_keys}")
+            # Validate batch contents using parent class method
+            self._validate_batch(batch)
             
-            missing_keys = required_keys - available_keys
-            if missing_keys:
-                error_msg = f"Missing required keys in batch: {missing_keys}"
-                print(f"\nERROR: {error_msg}")
-                print("\nBatch contents summary:")
-                for key, value in batch.items():
-                    if isinstance(value, torch.Tensor):
-                        print(f"  {key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
-                    elif isinstance(value, list):
-                        print(f"  {key}: list of length {len(value)}")
-                    else:
-                        print(f"  {key}: type={type(value)}")
-                raise KeyError(error_msg)
+            # Process latents
+            if isinstance(batch["model_input"], list):
+                latents_list = batch["model_input"]
+            else:
+                latents_list = [lat for lat in batch["model_input"]]
 
-            # Access validated input
-            x1 = batch["model_input"]
-            prompt_embeds = batch["prompt_embeds"]
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+            print(f"\nInitial Batch:")
+            print(f"Number of latents: {len(latents_list)}")
+            for idx, lat in enumerate(latents_list):
+                print(f"Latent {idx}: shape={lat.shape}, dtype={lat.dtype}, device={lat.device}")
+
+            # Extract embeddings using parent class method
+            prompt_embeds, pooled_prompt_embeds = self._extract_embeddings(batch)
+            print(f"\nFound embeddings:")
+            print(f"prompt_embeds shape: {prompt_embeds.shape}")
+            print(f"pooled_prompt_embeds shape: {pooled_prompt_embeds.shape}")
+
+            # Process sizes with defaults
+            original_sizes = batch.get("original_sizes", [(1024, 1024)] * len(latents_list))
+            crop_top_lefts = batch.get("crop_top_lefts", [(0, 0)] * len(latents_list))
+            target_sizes = batch.get("target_sizes", [(1024, 1024)] * len(latents_list))
+
+            print("\nSize Information:")
+            print(f"Original sizes: {original_sizes}")
+            print(f"Crop top lefts: {crop_top_lefts}")
+            print(f"Target sizes: {target_sizes}")
+
+            # Stack latents if needed
+            x1 = torch.stack(latents_list, dim=0) if isinstance(batch["model_input"], list) else batch["model_input"]
             
             # Sample time steps
             t = self.sample_logit_normal(

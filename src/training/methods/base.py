@@ -78,6 +78,42 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
             if isinstance(attr, torch.Tensor):
                 setattr(self.noise_scheduler, attr_name, attr.to(unet.device))
 
+    def _extract_embeddings(self, batch: Dict[str, Tensor]) -> Tuple[Optional[Tensor], Optional[Tensor]]:
+        """Extract embeddings from batch, handling both cached and direct formats."""
+        if "embeddings" in batch:
+            # Handle cached format
+            embeddings = batch["embeddings"]
+            prompt_embeds = embeddings.get("prompt_embeds")
+            pooled_prompt_embeds = embeddings.get("pooled_prompt_embeds")
+        else:
+            # Try direct format
+            prompt_embeds = batch.get("prompt_embeds")
+            pooled_prompt_embeds = batch.get("pooled_prompt_embeds")
+            
+        return prompt_embeds, pooled_prompt_embeds
+
+    def _validate_batch(self, batch: Dict[str, Tensor]) -> None:
+        """Validate batch contents and structure."""
+        if "model_input" not in batch:
+            raise KeyError("Missing model_input in batch")
+            
+        prompt_embeds, pooled_prompt_embeds = self._extract_embeddings(batch)
+        if prompt_embeds is None or pooled_prompt_embeds is None:
+            print("\nEmbeddings structure:")
+            for key, value in batch.items():
+                if isinstance(value, dict):
+                    print(f"{key}:")
+                    for subkey, subval in value.items():
+                        if isinstance(subval, torch.Tensor):
+                            print(f"  {subkey}: shape={subval.shape}, dtype={subval.dtype}")
+                        else:
+                            print(f"  {subkey}: type={type(subval)}")
+                elif isinstance(value, torch.Tensor):
+                    print(f"{key}: shape={value.shape}, dtype={value.dtype}")
+                else:
+                    print(f"{key}: type={type(value)}")
+            raise KeyError("Missing required embeddings")
+
     @abstractmethod
     def compute_loss(
         self,
