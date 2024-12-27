@@ -106,15 +106,25 @@ class WandbLogger:
             return
             
         try:
-            # Only watch model once
+            # Only log model once
             if not hasattr(self, 'model_logged') or not self.model_logged:
-                wandb.watch(
-                    model,
-                    criterion=criterion,
-                    log="all",
-                    log_freq=100
-                )
+                # Log model architecture as config
+                model_config = {
+                    'model_parameters': sum(p.numel() for p in model.parameters()),
+                    'model_structure': str(model),
+                }
+                wandb.config.update({'model': model_config}, allow_val_change=True)
+                
+                # Log initial parameter statistics
+                param_stats = {
+                    f"parameters/{name}_norm": param.norm().item()
+                    for name, param in model.named_parameters()
+                    if param.requires_grad
+                }
+                wandb.log(param_stats, step=step, commit=commit)
+                
                 self.model_logged = True
+                
         except Exception as e:
             logger.error(f"Failed to log model: {str(e)}")
 
