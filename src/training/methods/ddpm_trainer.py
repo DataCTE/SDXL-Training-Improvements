@@ -1,5 +1,6 @@
 """DDPM trainer implementation for SDXL with extreme speedups."""
 import logging
+import traceback
 import torch
 import torch.backends.cudnn
 from src.training.methods.base import make_picklable
