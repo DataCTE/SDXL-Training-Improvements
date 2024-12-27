@@ -252,7 +252,7 @@ class CacheManager(TensorValidator):
 
     def save_preprocessed_data(
         self,
-        image_latent: Optional[Dict[str, torch.Tensor]],
+        image_latent: Optional[Union[Dict[str, torch.Tensor], torch.Tensor]],
         text_latent: Optional[Dict[str, Any]] = None,
         metadata: Dict = None,
         file_path: Union[str, Path] = None
@@ -269,23 +269,38 @@ class CacheManager(TensorValidator):
             }
 
             if image_latent is not None:
-                image_latent = self._process_latents(image_latent, "image")
-                latent_path = self.image_latents_dir / f"{base_name}.pt"
-                
-                # Structure the latent data properly
-                latent_data = {
-                    "latent": {
-                        "model_input": image_latent.get("image_latent", image_latent),
-                        "latent": image_latent
-                    },
-                    "metadata": {
-                        "original_size": metadata.get("original_size", (1024, 1024)),
-                        "crop_top_left": metadata.get("crop_top_left", (0, 0)),
-                        "target_size": metadata.get("target_size", (1024, 1024)),
-                        **{k: v for k, v in metadata.items() if k not in ["original_size", "crop_top_left", "target_size"]}
+                # Handle both tensor and dict inputs
+                if isinstance(image_latent, torch.Tensor):
+                    # Convert tensor to expected dict structure
+                    latent_data = {
+                        "latent": {
+                            "model_input": image_latent,
+                            "latent": image_latent
+                        },
+                        "metadata": {
+                            "original_size": metadata.get("original_size", (1024, 1024)),
+                            "crop_top_left": metadata.get("crop_top_left", (0, 0)),
+                            "target_size": metadata.get("target_size", (1024, 1024)),
+                            **{k: v for k, v in metadata.items() if k not in ["original_size", "crop_top_left", "target_size"]}
+                        }
                     }
-                }
+                else:
+                    # Use existing dict structure
+                    latent_data = {
+                        "latent": {
+                            "model_input": image_latent.get("image_latent", image_latent),
+                            "latent": image_latent
+                        },
+                        "metadata": metadata
+                    }
                 
+                latent_path = self.image_latents_dir / f"{base_name}.pt"
+                # Ensure tensor is on CPU before saving
+                if isinstance(latent_data["latent"]["model_input"], torch.Tensor):
+                    latent_data["latent"]["model_input"] = latent_data["latent"]["model_input"].cpu()
+                if isinstance(latent_data["latent"]["latent"], torch.Tensor):
+                    latent_data["latent"]["latent"] = latent_data["latent"]["latent"].cpu()
+                    
                 torch.save(latent_data, latent_path)
                 cache_entry["image_latent_path"] = str(latent_path)
 
