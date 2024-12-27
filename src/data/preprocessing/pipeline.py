@@ -139,54 +139,39 @@ class PreprocessingPipeline:
         img: Union[str, Path, Image.Image],
         max_aspect_ratio: Optional[float] = None
     ) -> Tuple[int, Tuple[int, int]]:
-        """Assign image to optimal bucket based on aspect ratio and size.
-        
-        Args:
-            img: Image path or PIL Image object
-            max_aspect_ratio: Optional override for max aspect ratio
-                
-        Returns:
-            Tuple of (bucket_index, (height, width))
-                
-        Raises:
-            ValueError: If image cannot be processed
-        """
+        """Assign image to optimal bucket based on aspect ratio and size."""
         try:
-            # Handle both PIL Image and path inputs
             if isinstance(img, (str, Path)):
                 img = Image.open(img).convert('RGB')
                 
             w, h = img.size
             aspect_ratio = w / h
-            img_area = w * h
-                
+            
             # Use config max_aspect_ratio if not overridden
             max_ar = max_aspect_ratio or self.config.global_config.image.max_aspect_ratio
-                
+            
+            # Find exact matching bucket first
+            for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
+                bucket_ratio = bucket_w / bucket_h
+                if abs(aspect_ratio - bucket_ratio) < 0.01:  # Allow small tolerance
+                    return idx, (bucket_h, bucket_w)
+            
+            # If no exact match, find closest within max aspect ratio
             min_diff = float('inf')
             best_idx = 0
             best_bucket = self.buckets[0]
-                
-            for idx, bucket in enumerate(self.buckets):
-                bucket_h, bucket_w = bucket
+            
+            for idx, (bucket_h, bucket_w) in enumerate(self.buckets):
                 bucket_ratio = bucket_w / bucket_h
-                    
-                # Skip buckets exceeding max aspect ratio
                 if bucket_ratio > max_ar:
                     continue
-                        
-                # Calculate weighted difference score
+                    
                 ratio_diff = abs(aspect_ratio - bucket_ratio)
-                area_diff = abs(img_area - (bucket_w * bucket_h))
-                    
-                # Combined score favoring aspect ratio match
-                total_diff = (ratio_diff * 2.0) + (area_diff / (1536 * 1536))
-                    
-                if total_diff < min_diff:
-                    min_diff = total_diff
+                if ratio_diff < min_diff:
+                    min_diff = ratio_diff
                     best_idx = idx
-                    best_bucket = bucket
-                        
+                    best_bucket = (bucket_h, bucket_w)
+                    
             return best_idx, best_bucket
                 
         except Exception as e:
