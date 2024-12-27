@@ -187,7 +187,7 @@ class TrainingConfig:
     use_wandb: bool = True
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    method: TrainingMethodConfig = field(default_factory=TrainingMethodConfig)
+    method: str = "ddpm"  # Valid values: "ddpm" or "flow_matching"
 
 @dataclass
 class DataConfig:

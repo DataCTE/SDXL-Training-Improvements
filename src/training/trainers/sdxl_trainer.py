@@ -41,11 +41,11 @@ class SDXLTrainer:
                device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
                validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
         # Extract method from training configuration
-        print(config.training.method.type.lower())
-        method = config.training.method.type.lower()
+        method = config.training.method.lower()
+        logger.info(f"Creating trainer with method: {method}")
         
         trainer_cls = TrainingMethod.get_method(method)
-        logger.info(f"Creating trainer with method: {trainer_cls.__name__}")
+        logger.info(f"Using trainer class: {trainer_cls.__name__}")
         training_method = trainer_cls(unet=model.unet, config=config)
         return cls(
             config=config,
