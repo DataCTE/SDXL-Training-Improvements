@@ -157,14 +157,14 @@ def setup_logging(
         logger.removeHandler(handler)
     
     try:
-        # Create console handler with simplified colored output and INFO level
+        # Create console handler with specified level
         console_handler = logging.StreamHandler(sys.stdout)
         console_formatter = ColoredFormatter(
             '%(asctime)s | %(levelname)s | %(message)s',  # Remove exc_info from format
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_handler.setFormatter(console_formatter)
-        console_handler.setLevel(logging.DEBUG)  # Force DEBUG level for console
+        console_handler.setLevel(console_level)  # Use the console_level parameter
         logger.addHandler(console_handler)
 
         # Enable warning capture and configure propagation
