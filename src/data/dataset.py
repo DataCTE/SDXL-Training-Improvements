@@ -320,15 +320,38 @@ class AspectBucketDataset(Dataset):
             # Return 0 to indicate empty dataset on error
             return 0
 
-    def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Collate batch of samples into training format using cached data.
+    def _create_collate_buffers(self, batch_size: int, example_shape: tuple) -> Dict[str, torch.Tensor]:
+        """Create reusable buffers for batch collation.
         
         Args:
-            batch: List of samples from dataset
+            batch_size: Size of batch
+            example_shape: Shape of example tensor
             
         Returns:
-            Dict containing batched tensors for SDXL training
+            Dictionary of preallocated buffers
         """
+        if not hasattr(self, '_collate_buffers'):
+            self._collate_buffers = {}
+            
+        if torch.cuda.is_available() and self.config.data.pin_memory:
+            if 'latent' not in self._collate_buffers:
+                self._collate_buffers['latent'] = {
+                    'model_input': torch.empty(
+                        (batch_size, *example_shape),
+                        dtype=torch.float32,
+                        pin_memory=True
+                    ),
+                    'latent': torch.empty(
+                        (batch_size, *example_shape),
+                        dtype=torch.float32,
+                        pin_memory=True
+                    )
+                }
+                
+        return self._collate_buffers
+
+    def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
+        """Collate batch of samples into training format using cached data."""
         try:
             result = {
                 "original_sizes": [],
@@ -336,9 +359,28 @@ class AspectBucketDataset(Dataset):
                 "target_sizes": []
             }
 
+            # Get example latent shape from first valid item
+            example_shape = None
+            for item in batch:
+                if "latent" in item:
+                    latent = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
+                    if latent is not None:
+                        example_shape = latent.shape
+                        break
+                elif "model_input" in item:
+                    if item["model_input"] is not None:
+                        example_shape = item["model_input"].shape
+                        break
+
+            if example_shape is None:
+                raise ValueError("Could not determine latent shape from batch")
+
+            # Create or get collation buffers
+            buffers = self._create_collate_buffers(len(batch), example_shape)
+
             # Handle latent data
             latents = []
-            for item in batch:
+            for i, item in enumerate(batch):
                 # Handle both direct and nested latent formats
                 if "latent" in item:
                     latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
@@ -356,10 +398,18 @@ class AspectBucketDataset(Dataset):
                 result["target_sizes"].append(item.get("target_sizes", [(1024, 1024)])[0])
 
             if latents:
-                result["latent"] = {
-                    "model_input": torch.stack(latents),
-                    "latent": torch.stack(latents)
-                }
+                if buffers and 'latent' in buffers:
+                    # Use preallocated buffers
+                    torch.stack(latents, out=buffers['latent']['model_input'][:len(latents)])
+                    torch.stack(latents, out=buffers['latent']['latent'][:len(latents)])
+                    result["latent"] = buffers['latent']
+                else:
+                    # Fallback to regular stacking
+                    stacked_latents = torch.stack(latents)
+                    result["latent"] = {
+                        "model_input": stacked_latents,
+                        "latent": stacked_latents
+                    }
 
             # Handle embeddings
             if all("embeddings" in item for item in batch):
