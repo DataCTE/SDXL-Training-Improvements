@@ -51,12 +51,13 @@ class DDPMTrainer(TrainingMethod):
                 if latents is None:
                     raise KeyError("No latent data found in batch")
 
-            # Log latent shapes
-            logger.info(f"Input latents shape: {latents.shape}")
+            # Process tensors with detailed shape logging
+            logger.debug("=== DDPM Training Step Tensor Shapes ===")
+            logger.debug(f"→ Input latents:          {latents.shape}")
 
             # Process noise and timesteps
             noise = torch.randn_like(latents, generator=generator)
-            logger.info(f"Generated noise shape: {noise.shape}")
+            logger.debug(f"→ Generated noise:        {noise.shape}")
             
             timesteps = torch.randint(
                 0, 
@@ -64,10 +65,10 @@ class DDPMTrainer(TrainingMethod):
                 (latents.shape[0],), 
                 device=latents.device
             )
-            logger.info(f"Timesteps shape: {timesteps.shape}")
+            logger.debug(f"→ Timesteps:             {timesteps.shape}")
 
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-            logger.info(f"Noisy latents shape: {noisy_latents.shape}")
+            logger.debug(f"→ Noisy latents:         {noisy_latents.shape}")
 
             # Extract embeddings from cached format
             if "embeddings" in batch:
@@ -82,8 +83,8 @@ class DDPMTrainer(TrainingMethod):
                 if prompt_embeds is None or pooled_prompt_embeds is None:
                     raise KeyError("No embeddings found in batch")
 
-            logger.info(f"Prompt embeds shape: {prompt_embeds.shape}")
-            logger.info(f"Pooled prompt embeds shape: {pooled_prompt_embeds.shape}")
+            logger.debug(f"→ Prompt embeds:         {prompt_embeds.shape}")
+            logger.debug(f"→ Pooled prompt embeds:  {pooled_prompt_embeds.shape}")
 
             # Get add_time_ids with shape logging
             add_time_ids = get_add_time_ids(
@@ -93,15 +94,15 @@ class DDPMTrainer(TrainingMethod):
                 dtype=prompt_embeds.dtype,
                 device=prompt_embeds.device
             )
-            logger.info(f"Add time ids shape: {add_time_ids.shape}")
+            logger.debug(f"→ Add time ids:          {add_time_ids.shape}")
             
             # Log UNet input shapes
-            logger.info(f"UNet inputs:")
-            logger.info(f"- noisy_latents: {noisy_latents.shape}")
-            logger.info(f"- timesteps: {timesteps.shape}")
-            logger.info(f"- prompt_embeds: {prompt_embeds.shape}")
-            logger.info(f"- time_ids: {add_time_ids.shape}")
-            logger.info(f"- text_embeds: {pooled_prompt_embeds.shape}")
+            logger.debug("=== UNet Forward Pass Input Shapes ===")
+            logger.debug(f"→ Noisy latents:         {noisy_latents.shape}")
+            logger.debug(f"→ Timesteps:             {timesteps.shape}")
+            logger.debug(f"→ Prompt embeds:         {prompt_embeds.shape}")
+            logger.debug(f"→ Time ids:              {add_time_ids.shape}")
+            logger.debug(f"→ Text embeds:           {pooled_prompt_embeds.shape}")
             
             noise_pred = self.unet(
                 noisy_latents,
@@ -113,16 +114,16 @@ class DDPMTrainer(TrainingMethod):
                 },
             ).sample
             
-            logger.info(f"Predicted noise shape: {noise_pred.shape}")
+            logger.debug(f"→ Predicted noise:       {noise_pred.shape}")
 
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
-            logger.info(f"Loss shape: {loss.shape}")
+            logger.debug(f"→ Loss value:            {loss.item():.6f}")
+            logger.debug("=====================================")
             
             return {"loss": loss}
 
         except Exception as e:
-            logger.error(f"DDPM loss computation failed: {str(e)}", exc_info=True)
-            # Log shapes of available tensors in error case
+            logger.error("=== DDPM Error State Tensor Shapes ===")
             error_shapes = {
                 "latents": getattr(latents, "shape", None) if "latents" in locals() else None,
                 "noise": getattr(noise, "shape", None) if "noise" in locals() else None,
@@ -132,5 +133,7 @@ class DDPMTrainer(TrainingMethod):
                 "add_time_ids": getattr(add_time_ids, "shape", None) if "add_time_ids" in locals() else None,
                 "noise_pred": getattr(noise_pred, "shape", None) if "noise_pred" in locals() else None
             }
-            logger.error(f"Tensor shapes at error: {error_shapes}")
+            for k, v in error_shapes.items():
+                logger.error(f"→ {k}: {v}")
+            logger.error("=====================================")
             raise
