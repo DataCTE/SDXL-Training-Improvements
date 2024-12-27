@@ -165,6 +165,22 @@ class TrainingMethodConfig:
     time_sampling: str = "uniform"  # or logit_normal
 
 @dataclass
+class TrainingMethodConfig:
+    """Training method configuration."""
+    method: str = "ddpm"  # Valid values: "ddpm" or "flow_matching"
+    num_timesteps: int = 1000
+    # DDPM specific
+    snr_gamma: float = 5.0
+    zero_terminal_snr: bool = True
+    sigma_min: float = 0.002
+    sigma_max: float = 80.0
+    rho: float = 7.0
+    scheduler: NoiseSchedulerConfig = field(default_factory=NoiseSchedulerConfig)
+    # Flow matching specific
+    sigma: float = 1.0
+    time_sampling: str = "uniform"  # or logit_normal
+
+@dataclass
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
@@ -187,20 +203,12 @@ class TrainingConfig:
     use_wandb: bool = True
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    method: str = "ddpm"  # Valid values: "ddpm" or "flow_matching"
-    
-    # DDPM specific settings
-    num_timesteps: int = 1000
-    snr_gamma: float = 5.0
-    zero_terminal_snr: bool = True
-    sigma_min: float = 0.002
-    sigma_max: float = 80.0
-    rho: float = 7.0
-    scheduler: NoiseSchedulerConfig = field(default_factory=NoiseSchedulerConfig)
-    
-    # Flow matching specific settings
-    sigma: float = 1.0
-    time_sampling: str = "uniform"  # or logit_normal
+    method_config: TrainingMethodConfig = field(default_factory=TrainingMethodConfig)
+
+    @property
+    def method(self) -> str:
+        """Get training method name."""
+        return self.method_config.method
 
     def __post_init__(self):
         """Validate training configuration."""
@@ -338,16 +346,26 @@ class Config:
 
             model_config = ModelConfig(**config_dict.get("model", {}))
 
-            training_dict = config_dict.get("training", {}).copy()  # Make a copy to modify
+            training_dict = config_dict.get("training", {}).copy()
             
-            # Remove method from the dictionary since we'll pass it separately
-            method = training_dict.pop("method", "ddpm")
-            memory_config = training_dict.pop("memory", {})
+            # Extract method config parameters
+            method_config_dict = {
+                "method": training_dict.pop("method", "ddpm"),
+                "num_timesteps": training_dict.pop("num_timesteps", 1000),
+                "snr_gamma": training_dict.pop("snr_gamma", 5.0),
+                "zero_terminal_snr": training_dict.pop("zero_terminal_snr", True),
+                "sigma_min": training_dict.pop("sigma_min", 0.002),
+                "sigma_max": training_dict.pop("sigma_max", 80.0),
+                "rho": training_dict.pop("rho", 7.0),
+                "sigma": training_dict.pop("sigma", 1.0),
+                "time_sampling": training_dict.pop("time_sampling", "uniform"),
+                "scheduler": NoiseSchedulerConfig(**training_dict.pop("scheduler", {}))
+            }
             
+            # Create training config with method config
             training_config = TrainingConfig(
-                method=method,
-                memory=MemoryConfig(**memory_config),
-                **training_dict  # Pass remaining training settings
+                method_config=TrainingMethodConfig(**method_config_dict),
+                **training_dict
             )
 
             data_config = DataConfig(**config_dict.get("data", {}))
