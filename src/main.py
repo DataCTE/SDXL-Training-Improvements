@@ -317,9 +317,9 @@ def setup_training(
                 train_dataset,
                 batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
                 shuffle=True,
-                num_workers=config.data.num_workers,
-                pin_memory=config.data.pin_memory,
-                persistent_workers=config.data.persistent_workers,
+                num_workers=0,  # Use single worker to avoid pickling issues
+                pin_memory=True,
+                persistent_workers=False,  # Disable persistent workers
                 collate_fn=train_dataset.collate_fn
             )
         except Exception as e:

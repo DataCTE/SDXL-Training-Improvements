@@ -112,8 +112,8 @@ class PreprocessingPipeline:
         self.num_cpu_workers = num_cpu_workers
         self.num_io_workers = num_io_workers
         
-        # Create dedicated CUDA stream for this pipeline
-        self.stream = torch.cuda.Stream(device=self.device_id) if torch.cuda.is_available() else None
+        # Initialize thread-local storage for streams
+        self._streams = {}
         self.prefetch_factor = prefetch_factor
         self.use_pinned_memory = use_pinned_memory
         self.enable_memory_tracking = enable_memory_tracking
@@ -708,6 +708,14 @@ class PreprocessingPipeline:
                 'memory_stats': memory_stats
             })
 
+    def _get_stream(self):
+        """Get a CUDA stream for the current thread."""
+        import threading
+        thread_id = threading.get_ident()
+        if thread_id not in self._streams and torch.cuda.is_available():
+            self._streams[thread_id] = torch.cuda.Stream()
+        return self._streams.get(thread_id)
+
     def _process_on_gpu(self, func, *args, **kwargs):
         """Execute function on GPU with proper stream management."""
         if not torch.cuda.is_available():
@@ -715,10 +723,11 @@ class PreprocessingPipeline:
             
         try:
             with torch.cuda.device(self.device_id):
-                with create_stream_context(self.stream):
+                stream = self._get_stream()
+                with create_stream_context(stream):
                     result = func(*args, **kwargs)
-                    if self.stream:
-                        self.stream.synchronize()
+                    if stream:
+                        stream.synchronize()
                     return result
         except Exception as e:
             logger.error(f"GPU processing error: {str(e)}")

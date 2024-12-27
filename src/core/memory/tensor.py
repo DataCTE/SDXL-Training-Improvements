@@ -58,6 +58,10 @@ def create_stream_context(stream: Optional[torch.cuda.Stream] = None) -> Union[t
         return
 
     try:
+        # Create a new stream if needed
+        if stream is None:
+            stream = torch.cuda.Stream()
+
         # Ensure previous operations are complete
         if torch.cuda.is_available():
             torch.cuda.current_stream().synchronize()
