@@ -65,53 +65,58 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
-            # Get the individual tensors before stacking
             if isinstance(batch["model_input"], list):
                 latents_list = batch["model_input"]
             else:
-                # If already stacked, split it back
                 latents_list = [lat for lat in batch["model_input"]]
 
-            # First, determine the target dimensions from all latents
-            all_dims = [(lat.shape[-2], lat.shape[-1]) for lat in latents_list]
-            logger.debug(f"Original dimensions: {all_dims}")
-            
-            # Choose the most common dimensions as target
-            from collections import Counter
-            dim_counter = Counter(all_dims)
-            target_h, target_w = dim_counter.most_common(1)[0][0]
-            logger.debug(f"Target dimensions: {target_h}x{target_w}")
+            # Force print the original shapes
+            print(f"Original shapes: {[lat.shape for lat in latents_list]}")
 
-            # Process each latent individually
-            processed_latents = []
+            # First normalize orientation - make all landscape (width > height)
+            oriented_latents = []
             for idx, lat in enumerate(latents_list):
                 h, w = lat.shape[-2:]
+                print(f"Processing latent {idx}: h={h}, w={w}")
                 
-                # If dimensions don't match target, resize and potentially rotate
-                if (h, w) != (target_h, target_w):
-                    if (w, h) == (target_h, target_w):
-                        # Need to rotate
-                        lat = lat.transpose(-1, -2)
-                    else:
-                        # Need to resize
-                        lat = F.interpolate(
-                            lat,
-                            size=(target_h, target_w),
-                            mode='bilinear',
-                            align_corners=False
-                        )
+                # Always make width larger than height
+                if h > w:
+                    print(f"Rotating latent {idx}")
+                    lat = lat.transpose(-1, -2)
                 
-                logger.debug(f"Latent {idx} shape after processing: {lat.shape}")
-                processed_latents.append(lat)
+                print(f"After orientation: {lat.shape}")
+                oriented_latents.append(lat)
 
-            # Verify all tensors have the same shape before stacking
+            # Now all tensors should be in landscape orientation
+            # Get the target size from the first tensor
+            target_h = min(oriented_latents[0].shape[-2], oriented_latents[0].shape[-1])
+            target_w = max(oriented_latents[0].shape[-2], oriented_latents[0].shape[-1])
+
+            print(f"Target dimensions: {target_h}x{target_w}")
+
+            # Resize all tensors to match target size
+            processed_latents = []
+            for idx, lat in enumerate(oriented_latents):
+                if lat.shape[-2:] != (target_h, target_w):
+                    print(f"Resizing latent {idx} from {lat.shape[-2:]} to {(target_h, target_w)}")
+                    lat = F.interpolate(
+                        lat,
+                        size=(target_h, target_w),
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                processed_latents.append(lat)
+                print(f"Final shape for latent {idx}: {lat.shape}")
+
+            # Verify shapes before stacking
             shapes = [lat.shape for lat in processed_latents]
-            if len(set(shapes)) != 1:
+            print(f"Shapes before stacking: {shapes}")
+            if len(set(str(s) for s in shapes)) != 1:  # Convert to string for proper comparison
                 raise ValueError(f"Inconsistent tensor shapes after processing: {shapes}")
 
             # Stack the processed tensors
             latents = torch.stack(processed_latents, dim=0)
-            logger.debug(f"Final stacked latents shape: {latents.shape}")
+            print(f"Final stacked shape: {latents.shape}")
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
                 
