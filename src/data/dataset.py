@@ -374,34 +374,58 @@ class AspectBucketDataset(Dataset):
 
             # Process latents from consistent bucket
             latents = []
+            prompt_embeds = []
+            pooled_prompt_embeds = []
+
             for item in batch:
+                # Handle latents
                 if "latent" in item:
                     latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
                     if latent_data is not None:
-                        # Move to CPU before pinning if needed
                         if latent_data.is_cuda:
                             latent_data = latent_data.cpu()
                         latents.append(latent_data)
-                else:
-                    model_input = item.get("model_input")
+                elif "model_input" in item:
+                    model_input = item["model_input"]
                     if model_input is not None:
-                        # Move to CPU before pinning if needed
                         if model_input.is_cuda:
                             model_input = model_input.cpu()
                         latents.append(model_input)
 
+                # Handle embeddings - check both direct and nested formats
+                if "prompt_embeds" in item:
+                    prompt_emb = item["prompt_embeds"]
+                    if prompt_emb.is_cuda:
+                        prompt_emb = prompt_emb.cpu()
+                    prompt_embeds.append(prompt_emb)
+                elif "embeddings" in item and "prompt_embeds" in item["embeddings"]:
+                    prompt_emb = item["embeddings"]["prompt_embeds"]
+                    if prompt_emb.is_cuda:
+                        prompt_emb = prompt_emb.cpu()
+                    prompt_embeds.append(prompt_emb)
+
+                if "pooled_prompt_embeds" in item:
+                    pooled_emb = item["pooled_prompt_embeds"]
+                    if pooled_emb.is_cuda:
+                        pooled_emb = pooled_emb.cpu()
+                    pooled_prompt_embeds.append(pooled_emb)
+                elif "embeddings" in item and "pooled_prompt_embeds" in item["embeddings"]:
+                    pooled_emb = item["embeddings"]["pooled_prompt_embeds"]
+                    if pooled_emb.is_cuda:
+                        pooled_emb = pooled_emb.cpu()
+                    pooled_prompt_embeds.append(pooled_emb)
+
+                # Collect metadata
                 result["original_sizes"].append(item.get("original_sizes", [(1024, 1024)])[0])
                 result["crop_top_lefts"].append(item.get("crop_top_lefts", [(0, 0)])[0])
                 result["target_sizes"].append(item.get("target_sizes", [(1024, 1024)])[0])
 
+            # Process latents
             if latents:
-                # Verify all tensors have same shape
                 first_shape = latents[0].shape
                 latents = [lat for lat in latents if lat.shape == first_shape]
-                
                 if len(latents) > 0:
                     stacked_latents = torch.stack(latents)
-                    # Pin memory only if tensor is on CPU
                     if self.config.data.pin_memory and not stacked_latents.is_cuda:
                         stacked_latents = stacked_latents.pin_memory()
                     result["latent"] = {
@@ -409,19 +433,22 @@ class AspectBucketDataset(Dataset):
                         "latent": stacked_latents
                     }
 
-            # Handle embeddings
-            if all("embeddings" in item for item in batch):
-                embeddings = {}
-                for key in ["prompt_embeds", "pooled_prompt_embeds"]:
-                    if all(key in item["embeddings"] for item in batch):
-                        tensors = [item["embeddings"][key] for item in batch]
-                        # Move to CPU before pinning if needed
-                        tensors = [t.cpu() if t.is_cuda else t for t in tensors]
-                        stacked = torch.stack(tensors)
-                        if self.config.data.pin_memory and not stacked.is_cuda:
-                            stacked = stacked.pin_memory()
-                        embeddings[key] = stacked
-                result["embeddings"] = embeddings
+            # Process embeddings
+            if prompt_embeds and pooled_prompt_embeds:
+                stacked_prompt_embeds = torch.stack(prompt_embeds)
+                stacked_pooled_embeds = torch.stack(pooled_prompt_embeds)
+                
+                if self.config.data.pin_memory:
+                    if not stacked_prompt_embeds.is_cuda:
+                        stacked_prompt_embeds = stacked_prompt_embeds.pin_memory()
+                    if not stacked_pooled_embeds.is_cuda:
+                        stacked_pooled_embeds = stacked_pooled_embeds.pin_memory()
+                
+                result["prompt_embeds"] = stacked_prompt_embeds
+                result["pooled_prompt_embeds"] = stacked_pooled_embeds
+
+            if not ("prompt_embeds" in result and "pooled_prompt_embeds" in result):
+                raise ValueError("Missing required embeddings in batch data")
 
             return result
 
