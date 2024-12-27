@@ -8,6 +8,9 @@ import torch.backends.cudnn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 # Force speed optimizations
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -40,17 +43,26 @@ class SDXLTrainer:
                optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
                device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
                validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
+        logger.debug("Creating SDXLTrainer instance")
+        
         # Extract method from training configuration
         method = config.training.method
         if not isinstance(method, str):
+            logger.error(f"Invalid training method type: {type(method)}")
             raise ValueError(f"Training method must be a string, got {type(method)}")
             
         method = method.lower()
-        logger.info(f"Creating trainer with method: {method}")
+        logger.debug(f"Using training method: {method}")
         
         trainer_cls = TrainingMethod.get_method(method)
-        logger.info(f"Using trainer class: {trainer_cls.__name__}")
-        training_method = trainer_cls(unet=model.unet, config=config)
+        logger.debug(f"Selected trainer class: {trainer_cls.__name__}")
+        
+        try:
+            training_method = trainer_cls(unet=model.unet, config=config)
+            logger.debug("Training method initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize training method: {str(e)}", exc_info=True)
+            raise
         return cls(
             config=config,
             model=model,

@@ -9,18 +9,21 @@ from torch import Tensor
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
-# Add print for immediate verification
-print("Initializing DDPM Trainer logger")
-
-# Get logger but don't configure it here
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Add verification print
+print(f"DDPM Trainer logger initialized with level: {logger.getEffectiveLevel()}")
+print(f"DDPM Trainer logger handlers: {logger.handlers}")
 
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        logger.debug("Initializing DDPMTrainer")
         if hasattr(torch, "compile"):
+            logger.debug("Compiling loss computation function")
             self._compiled_loss = torch.compile(
                 self._compute_loss_impl,
                 mode="reduce-overhead",

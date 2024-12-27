@@ -10,6 +10,7 @@ from src.data.config import Config
 from src.training.schedulers import configure_noise_scheduler
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Ensure base class logger is at DEBUG level
 
 class TrainingMethodMeta(ABCMeta):
     _methods: Dict[str, Type['TrainingMethod']] = {}
@@ -33,6 +34,9 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
     name: str = None
     
     def __init__(self, unet: torch.nn.Module, config: Config):
+        # Add logger verification at initialization
+        logger.debug(f"Initializing {self.__class__.__name__} with config: {config}")
+        
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True

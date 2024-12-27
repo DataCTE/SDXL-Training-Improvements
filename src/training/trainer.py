@@ -2,10 +2,14 @@
 from typing import List, Optional, Union
 
 import torch
+import logging
 from src.core.logging import WandbLogger
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
 from src.training.trainers.sdxl_trainer import SDXLTrainer
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 def create_trainer(
     config: Config,
@@ -17,6 +21,11 @@ def create_trainer(
     validation_prompts: Optional[List[str]] = None
 ) -> SDXLTrainer:
     """Wrapper around SDXLTrainer.create for backward compatibility."""
+    logger.debug("Creating trainer with configuration:")
+    logger.debug(f"Device: {device}")
+    logger.debug(f"Model type: {type(model).__name__}")
+    logger.debug(f"Optimizer type: {type(optimizer).__name__}")
+    
     # Ensure device is properly set
     if isinstance(device, str):
         device = torch.device(device)
