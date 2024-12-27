@@ -233,7 +233,8 @@ class SDXLTrainer:
 
             self.global_step += 1
             progress_bar.update(1)
-        progress_bar.close()
+        finally:
+            progress_bar.close()
         epoch_metrics = {k: sum(v) / len(v) for k, v in epoch_metrics.items()}
         return epoch_metrics
 
