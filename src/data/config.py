@@ -188,6 +188,28 @@ class TrainingConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     method: str = "ddpm"  # Valid values: "ddpm" or "flow_matching"
+    
+    # DDPM specific settings
+    num_timesteps: int = 1000
+    snr_gamma: float = 5.0
+    zero_terminal_snr: bool = True
+    sigma_min: float = 0.002
+    sigma_max: float = 80.0
+    rho: float = 7.0
+    scheduler: NoiseSchedulerConfig = field(default_factory=NoiseSchedulerConfig)
+    
+    # Flow matching specific settings
+    sigma: float = 1.0
+    time_sampling: str = "uniform"  # or logit_normal
+
+    def __post_init__(self):
+        """Validate training configuration."""
+        if self.method not in ["ddpm", "flow_matching"]:
+            raise ValueError(f"Invalid training method: {self.method}")
+        if self.batch_size < self.gradient_accumulation_steps:
+            raise ValueError("batch_size must be >= gradient_accumulation_steps")
+        if self.learning_rate <= 0:
+            raise ValueError("learning_rate must be positive")
 
 @dataclass
 class DataConfig:
