@@ -38,7 +38,7 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
-            # Extract latents from cached format
+            # Extract latents from cached format with shape logging
             if "latent" in batch:
                 latents = batch["latent"].get("model_input", None)
                 if latents is None:
@@ -51,16 +51,23 @@ class DDPMTrainer(TrainingMethod):
                 if latents is None:
                     raise KeyError("No latent data found in batch")
 
+            # Log latent shapes
+            logger.info(f"Input latents shape: {latents.shape}")
+
             # Process noise and timesteps
             noise = torch.randn_like(latents, generator=generator)
+            logger.info(f"Generated noise shape: {noise.shape}")
+            
             timesteps = torch.randint(
                 0, 
                 self.noise_scheduler.config.num_train_timesteps, 
                 (latents.shape[0],), 
                 device=latents.device
             )
+            logger.info(f"Timesteps shape: {timesteps.shape}")
 
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+            logger.info(f"Noisy latents shape: {noisy_latents.shape}")
 
             # Extract embeddings from cached format
             if "embeddings" in batch:
@@ -75,7 +82,10 @@ class DDPMTrainer(TrainingMethod):
                 if prompt_embeds is None or pooled_prompt_embeds is None:
                     raise KeyError("No embeddings found in batch")
 
-            # Continue with model prediction
+            logger.info(f"Prompt embeds shape: {prompt_embeds.shape}")
+            logger.info(f"Pooled prompt embeds shape: {pooled_prompt_embeds.shape}")
+
+            # Get add_time_ids with shape logging
             add_time_ids = get_add_time_ids(
                 original_sizes=batch.get("original_sizes", [(1024, 1024)]),
                 crop_top_lefts=batch.get("crop_top_lefts", [(0, 0)]),
@@ -83,6 +93,15 @@ class DDPMTrainer(TrainingMethod):
                 dtype=prompt_embeds.dtype,
                 device=prompt_embeds.device
             )
+            logger.info(f"Add time ids shape: {add_time_ids.shape}")
+            
+            # Log UNet input shapes
+            logger.info(f"UNet inputs:")
+            logger.info(f"- noisy_latents: {noisy_latents.shape}")
+            logger.info(f"- timesteps: {timesteps.shape}")
+            logger.info(f"- prompt_embeds: {prompt_embeds.shape}")
+            logger.info(f"- time_ids: {add_time_ids.shape}")
+            logger.info(f"- text_embeds: {pooled_prompt_embeds.shape}")
             
             noise_pred = self.unet(
                 noisy_latents,
@@ -93,10 +112,25 @@ class DDPMTrainer(TrainingMethod):
                     "text_embeds": pooled_prompt_embeds
                 },
             ).sample
+            
+            logger.info(f"Predicted noise shape: {noise_pred.shape}")
 
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+            logger.info(f"Loss shape: {loss.shape}")
+            
             return {"loss": loss}
 
         except Exception as e:
             logger.error(f"DDPM loss computation failed: {str(e)}", exc_info=True)
+            # Log shapes of available tensors in error case
+            error_shapes = {
+                "latents": getattr(latents, "shape", None) if "latents" in locals() else None,
+                "noise": getattr(noise, "shape", None) if "noise" in locals() else None,
+                "noisy_latents": getattr(noisy_latents, "shape", None) if "noisy_latents" in locals() else None,
+                "prompt_embeds": getattr(prompt_embeds, "shape", None) if "prompt_embeds" in locals() else None,
+                "pooled_prompt_embeds": getattr(pooled_prompt_embeds, "shape", None) if "pooled_prompt_embeds" in locals() else None,
+                "add_time_ids": getattr(add_time_ids, "shape", None) if "add_time_ids" in locals() else None,
+                "noise_pred": getattr(noise_pred, "shape", None) if "noise_pred" in locals() else None
+            }
+            logger.error(f"Tensor shapes at error: {error_shapes}")
             raise
