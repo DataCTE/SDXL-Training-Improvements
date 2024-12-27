@@ -9,7 +9,11 @@ from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Ensure logger level is set to DEBUG
+# Remove any existing handlers
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+logger.setLevel(logging.DEBUG)
+logger.propagate = True  # Ensure propagation to root logger
 
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"

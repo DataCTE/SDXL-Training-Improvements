@@ -28,6 +28,12 @@ class ColoredFormatter(logging.Formatter):
         'CRITICAL': Fore.RED + Style.BRIGHT + Style.DIM
     }
 
+    def format(self, record):
+        """Enhanced formatter with detailed context and error tracking."""
+        # Always show DEBUG messages with visual separator
+        if record.levelno == logging.DEBUG:
+            record.msg = f"[DEBUG] {record.msg}"
+
     # Extended context fields for detailed logging
     CONTEXT_FIELDS = [
         'function', 'line_number', 'file_path',
@@ -144,7 +150,7 @@ def setup_logging(
     # Create and configure logger
     logger_name = module_name or 'root'
     logger = logging.getLogger(logger_name)
-    logger.setLevel(level)
+    logger.setLevel(logging.DEBUG)  # Force DEBUG level for logger
     
     # Remove existing handlers
     for handler in logger.handlers[:]:
@@ -158,7 +164,7 @@ def setup_logging(
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_handler.setFormatter(console_formatter)
-        console_handler.setLevel(console_level)  # Use console_level for terminal output
+        console_handler.setLevel(logging.DEBUG)  # Force DEBUG level for console
         logger.addHandler(console_handler)
 
         # Enable warning capture and configure propagation
