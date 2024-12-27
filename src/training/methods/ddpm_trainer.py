@@ -45,17 +45,10 @@ class DDPMTrainer(TrainingMethod):
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
-        # Add immediate verification print
-        print("Entering _compute_loss_impl")
-        print(f"Logger level: {logger.getEffectiveLevel()}")
-        print(f"Logger handlers: {logger.handlers}")
-        print(f"Logger propagate: {logger.propagate}")
-        
+        """Compute training loss with detailed shape logging."""
         try:
-            logger.debug("=== Starting Batch Processing ===")
-            logger.debug(f"Batch keys: {batch.keys()}")
-            
-            # Log shapes of all tensors in batch
+            # Log initial batch structure
+            logger.debug("=== Initial Batch Structure ===")
             for key, value in batch.items():
                 if isinstance(value, dict):
                     logger.debug(f"Dict {key} contains:")
