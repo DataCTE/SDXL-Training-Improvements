@@ -65,36 +65,40 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
-            # Direct access since data is already validated
-            latents = batch["model_input"]  # This is already a concatenated tensor
+            # Get the individual tensors before stacking
+            if isinstance(batch["model_input"], list):
+                latents_list = batch["model_input"]
+            else:
+                # If already stacked, split it back
+                latents_list = [lat for lat in batch["model_input"]]
+
+            # Process each latent individually
+            processed_latents = []
+            for lat in latents_list:
+                h, w = lat.shape[-2:]
+                should_rotate = h > w
+                
+                if should_rotate:
+                    lat = lat.transpose(-1, -2)
+                    
+                # Now lat is in landscape orientation
+                target_height = min(lat.shape[-2], lat.shape[-1])
+                target_width = max(lat.shape[-2], lat.shape[-1])
+                
+                if lat.shape[-2:] != (target_height, target_width):
+                    lat = F.interpolate(
+                        lat,
+                        size=(target_height, target_width),
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                
+                processed_latents.append(lat)
+
+            # Stack the processed tensors
+            latents = torch.stack(processed_latents, dim=0)
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-
-            # Get batch size and dimensions
-            batch_size, channels, h, w = latents.shape
-            
-            logger.debug(f"Initial latents shape: {latents.shape}")
-            
-            # Determine if we need to rotate the entire batch
-            should_rotate = h > w
-            
-            if should_rotate:
-                # Transpose the entire batch at once
-                latents = latents.transpose(-1, -2)
-                logger.debug(f"Rotating latents. New shape: {latents.shape}")
-                
-            # Now h and w are correctly oriented (width > height)
-            target_height = min(latents.shape[-2], latents.shape[-1])
-            target_width = max(latents.shape[-2], latents.shape[-1])
-            
-            # Resize if needed
-            if latents.shape[-2:] != (target_height, target_width):
-                latents = F.interpolate(
-                    latents,
-                    size=(target_height, target_width),
-                    mode='bilinear',
-                    align_corners=False
-                )
                 
             logger.debug(f"Final latents shape: {latents.shape}")
 
