@@ -413,9 +413,28 @@ def setup_training(
         logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
         raise
 
+def check_system_limits():
+    """Check and attempt to increase system file limits."""
+    import resource
+    try:
+        # Get current soft limit
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        
+        # Try to increase soft limit to hard limit
+        resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+        
+        logger.info(f"Increased file limit from {soft} to {hard}")
+    except Exception as e:
+        logger.warning(f"Could not increase file limit: {e}")
+        logger.warning("You may need to increase system file limits (ulimit -n)")
+
 def main():
     print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
+    
+    # Check and configure system limits
+    check_system_limits()
+    
     device = None
     try:
         args = parse_args()

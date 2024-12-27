@@ -45,6 +45,11 @@ class CacheManager(TensorValidator):
         self.index_path = self.cache_dir / "cache_index.json"
         self.stats = CacheStats()
         self.device = kwargs.get('device') or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Add file handle tracking
+        self._open_files = set()
+        self._max_open_files = kwargs.get('max_open_files', 1000)
+        
         self._load_index()
         
         # Verify cache structure
@@ -301,16 +306,26 @@ class CacheManager(TensorValidator):
             logger.error(f"Failed to save data for {file_path}: {str(e)}")
             return False
 
+    def _close_excess_files(self):
+        """Close oldest files if we're approaching the limit."""
+        while len(self._open_files) >= self._max_open_files:
+            try:
+                oldest = self._open_files.pop()
+                oldest.close()
+            except Exception as e:
+                logger.warning(f"Error closing file: {e}")
+
     def get_cached_item(
         self,
         file_path: Union[str, Path],
         device: Optional[torch.device] = None
     ) -> Optional[Dict[str, Any]]:
         try:
+            self._close_excess_files()  # Ensure we don't hit limits
+            
             base_name = Path(file_path).stem
             result = {}
 
-            # Fast path - check if item exists in cache using sets
             if (base_name not in self._cached_image_files and 
                 base_name not in self._cached_text_files):
                 self.stats.cache_misses += 1
@@ -320,8 +335,12 @@ class CacheManager(TensorValidator):
                 if not path.exists():
                     return None
                     
-                # Use torch.load with map_location for faster loading
-                data = torch.load(path, map_location='cpu', weights_only=True)
+                try:
+                    data = torch.load(path, map_location='cpu', weights_only=True)
+                    return data
+                finally:
+                    # Ensure file is closed after loading
+                    torch.cuda.empty_cache()
                 
                 # Process latents and ensure format compatibility
                 if "latent" in data:
@@ -387,6 +406,14 @@ class CacheManager(TensorValidator):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
+            # Close all open files
+            for f in self._open_files:
+                try:
+                    f.close()
+                except:
+                    pass
+            self._open_files.clear()
+            
             self._save_index()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
