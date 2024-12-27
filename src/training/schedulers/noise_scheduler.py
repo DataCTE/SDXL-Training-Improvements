@@ -21,6 +21,7 @@ def configure_noise_scheduler(
     Returns:
         Configured noise scheduler
     """
+    # Create scheduler with device-aware tensors
     scheduler = DDPMScheduler(
         num_train_timesteps=config.training.method_config.scheduler.num_train_timesteps,
         beta_start=config.training.method_config.scheduler.beta_start,
@@ -36,7 +37,16 @@ def configure_noise_scheduler(
         rescale_betas_zero_snr=config.training.method_config.scheduler.rescale_betas_zero_snr
     )
     
-    scheduler.to(device)
+    # Move scheduler's tensors to device
+    if hasattr(scheduler, 'betas'):
+        scheduler.betas = scheduler.betas.to(device)
+    if hasattr(scheduler, 'alphas'):
+        scheduler.alphas = scheduler.alphas.to(device)
+    if hasattr(scheduler, 'alphas_cumprod'):
+        scheduler.alphas_cumprod = scheduler.alphas_cumprod.to(device)
+    if hasattr(scheduler, 'final_alpha_cumprod'):
+        scheduler.final_alpha_cumprod = scheduler.final_alpha_cumprod.to(device)
+    
     return scheduler
 
 def get_karras_sigmas(
