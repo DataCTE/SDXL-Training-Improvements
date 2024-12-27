@@ -65,8 +65,32 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
-            print("\n=== Starting Tensor Processing ===")  # Clear visual separator
+            print("\n=== Starting Tensor Processing ===")
             
+            # Validate batch contents
+            print("\nValidating Batch Contents:")
+            required_keys = {
+                'model_input', 'prompt_embeds', 'pooled_prompt_embeds',
+                'original_sizes', 'crop_top_lefts', 'target_sizes'
+            }
+            available_keys = set(batch.keys())
+            print(f"Available batch keys: {available_keys}")
+            print(f"Required batch keys: {required_keys}")
+            
+            missing_keys = required_keys - available_keys
+            if missing_keys:
+                error_msg = f"Missing required keys in batch: {missing_keys}"
+                print(f"\nERROR: {error_msg}")
+                print("\nBatch contents summary:")
+                for key, value in batch.items():
+                    if isinstance(value, torch.Tensor):
+                        print(f"  {key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
+                    elif isinstance(value, list):
+                        print(f"  {key}: list of length {len(value)}")
+                    else:
+                        print(f"  {key}: type={type(value)}")
+                raise KeyError(error_msg)
+
             # Initial batch inspection
             if isinstance(batch["model_input"], list):
                 latents_list = batch["model_input"]
