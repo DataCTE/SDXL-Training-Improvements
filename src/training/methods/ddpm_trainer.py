@@ -47,6 +47,25 @@ class DDPMTrainer(TrainingMethod):
     ) -> Dict[str, Tensor]:
         """Compute training loss with detailed shape logging."""
         try:
+            # Add detailed batch inspection at the start
+            logger.debug("=== Batch Structure Analysis ===")
+            def inspect_batch(data: Union[Dict, Tensor], prefix: str = "") -> None:
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        new_prefix = f"{prefix}.{key}" if prefix else key
+                        inspect_batch(value, new_prefix)
+                elif isinstance(data, Tensor):
+                    logger.debug(
+                        f"Tensor at {prefix}: shape={data.shape}, "
+                        f"dtype={data.dtype}, device={data.device}, "
+                        f"min={data.min().item():.3f}, max={data.max().item():.3f}"
+                    )
+                elif isinstance(data, (list, tuple)):
+                    for i, item in enumerate(data):
+                        inspect_batch(item, f"{prefix}[{i}]")
+
+            inspect_batch(batch)
+
             # Validate batch tensor shapes
             def validate_tensor_shapes(data: Union[torch.Tensor, Dict], path: str = "") -> None:
                 if isinstance(data, dict):
@@ -246,4 +265,41 @@ class DDPMTrainer(TrainingMethod):
                 'stack_info': True
             })
             
-            raise RuntimeError(f"Loss computation failed with detailed shapes logged above: {str(e)}") from e
+            if "expects each tensor to be equal size" in str(e):
+                logger.error("=== Tensor Size Mismatch Error ===")
+                logger.error(f"Error: {str(e)}")
+                
+                # Log detailed tensor information
+                logger.error("\nTensor shapes in batch:")
+                def log_tensor_shapes(data: Union[Dict, Tensor], prefix: str = "") -> None:
+                    if isinstance(data, dict):
+                        for key, value in data.items():
+                            new_prefix = f"{prefix}.{key}" if prefix else key
+                            log_tensor_shapes(value, new_prefix)
+                    elif isinstance(data, Tensor):
+                        logger.error(
+                            f"→ {prefix}: shape={data.shape}, "
+                            f"dtype={data.dtype}, device={data.device}"
+                        )
+                    elif isinstance(data, (list, tuple)):
+                        for i, item in enumerate(data):
+                            log_tensor_shapes(item, f"{prefix}[{i}]")
+
+                log_tensor_shapes(batch)
+                
+                # Add stack trace
+                logger.error("\nStack trace:", exc_info=True)
+                
+                # Add memory info
+                if torch.cuda.is_available():
+                    logger.error("\nCUDA Memory Status:")
+                    logger.error(f"Allocated: {torch.cuda.memory_allocated() / 1024**2:.1f}MB")
+                    logger.error(f"Reserved: {torch.cuda.memory_reserved() / 1024**2:.1f}MB")
+                    logger.error(f"Max Allocated: {torch.cuda.max_memory_allocated() / 1024**2:.1f}MB")
+
+                raise RuntimeError(
+                    f"Tensor size mismatch in batch. See detailed error above. "
+                    f"Original error: {str(e)}"
+                ) from e
+            else:
+                raise RuntimeError(f"Loss computation failed with detailed shapes logged above: {str(e)}") from e

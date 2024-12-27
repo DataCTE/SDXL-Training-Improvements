@@ -62,6 +62,20 @@ class SDXLTrainer:
             logger.debug("Training method initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize training method: {str(e)}", exc_info=True)
+            logger.error(
+                "Error in training step",
+                extra={
+                    'error_type': type(e).__name__,
+                    'error_msg': str(e),
+                    'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
+                    'accumulation_step': accumulation_step,
+                    'tensor_shapes': {
+                        k: v.shape if isinstance(v, torch.Tensor) else type(v)
+                        for k, v in batch.items()
+                    } if isinstance(batch, dict) else None
+                },
+                exc_info=True
+            )
             raise
         return cls(
             config=config,
@@ -157,6 +171,24 @@ class SDXLTrainer:
         accumulation_step: int = 0
     ) -> Dict[str, float]:
         try:
+            # Add pre-validation
+            logger.debug("=== Pre-Training Step Validation ===")
+            def validate_tensors(data: Union[Dict, torch.Tensor], path: str = "") -> None:
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        new_path = f"{path}.{key}" if path else key
+                        validate_tensors(value, new_path)
+                elif isinstance(data, torch.Tensor):
+                    if path.endswith("model_input") or "latent" in path:
+                        logger.debug(
+                            f"Validating tensor at {path}: "
+                            f"shape={data.shape}, dtype={data.dtype}, "
+                            f"device={data.device}, "
+                            f"range=[{data.min().item():.3f}, {data.max().item():.3f}]"
+                        )
+
+            validate_tensors(batch)
+
             loss_dict = self.training_method.compute_loss(self.unet, batch, generator=generator)
             loss = loss_dict["loss"] / self.gradient_accumulation_steps
             loss.backward()
