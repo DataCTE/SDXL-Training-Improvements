@@ -316,21 +316,16 @@ class Config:
 
             model_config = ModelConfig(**config_dict.get("model", {}))
 
-            training_dict = config_dict.get("training", {})
-            # Extract method string from training config
-            training_method = training_dict.get("method", "ddpm")
-            if not isinstance(training_method, str):
-                logger.warning(f"Invalid training method format: {training_method}, defaulting to 'ddpm'")
-                training_method = "ddpm"
+            training_dict = config_dict.get("training", {}).copy()  # Make a copy to modify
+            
+            # Remove method from the dictionary since we'll pass it separately
+            method = training_dict.pop("method", "ddpm")
+            memory_config = training_dict.pop("memory", {})
             
             training_config = TrainingConfig(
-                method=training_method,
-                memory=MemoryConfig(**training_dict.get("memory", {})),
-                **{
-                    k: v
-                    for k, v in training_dict.items()
-                    if k not in ["memory"]
-                },
+                method=method,
+                memory=MemoryConfig(**memory_config),
+                **training_dict  # Pass remaining training settings
             )
 
             data_config = DataConfig(**config_dict.get("data", {}))
@@ -338,7 +333,6 @@ class Config:
                 **config_dict.get("tag_weighting", {})
             )
 
-            # If missing root-level fields, they get defaulted by the dataclasses
             return cls(
                 global_config=global_config,
                 model=model_config,
