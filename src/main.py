@@ -87,18 +87,39 @@ def setup_device_and_logging(config: Config) -> torch.device:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     
-    # Get logging levels from config
-    console_level = getattr(logging, config.global_config.logging.console_level.upper())
-    file_level = getattr(logging, config.global_config.logging.file_level.upper())
+    # Force DEBUG level for console during development
+    console_level = logging.DEBUG  # Temporarily force DEBUG level
+    file_level = logging.DEBUG
     
+    # Add more detailed logging setup
     setup_logging(
         log_dir=str(log_dir),
         filename="train.log",
         level=file_level,
-        console_level=console_level
+        console_level=console_level,
+        capture_warnings=True,
+        propagate=True
     )
+    
+    # Add root logger configuration
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    
+    # Explicitly set DDPM trainer logger level
+    ddpm_logger = logging.getLogger("src.training.methods.ddpm_trainer")
+    ddpm_logger.setLevel(logging.DEBUG)
+    
+    # Add a stream handler if none exists
+    if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+    
     if is_main_process():
         logger.info(f"Using device: {device}")
+        logger.info("Logging level set to DEBUG for console output")
         if device.type == "cuda":
             logger.info(f"cuda Device: {torch.cuda.get_device_name(device.index)}")
             logger.info(f"cuda Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
