@@ -10,6 +10,7 @@ import torch.cuda
 import logging
 import sys
 import threading
+from src.core.logging.logging import setup_logging
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -79,38 +80,24 @@ def setup_environment(args: argparse.Namespace):
         torch_sync()
 
 def setup_device_and_logging(config: Config) -> torch.device:
-    # First, clear all existing handlers from the root logger
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    root_logger.setLevel(logging.DEBUG)
-    
-    # Create console handler for root logger
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(name)s | %(message)s')
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-    
-    # Set up file logging
+    # Create output and log directories
     output_dir = Path(config.global_config.output_dir)
     log_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
-    
-    file_handler = logging.FileHandler(log_dir / "train.log")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
-    
-    # Explicitly set DDPM trainer logger level
-    ddpm_logger = logging.getLogger("src.training.methods.ddpm_trainer")
-    ddpm_logger.setLevel(logging.DEBUG)
-    
-    # Add verification logs
-    root_logger.debug("Root logger initialized at DEBUG level")
-    ddpm_logger.debug("DDPM trainer logger initialized at DEBUG level")
-    
+
+    # Use the setup_logging function from core.logging
+    logger = setup_logging(
+        log_dir=str(log_dir),
+        level=logging.DEBUG,  # Keep full debug logging in file
+        filename="train.log",  # Log to train.log file
+        module_name="main",  # Set module name for main script
+        capture_warnings=True,
+        propagate=True,
+        console_level=logging.DEBUG  # Set console level to DEBUG for now
+    )
+
+    # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if not isinstance(device, torch.device):
         device = torch.device(device)
@@ -120,6 +107,7 @@ def setup_device_and_logging(config: Config) -> torch.device:
         if device.type == "cuda":
             logger.info(f"CUDA Device: {torch.cuda.get_device_name(device.index)}")
             logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
+
     return device
 
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
