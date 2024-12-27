@@ -22,19 +22,18 @@ def configure_noise_scheduler(
         Configured noise scheduler
     """
     scheduler = DDPMScheduler(
-        num_train_timesteps=config.model.scheduler_config.num_train_timesteps,
-        beta_start=config.model.scheduler_config.beta_start,
-        beta_end=config.model.scheduler_config.beta_end,
-        beta_schedule=config.model.scheduler_config.beta_schedule,
-        clip_sample=config.model.scheduler_config.clip_sample,
-        set_alpha_to_one=config.model.scheduler_config.set_alpha_to_one,
-        steps_offset=config.model.scheduler_config.steps_offset,
-        prediction_type=config.model.scheduler_config.prediction_type,
-        thresholding=config.model.scheduler_config.thresholding,
-        dynamic_thresholding_ratio=config.model.scheduler_config.dynamic_thresholding_ratio,
-        sample_max_value=config.model.scheduler_config.sample_max_value,
-        timestep_spacing=config.model.scheduler_config.timestep_spacing,
-        rescale_betas_zero_snr=config.model.scheduler_config.rescale_betas_zero_snr
+        num_train_timesteps=config.model.ddpm.scheduler.num_train_timesteps,
+        beta_start=config.model.ddpm.scheduler.beta_start,
+        beta_end=config.model.ddpm.scheduler.beta_end,
+        beta_schedule=config.model.ddpm.scheduler.beta_schedule,
+        clip_sample=config.model.ddpm.scheduler.clip_sample,
+        steps_offset=config.model.ddpm.scheduler.steps_offset,
+        prediction_type=config.model.prediction_type,
+        thresholding=config.model.ddpm.scheduler.thresholding,
+        dynamic_thresholding_ratio=config.model.ddpm.scheduler.dynamic_thresholding_ratio,
+        sample_max_value=config.model.ddpm.scheduler.sample_max_value,
+        timestep_spacing=config.model.ddpm.scheduler.timestep_spacing,
+        rescale_betas_zero_snr=config.model.ddpm.scheduler.rescale_betas_zero_snr
     )
     
     scheduler.to(device)

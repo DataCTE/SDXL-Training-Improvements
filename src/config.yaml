@@ -71,62 +71,39 @@ global_config:
 
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
-  num_timesteps: 1000
-  sigma_min: 0.002
-  sigma_max: 2000.0
-  rho: 7.0
   enable_memory_efficient_attention: true
   enable_vae_slicing: false
   enable_model_cpu_offload: false
   enable_sequential_cpu_offload: false
+  enable_bf16_training: true
+  dtype: "bfloat16"
+  fallback_dtype: "float32"
+  prediction_type: "v_prediction"
 
 training:
   batch_size: 4
   gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
-  memory:
-    enable_24gb_optimizations: true
-    layer_offload_fraction: 0.5 # Fraction of layers to offload to CPU best % is 0.5
-    enable_activation_offloading: true
-    enable_async_offloading: true
-    temp_device: "cpu"
-  optimizer:
-    type: "adamw_bf16"  # Options: adamw, adamw_bf16, adamw_kahan, soap
-    soap_config:
-      precondition_frequency: 10
-      max_precond_dim: 10000
-      merge_dims: false
-      precondition_1d: false
-      normalize_grads: false
-    kahan_config:
-      warmup_steps: 500
-      kahan_sum: true
-  learning_rate: 4.0e-7
-  max_grad_norm: 1.0
-  num_epochs: 100
-  warmup_steps: 500
-  save_steps: 500
-  log_steps: 10
-  eval_steps: 100
-  validation_steps: 1000
-  max_train_steps: null
-  lr_scheduler: "linear"
-  optimizer_betas: [0.9, 0.999]
-  weight_decay: 1.0e-2
-  optimizer_eps: 1.0e-8
-  method: "ddpm"  # Available: ddpm, flow_matching, consistency, dpm
-  ddpm:
-    # Prediction types:
-    # - v_prediction: Velocity prediction (NovelAI style), faster convergence
-    # - epsilon: Classic noise prediction, more stable
-    # - sample: Direct sample prediction (experimental)
-    prediction_type: "v_prediction"
+  method:
+    type: "ddpm"  # Single source of truth for training method
+    num_timesteps: 1000
+    # DDPM specific settings
     snr_gamma: 5.0
     zero_terminal_snr: true
     sigma_min: 0.002
     sigma_max: 2000.0
     rho: 7.0
+    scheduler:
+      num_train_timesteps: 1000
+      beta_start: 0.00085
+      beta_end: 0.012
+      beta_schedule: "scaled_linear"
+      timestep_spacing: "uniform" #options are "leading", "trailing", "uniform"
+      rescale_betas_zero_snr: true
+    # Flow matching specific settings
+    sigma: 1.0
+    time_sampling: "uniform"
 
 data:
   # Supports both Windows and Unix paths
@@ -145,3 +122,4 @@ tag_weighting:
   min_weight: 0.1
   max_weight: 3.0
   smoothing_factor: 0.1
+

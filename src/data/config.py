@@ -88,45 +88,12 @@ class NoiseSchedulerConfig:
     beta_end: float = 0.012
     beta_schedule: str = "scaled_linear"
     clip_sample: bool = False
-    set_alpha_to_one: bool = False
     steps_offset: int = 0
-    prediction_type: str = "v_prediction"
     thresholding: bool = False
     dynamic_thresholding_ratio: float = 0.995
     sample_max_value: float = 1.0
-    timestep_spacing: str = "none"
+    timestep_spacing: str = "leading"
     rescale_betas_zero_snr: bool = True
-
-@dataclass
-class ModelConfig:
-    """Model configuration."""
-    pretrained_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
-    num_timesteps: int = 1000
-    sigma_min: float = 0.002
-    sigma_max: float = 80.0
-    rho: float = 7.0
-    dtype: str = "bfloat16"
-    fallback_dtype: str = "float32"
-    enable_bf16_training: bool = True
-    # Model optimization flags
-    enable_memory_efficient_attention: bool = True
-    enable_vae_slicing: bool = False
-    enable_model_cpu_offload: bool = False
-    enable_sequential_cpu_offload: bool = False
-    # Model component dtypes
-    unet_dtype: Optional[str] = None
-    prior_dtype: Optional[str] = None
-    text_encoder_dtype: Optional[str] = None
-    text_encoder_2_dtype: Optional[str] = None
-    vae_dtype: Optional[str] = None
-    effnet_dtype: Optional[str] = None
-    decoder_dtype: Optional[str] = None
-    decoder_text_encoder_dtype: Optional[str] = None
-    decoder_vqgan_dtype: Optional[str] = None
-    lora_dtype: Optional[str] = None
-    embedding_dtype: Optional[str] = None
-    scheduler_type: str = "ddpm"
-    scheduler_config: NoiseSchedulerConfig = field(default_factory=NoiseSchedulerConfig)
 
 @dataclass
 class MemoryConfig:
@@ -141,22 +108,29 @@ class MemoryConfig:
     offload_models: List[str] = field(default_factory=lambda: ["vae"])
 
 @dataclass
-class FlowMatchingConfig:
-    """Flow Matching configuration."""
-    enabled: bool = False
-    num_timesteps: int = 1000
-    sigma: float = 1.0
-    time_sampling: str = "uniform"  # or logit_normal
-
-@dataclass
-class DDPMConfig:
-    """DDPM-specific training configuration."""
+class ModelConfig:
+    """Model configuration."""
+    pretrained_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    enable_memory_efficient_attention: bool = True
+    enable_vae_slicing: bool = False
+    enable_model_cpu_offload: bool = False
+    enable_sequential_cpu_offload: bool = False
+    enable_bf16_training: bool = True
+    dtype: str = "bfloat16"
+    fallback_dtype: str = "float32"
     prediction_type: str = "v_prediction"
-    snr_gamma: Optional[float] = 5.0
-    zero_terminal_snr: bool = True
-    sigma_min: float = 0.002
-    sigma_max: float = 20000.0
-    rho: float = 7.0
+    # Component-specific dtypes (fallback to main dtype if not specified)
+    unet_dtype: Optional[str] = None
+    prior_dtype: Optional[str] = None
+    text_encoder_dtype: Optional[str] = None
+    text_encoder_2_dtype: Optional[str] = None
+    vae_dtype: Optional[str] = None
+    effnet_dtype: Optional[str] = None
+    decoder_dtype: Optional[str] = None
+    decoder_text_encoder_dtype: Optional[str] = None
+    decoder_vqgan_dtype: Optional[str] = None
+    lora_dtype: Optional[str] = None
+    embedding_dtype: Optional[str] = None
 
 @dataclass
 class OptimizerConfig:
@@ -175,48 +149,45 @@ class OptimizerConfig:
     })
 
 @dataclass
+class TrainingMethodConfig:
+    """Training method configuration."""
+    method: str = "ddpm"  # Single source of truth for training method: "ddpm" or "flow_matching"
+    num_timesteps: int = 1000
+    # DDPM specific
+    snr_gamma: float = 5.0
+    zero_terminal_snr: bool = True
+    sigma_min: float = 0.002
+    sigma_max: float = 80.0
+    rho: float = 7.0
+    scheduler: NoiseSchedulerConfig = field(default_factory=NoiseSchedulerConfig)
+    # Flow matching specific
+    sigma: float = 1.0
+    time_sampling: str = "uniform"  # or logit_normal
+
+@dataclass
 class TrainingConfig:
     """Training configuration."""
     batch_size: int = 4
-    micro_batch_size: Optional[int] = None
     gradient_accumulation_steps: int = 1
     mixed_precision: bool = True
-    use_bf16: bool = True
     gradient_checkpointing: bool = True
-    memory: MemoryConfig = field(default_factory=MemoryConfig)
-    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     learning_rate: float = 4.0e-7
     max_grad_norm: float = 1.0
     num_epochs: int = 100
+    max_train_steps: Optional[int] = None
     warmup_steps: int = 500
     save_steps: int = 500
     log_steps: int = 10
     eval_steps: int = 100
     validation_steps: int = 1000
-    validation_samples: int = 4
-    validation_guidance_scale: float = 7.5
-    validation_inference_steps: int = 30
-    validation_batch_size: int = 4
-    validation_scheduler: str = "ddim"
-    validation_cfg_scale: float = 7.5
-    max_train_steps: Optional[int] = None
     lr_scheduler: str = "linear"
     optimizer_betas: Tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 1e-2
     optimizer_eps: float = 1e-8
     use_wandb: bool = True
-    random_flip: bool = True
-    center_crop: bool = True
-    method: str = "ddpm"  # ddpm, flow_matching, consistency, dpm
-    enable_gradient_clipping: bool = True
-    clip_grad_value: Optional[float] = None
-    clip_grad_norm: Optional[float] = 1.0
-    enable_amp: bool = True
-    amp_dtype: str = "float16"
-    prediction_type: str = "v_prediction"
-    zero_terminal_snr: bool = True
-    ddpm: DDPMConfig = field(default_factory=DDPMConfig)
-    flow_matching: FlowMatchingConfig = field(default_factory=FlowMatchingConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    method: TrainingMethodConfig = field(default_factory=TrainingMethodConfig)
 
 @dataclass
 class DataConfig:
@@ -348,11 +319,10 @@ class Config:
             training_dict = config_dict.get("training", {})
             training_config = TrainingConfig(
                 memory=MemoryConfig(**training_dict.get("memory", {})),
-                flow_matching=FlowMatchingConfig(**training_dict.get("flow_matching", {})),
                 **{
                     k: v
                     for k, v in training_dict.items()
-                    if k not in ["memory", "flow_matching"]
+                    if k not in ["memory"]
                 },
             )
 
