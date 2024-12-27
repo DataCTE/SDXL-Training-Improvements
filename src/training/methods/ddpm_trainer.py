@@ -65,48 +65,62 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         try:
+            print("\n=== Starting Tensor Processing ===")  # Clear visual separator
+            
+            # Initial batch inspection
             if isinstance(batch["model_input"], list):
                 latents_list = batch["model_input"]
             else:
                 latents_list = [lat for lat in batch["model_input"]]
 
-            # Log original shapes
-            logger.info(f"Processing batch with {len(latents_list)} latents")
+            print(f"\nInitial Batch:")
+            print(f"Number of latents: {len(latents_list)}")
             for idx, lat in enumerate(latents_list):
-                logger.info(f"Original latent {idx}: shape={lat.shape}")
+                print(f"Latent {idx}: shape={lat.shape}, dtype={lat.dtype}, device={lat.device}")
 
-            # Determine target orientation based on majority
+            # Orientation analysis
+            print("\nAnalyzing Orientations:")
             orientations = []
-            for lat in latents_list:
+            for idx, lat in enumerate(latents_list):
                 h, w = lat.shape[-2:]
-                orientations.append('landscape' if w >= h else 'portrait')
+                current_orientation = 'landscape' if w >= h else 'portrait'
+                orientations.append(current_orientation)
+                print(f"Latent {idx}: {h}x{w} -> {current_orientation}")
             
             target_orientation = max(set(orientations), key=orientations.count)
-            logger.info(f"Target orientation: {target_orientation}")
+            print(f"\nTarget orientation: {target_orientation}")
 
             # Normalize orientations
+            print("\nNormalizing Orientations:")
             oriented_latents = []
             for idx, lat in enumerate(latents_list):
                 h, w = lat.shape[-2:]
                 current_orientation = 'landscape' if w >= h else 'portrait'
                 
                 if current_orientation != target_orientation:
-                    logger.info(f"Rotating latent {idx} from {current_orientation} to {target_orientation}")
+                    print(f"Rotating latent {idx} from {current_orientation} to {target_orientation}")
+                    print(f"Before rotation: {lat.shape}")
                     lat = lat.transpose(-1, -2)
+                    print(f"After rotation: {lat.shape}")
+                else:
+                    print(f"Latent {idx} already in {target_orientation} orientation: {lat.shape}")
                 
                 oriented_latents.append(lat)
-                logger.info(f"Latent {idx} after orientation: shape={lat.shape}")
 
-            # Get target dimensions based on the majority orientation
-            target_h = min(oriented_latents[0].shape[-2:])
-            target_w = max(oriented_latents[0].shape[-2:])
-            logger.info(f"Target dimensions: {target_h}x{target_w}")
+            # Target size determination
+            print("\nDetermining Target Size:")
+            shapes = [lat.shape[-2:] for lat in oriented_latents]
+            print(f"Available shapes: {shapes}")
+            target_h = min(min(shape[-2] for shape in shapes), min(shape[-1] for shape in shapes))
+            target_w = max(max(shape[-2] for shape in shapes), max(shape[-1] for shape in shapes))
+            print(f"Target dimensions: {target_h}x{target_w}")
 
-            # Resize all tensors to match target size
+            # Resize tensors
+            print("\nResizing Tensors:")
             processed_latents = []
             for idx, lat in enumerate(oriented_latents):
                 if lat.shape[-2:] != (target_h, target_w):
-                    logger.info(f"Resizing latent {idx} from {lat.shape[-2:]} to {(target_h, target_w)}")
+                    print(f"Resizing latent {idx}: {lat.shape[-2:]} -> ({target_h}, {target_w})")
                     lat = F.interpolate(
                         lat,
                         size=(target_h, target_w),
@@ -114,20 +128,26 @@ class DDPMTrainer(TrainingMethod):
                         align_corners=False
                     )
                 processed_latents.append(lat)
+                print(f"Processed latent {idx} final shape: {lat.shape}")
 
             # Final verification
+            print("\nFinal Verification:")
             shapes = [lat.shape for lat in processed_latents]
+            print(f"Final shapes: {shapes}")
             if len(set(str(s) for s in shapes)) != 1:
                 shape_details = [f"latent_{i}: {s}" for i, s in enumerate(shapes)]
-                raise ValueError(f"Inconsistent shapes after processing:\n" + "\n".join(shape_details))
+                error_msg = "Inconsistent shapes after processing:\n" + "\n".join(shape_details)
+                print(f"ERROR: {error_msg}")
+                raise ValueError(error_msg)
 
-            # Stack the processed tensors
+            # Stack tensors
+            print("\nStacking Tensors:")
             latents = torch.stack(processed_latents, dim=0)
-            logger.info(f"Successfully stacked latents to shape: {latents.shape}")
+            print(f"Final stacked shape: {latents.shape}")
+            print("\n=== Tensor Processing Complete ===\n")
+
             prompt_embeds = batch["prompt_embeds"]
             pooled_prompt_embeds = batch["pooled_prompt_embeds"]
-                
-            logger.debug(f"Final latents shape: {latents.shape}")
 
             # Get noise and timesteps
             noise = torch.randn(
@@ -183,6 +203,8 @@ class DDPMTrainer(TrainingMethod):
             return {"loss": loss}
 
         except Exception as e:
-            logger.error(f"Error computing DDPM loss: {str(e)}", exc_info=True)
-            torch_sync()
+            print(f"\nERROR in tensor processing: {str(e)}")
+            print("Stack trace:")
+            import traceback
+            traceback.print_exc()
             raise
