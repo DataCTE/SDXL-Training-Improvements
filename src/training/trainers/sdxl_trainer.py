@@ -1,7 +1,7 @@
 """SDXL trainer implementation with 100x speedups."""
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 
 import torch
 import torch.backends.cudnn
@@ -269,7 +269,59 @@ class SDXLTrainer:
                 break
         return metrics
 
+    def _validate_batch_sizes(self, batch: Dict[str, torch.Tensor]) -> None:
+        """Validate that all tensors in a batch have consistent sizes."""
+        expected_batch_size = None
+        expected_latent_size = None
+        
+        def check_tensor(tensor: torch.Tensor, path: str) -> None:
+            nonlocal expected_batch_size, expected_latent_size
+            
+            if len(tensor.shape) >= 2:  # Only check meaningful tensors
+                if expected_batch_size is None:
+                    expected_batch_size = tensor.shape[0]
+                elif tensor.shape[0] != expected_batch_size:
+                    raise ValueError(
+                        f"Inconsistent batch size at {path}: "
+                        f"expected {expected_batch_size}, got {tensor.shape[0]}"
+                    )
+                
+                # For latent/model inputs, check spatial dimensions
+                if path.endswith("model_input") or "latent" in path:
+                    if expected_latent_size is None:
+                        expected_latent_size = tensor.shape[2:]
+                    elif tensor.shape[2:] != expected_latent_size:
+                        raise ValueError(
+                            f"Inconsistent latent spatial dimensions at {path}: "
+                            f"expected {expected_latent_size}, got {tensor.shape[2:]}"
+                        )
+        
+        def recursive_check(data: Union[torch.Tensor, Dict], path: str = "") -> None:
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    current_path = f"{path}.{key}" if path else key
+                    recursive_check(value, current_path)
+            elif isinstance(data, torch.Tensor):
+                check_tensor(data, path)
+        
+        try:
+            recursive_check(batch)
+        except ValueError as e:
+            logger.error(
+                f"Batch validation failed: {str(e)}", 
+                extra={
+                    'batch_structure': {
+                        k: v.shape if isinstance(v, torch.Tensor) else type(v) 
+                        for k, v in batch.items()
+                    }
+                }
+            )
+            raise
+
     def _prepare_micro_batches(self, batch: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:
+        # Validate batch sizes first
+        self._validate_batch_sizes(batch)
+        
         if self.gradient_accumulation_steps == 1:
             return [batch]
             

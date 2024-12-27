@@ -3,7 +3,7 @@ import logging
 import sys
 import torch
 import torch.nn.functional as F
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 from torch import Tensor
 
 from src.training.methods.base import TrainingMethod
@@ -47,6 +47,28 @@ class DDPMTrainer(TrainingMethod):
     ) -> Dict[str, Tensor]:
         """Compute training loss with detailed shape logging."""
         try:
+            # Validate batch tensor shapes
+            def validate_tensor_shapes(data: Union[torch.Tensor, Dict], path: str = "") -> None:
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        current_path = f"{path}.{key}" if path else key
+                        validate_tensor_shapes(value, current_path)
+                elif isinstance(data, torch.Tensor):
+                    logger.debug(f"Tensor at {path}: shape={data.shape}, dtype={data.dtype}, device={data.device}")
+                    if path.endswith("model_input") or "latent" in path:
+                        # Check if this is the first latent shape we've seen
+                        if not hasattr(self, '_expected_latent_shape'):
+                            self._expected_latent_shape = data.shape
+                        else:
+                            if data.shape != self._expected_latent_shape:
+                                raise ValueError(
+                                    f"Inconsistent latent shapes in batch: "
+                                    f"expected {self._expected_latent_shape}, got {data.shape} at {path}"
+                                )
+
+            logger.debug("=== Validating Batch Tensor Shapes ===")
+            validate_tensor_shapes(batch)
+
             # Log initial batch structure
             logger.debug("=== Initial Batch Structure ===")
             for key, value in batch.items():
