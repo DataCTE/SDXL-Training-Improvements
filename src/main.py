@@ -278,7 +278,7 @@ def setup_training(
                 num_cpu_workers=config.preprocessing.num_cpu_workers,
                 num_io_workers=config.preprocessing.num_io_workers,
                 prefetch_factor=config.preprocessing.prefetch_factor,
-                use_pinned_memory=config.preprocessing.use_pinned_memory
+                use_pinned_memory=False  # Disable pinned memory to prevent CUDA tensor pinning issues
             )
         except Exception as e:
             logger.error(f"Failed to create preprocessing pipeline: {str(e)}", exc_info=True)
@@ -318,7 +318,7 @@ def setup_training(
                 batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
                 shuffle=True,
                 num_workers=0,  # Use single worker to avoid pickling issues
-                pin_memory=True,
+                pin_memory=False,  # Disable pinned memory to prevent CUDA tensor pinning issues
                 persistent_workers=False,  # Disable persistent workers
                 collate_fn=train_dataset.collate_fn
             )
