@@ -67,6 +67,8 @@ class GlobalConfig:
         cache_latents: bool = True
         cache_validation: bool = True
 
+    from src.core.logging.base import LogConfig
+
     @dataclass 
     class LoggingConfig:
         """Logging configuration."""
@@ -81,6 +83,33 @@ class GlobalConfig:
         log_system_memory: bool = True
         performance_logging: bool = True
         propagate: bool = True
+        # W&B fields
+        use_wandb: bool = False
+        wandb_project: str = "sdxl-training"
+        wandb_name: Optional[str] = None
+        wandb_tags: Optional[List[str]] = None
+        wandb_notes: Optional[str] = None
+        
+        def to_core_config(self) -> LogConfig:
+            """Convert to core logging config."""
+            return LogConfig(
+                console_level=self.console_level,
+                file_level=self.file_level,
+                log_dir=self.log_dir,
+                filename=self.filename,
+                capture_warnings=self.capture_warnings,
+                console_output=self.console_output,
+                file_output=self.file_output,
+                log_cuda_memory=self.log_cuda_memory,
+                log_system_memory=self.log_system_memory,
+                performance_logging=self.performance_logging,
+                propagate=self.propagate,
+                use_wandb=self.use_wandb,
+                wandb_project=self.wandb_project,
+                wandb_name=self.wandb_name,
+                wandb_tags=self.wandb_tags,
+                wandb_notes=self.wandb_notes
+            )
         # W&B fields
         use_wandb: bool = False
         wandb_project: str = "sdxl-training"
