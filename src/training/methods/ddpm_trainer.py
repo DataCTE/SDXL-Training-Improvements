@@ -14,11 +14,16 @@ logger = get_logger(__name__)
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, unet: torch.nn.Module, config: Config):
+        super().__init__(unet, config)
+        logger = get_logger(__name__)
+        # Create dedicated tensor logger for the trainer
+        self.tensor_logger = TensorLogger(logger)
+        
         logger.debug("Initializing DDPMTrainer")
         # Add shape logging buffer
         self._shape_logs = []
+        
         if hasattr(torch, "compile"):
             logger.debug("Compiling loss computation function")
             self._compiled_loss = torch.compile(

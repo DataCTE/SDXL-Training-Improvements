@@ -128,7 +128,12 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
         )
         
         # Log initial model creation
-        tensor_logger.log_tensor_state("Initial model creation")
+        tensor_logger.log_checkpoint("Initial Model Creation", {
+            "unet": model.unet,
+            "vae": model.vae,
+            "text_encoder_1": model.text_encoder_1,
+            "text_encoder_2": model.text_encoder_2
+        })
 
         # Load pretrained components
         logger.info(f"Loading pretrained model from {config.model.pretrained_model_name}")
@@ -139,14 +144,27 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
         )
         
         # Log post-loading state
-        tensor_logger.log_tensor_state("After pretrained loading")
+        tensor_logger.log_checkpoint("After Pretrained Loading", {
+            "unet": model.unet,
+            "vae": model.vae,
+            "text_encoder_1": model.text_encoder_1,
+            "text_encoder_2": model.text_encoder_2
+        })
 
         # Move model to device after loading
         logger.info(f"Moving model to {device}")
         model.to(device)
         
         # Log post-device-move state
-        tensor_logger.log_tensor_state("After device move")
+        tensor_logger.log_checkpoint("After Device Move", {
+            "unet": model.unet,
+            "vae": model.vae,
+            "text_encoder_1": model.text_encoder_1,
+            "text_encoder_2": model.text_encoder_2
+        })
+
+        # Store tensor_logger in model for access by training methods
+        model.tensor_logger = tensor_logger
         
         # Verify model components
         components = {
@@ -548,15 +566,14 @@ def main():
         tensor_logger = TensorLogger(logger)
             
         # Use print since logger might not be initialized yet
-        # Create TensorLogger for error handling
-        logger = get_logger(__name__)
-        tensor_logger = TensorLogger(logger)
+        # Use model's tensor logger if available, otherwise create new one
+        tensor_logger = getattr(model, 'tensor_logger', None) if 'model' in locals() else None
+        if tensor_logger is None:
+            logger = get_logger(__name__)
+            tensor_logger = TensorLogger(logger)
             
-        # Dump tensor history with full context
-        tensor_logger.dump_shape_history({
-            'error': str(e),
+        error_context = {
             'error_type': type(e).__name__,
-            'stack_trace': traceback.format_exc(),
             'device': str(device) if device is not None else 'unknown',
             'cuda_available': torch.cuda.is_available(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
@@ -564,6 +581,14 @@ def main():
             'cuda_memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
             'cuda_memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
             'cuda_max_memory': torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
+        }
+            
+        # Dump tensor history with full context
+        tensor_logger.dump_shape_history({
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'stack_trace': traceback.format_exc(),
+            **error_context
         })
                 
         sys.exit(1)
