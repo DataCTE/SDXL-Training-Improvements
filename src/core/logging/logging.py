@@ -11,6 +11,7 @@ from datetime import datetime
 import threading
 import torch
 from dataclasses import dataclass
+from src.data.utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
@@ -272,7 +273,7 @@ class ColoredFormatter(logging.Formatter):
 
 def setup_logging(
     config: Optional[Union[LoggingConfig, Dict]] = None,
-    log_dir: Optional[str] = None,
+    log_dir: Optional[str] = "outputs/logs",
     level: Optional[Union[int, str]] = None,
     filename: Optional[str] = None,
     module_name: Optional[str] = None,
@@ -295,7 +296,11 @@ def setup_logging(
         Configured logger instance
     """
     # Create log directory only for file logging
-    log_path = Path(log_dir)
+    if log_dir:
+        log_path = Path(convert_windows_path(log_dir, make_absolute=True))
+    else:
+        log_path = Path(convert_windows_path("outputs/logs", make_absolute=True))
+        
     try:
         if filename:
             log_path.mkdir(parents=True, exist_ok=True)
