@@ -44,7 +44,7 @@ def reduce_dict(input_dict: dict, average: bool = True) -> dict:
 # Initialize colorama
 colorama.init(autoreset=True)
 
-@dataclass
+@dataclass 
 class LogConfig:
     """Unified logging configuration."""
     # Basic logging config
@@ -69,6 +69,10 @@ class LogConfig:
     wandb_name: Optional[str] = None
     wandb_tags: Optional[List[str]] = None
     wandb_notes: Optional[str] = None
+    
+    def __post_init__(self):
+        """Initialize optional fields."""
+        self.wandb_tags = self.wandb_tags or []
     
     def __post_init__(self):
         """Initialize optional fields."""

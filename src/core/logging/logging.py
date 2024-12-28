@@ -19,29 +19,7 @@ colorama.init(autoreset=True)
 # Global action history dict
 _action_history: Dict[str, Any] = {}
 
-@dataclass
-class LoggingConfig:
-    """Centralized logging configuration."""
-    console_level: str = "INFO"
-    file_level: str = "DEBUG"
-    log_dir: str = "outputs/wslref/logs"
-    filename: str = "train.log"
-    capture_warnings: bool = True
-    console_output: bool = True
-    file_output: bool = True
-    log_cuda_memory: bool = True
-    log_system_memory: bool = True
-    performance_logging: bool = True
-    propagate: bool = True
-    module_name: Optional[str] = None
-    
-    def get_console_level(self) -> int:
-        """Convert string level to logging constant."""
-        return getattr(logging, self.console_level.upper())
-    
-    def get_file_level(self) -> int:
-        """Convert string level to logging constant."""
-        return getattr(logging, self.file_level.upper())
+from .base import LogConfig
 
 class LogManager:
     """Centralized logging manager."""
