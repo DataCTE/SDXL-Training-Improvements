@@ -257,7 +257,15 @@ def get_logger(name: str, config: Optional[LogConfig] = None) -> 'Logger':
         config = LogConfig()
     
     logger = LogManager.get_instance().get_logger(name, config)
-    logger.debug(f"Logger '{name}' configured with level: {config.console_level}")  # Add debug message
+    # Add explicit debug message about configuration
+    logger.debug(
+        f"Logger '{name}' initialized",
+        extra={
+            'console_level': config.console_level,
+            'file_level': config.file_level,
+            'log_dir': config.log_dir
+        }
+    )
     return logger
 """Base logging configuration and utilities."""
 from dataclasses import dataclass
