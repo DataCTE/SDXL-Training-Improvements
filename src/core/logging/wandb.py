@@ -4,11 +4,11 @@ from typing import Any, Dict, Optional, Union
 import functools
 from functools import wraps
 
-import functools
 import torch
 import wandb
 from PIL import Image
-from src.core.logging import get_logger, LogConfig
+from src.core.logging import get_logger
+from src.core.logging.base import LogConfig
 
 logger = get_logger(__name__)
 
@@ -31,12 +31,36 @@ class WandbLogger:
         dir: Optional[Union[str, Path]] = None,
         tags: Optional[list] = None,
         notes: Optional[str] = None,
-        resume: bool = False
+        resume: bool = False,
+        log_config: Optional[LogConfig] = None
     ):
-        """Initialize W&B logger."""
+        """Initialize W&B logger.
+        
+        Args:
+            project: W&B project name
+            name: Run name
+            config: Configuration dictionary
+            dir: Output directory
+            tags: Run tags
+            notes: Run notes
+            resume: Whether to resume previous run
+            log_config: Optional logging configuration
+        """
         self.enabled = True
         self.model_logged = False
+        
+        # Use log_config if provided
+        if log_config:
+            project = log_config.wandb_project
+            name = log_config.wandb_name
+            tags = log_config.wandb_tags
+            notes = log_config.wandb_notes
+            
         try:
+            if not self.enabled:
+                logger.warning("W&B logging disabled")
+                return
+                
             self.run = wandb.init(
                 project=project,
                 name=name,
@@ -46,8 +70,26 @@ class WandbLogger:
                 notes=notes,
                 resume=resume
             )
+            logger.info(
+                "Initialized W&B logger",
+                extra={
+                    'project': project,
+                    'run_name': name,
+                    'tags': tags,
+                    'output_dir': str(dir)
+                }
+            )
+            
         except Exception as e:
-            logger.error(f"Failed to initialize W&B: {str(e)}")
+            logger.error(
+                "Failed to initialize W&B",
+                exc_info=True,
+                extra={
+                    'error': str(e),
+                    'project': project,
+                    'enabled': self.enabled
+                }
+            )
             self.enabled = False
 
     @make_picklable
@@ -62,9 +104,29 @@ class WandbLogger:
             return
             
         try:
-            wandb.log(metrics, step=step, commit=commit)
+            # Validate metrics
+            filtered_metrics = {}
+            for k, v in metrics.items():
+                try:
+                    if isinstance(v, (int, float, str, bool)):
+                        filtered_metrics[k] = v
+                    elif isinstance(v, torch.Tensor):
+                        filtered_metrics[k] = v.item()
+                except Exception as e:
+                    logger.warning(f"Failed to process metric {k}: {str(e)}")
+                    
+            wandb.log(filtered_metrics, step=step, commit=commit)
+            
         except Exception as e:
-            logger.error(f"Failed to log metrics: {str(e)}")
+            logger.error(
+                "Failed to log metrics",
+                exc_info=True,
+                extra={
+                    'error': str(e),
+                    'step': step,
+                    'metrics_keys': list(metrics.keys())
+                }
+            )
 
     @make_picklable
     def log_images(
