@@ -78,38 +78,18 @@ def setup_environment(args: argparse.Namespace):
         cleanup_distributed()
         torch_sync()
 
-def setup_device_and_logging(config: Config) -> torch.device:
+def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
     """Setup device and logging configuration."""
-    # Create output and log directories
-    output_dir = Path(config.global_config.output_dir)
-    log_dir = output_dir / "logs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create logging config from main config
-    log_config = LogConfig(
-        console_level=config.global_config.logging.console_level,
-        file_level=config.global_config.logging.file_level,
-        log_dir=str(log_dir),
-        filename=config.global_config.logging.filename,
-        capture_warnings=config.global_config.logging.capture_warnings,
-        console_output=config.global_config.logging.console_output,
-        file_output=config.global_config.logging.file_output,
-        log_cuda_memory=config.global_config.logging.log_cuda_memory,
-        log_system_memory=config.global_config.logging.log_system_memory,
-        performance_logging=config.global_config.logging.performance_logging,
-        propagate=config.global_config.logging.propagate,
-        use_wandb=config.global_config.logging.use_wandb,
-        wandb_project=config.global_config.logging.wandb_project,
-        wandb_name=config.global_config.logging.wandb_name,
-        wandb_tags=config.global_config.logging.wandb_tags,
-        wandb_notes=config.global_config.logging.wandb_notes
-    )
+    # First validate the logging config
+    log_config = config.validate_logging_config()
     
-    # Initialize logger with the config
+    # Initialize root logger first
+    root_logger = get_logger("root", log_config)
+    
+    # Then create main logger
     logger = get_logger("main", log_config)
-    logger.debug(f"Logging initialized with console_level: {log_config.console_level}")  # Add debug message
-
+    logger.debug("Logging system initialized")
+    
     # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if not isinstance(device, torch.device):

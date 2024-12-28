@@ -452,15 +452,36 @@ class Config:
         
             # Validate console level
             valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-            if self.global_config.logging.console_level.upper() not in valid_levels:
-                raise ValueError(f"Invalid console log level: {self.global_config.logging.console_level}")
+            console_level = self.global_config.logging.console_level.upper()
+            if console_level not in valid_levels:
+                raise ValueError(f"Invalid console log level: {console_level}")
                 
             # Validate file level
-            if self.global_config.logging.file_level.upper() not in valid_levels:
-                raise ValueError(f"Invalid file level: {self.global_config.logging.file_level}")
+            file_level = self.global_config.logging.file_level.upper()
+            if file_level not in valid_levels:
+                raise ValueError(f"Invalid file level: {file_level}")
                 
-            # Setup logging based on config
-            setup_logging(config=self.global_config.logging)
+            # Create logging config
+            from src.core.logging import LogConfig
+            log_config = LogConfig(
+                console_level=console_level,
+                file_level=file_level,
+                log_dir=str(log_dir),
+                filename=self.global_config.logging.filename,
+                capture_warnings=self.global_config.logging.capture_warnings,
+                console_output=self.global_config.logging.console_output,
+                file_output=self.global_config.logging.file_output,
+                log_cuda_memory=self.global_config.logging.log_cuda_memory,
+                log_system_memory=self.global_config.logging.log_system_memory,
+                performance_logging=self.global_config.logging.performance_logging,
+                propagate=self.global_config.logging.propagate
+            )
+            
+            # Setup logging with validated config
+            from src.core.logging import setup_logging
+            setup_logging(log_config)
+            
+            return log_config
             
         except Exception as e:
             raise ValueError(f"Invalid logging configuration: {str(e)}")
