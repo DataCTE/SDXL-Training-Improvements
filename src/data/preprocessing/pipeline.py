@@ -4,9 +4,9 @@ import torch
 import random
 import logging
 from contextlib import contextmanager
-from src.core.logging.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 
-logger = setup_logging(__name__, level=logging.INFO)
+logger = get_logger(__name__)
 import torch.backends.cudnn
 from pathlib import Path
 import multiprocessing as mp

@@ -38,9 +38,9 @@ from src.core.types import DataType, ModelWeightDtypes
 from src.models.base import BaseModel, BaseModelEmbedding, ModelType
 from src.models.adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
 
-from src.core.logging.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 class ModelError(Exception):
     """Base exception for model errors."""
