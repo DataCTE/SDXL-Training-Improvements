@@ -1,5 +1,4 @@
 """SDXL trainer implementation with 100x speedups."""
-import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 
@@ -8,8 +7,8 @@ import torch.backends.cudnn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+from src.core.logging import setup_logging
+logger = setup_logging(__name__)
 
 # Force speed optimizations
 torch.backends.cudnn.benchmark = True

@@ -2,14 +2,12 @@
 from typing import List, Optional, Union
 
 import torch
-import logging
-from src.core.logging import WandbLogger
+from src.core.logging import setup_logging, WandbLogger
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXLModel, StableDiffusionXLPipeline
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger = setup_logging(__name__)
 
 def create_trainer(
     config: Config,

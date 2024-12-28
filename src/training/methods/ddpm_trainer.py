@@ -1,20 +1,15 @@
 """DDPM trainer implementation for SDXL with extreme speedups."""
-import logging
 import sys
 import torch
 import torch.nn.functional as F
 from typing import Dict, Optional, Union
 from torch import Tensor
 
+from src.core.logging import setup_logging
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-# Add verification print
-print(f"DDPM Trainer logger initialized with level: {logger.getEffectiveLevel()}")
-print(f"DDPM Trainer logger handlers: {logger.handlers}")
+logger = setup_logging(__name__)
 
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"

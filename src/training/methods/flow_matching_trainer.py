@@ -1,15 +1,15 @@
 """Flow Matching trainer implementation with extreme speedups."""
-import logging
 import torch
 import torch.backends.cudnn
 import torch.nn.functional as F
 from typing import Dict, Optional
 from torch import Tensor
 
+from src.core.logging import setup_logging
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 class FlowMatchingTrainer(TrainingMethod):
     name = "flow_matching"
