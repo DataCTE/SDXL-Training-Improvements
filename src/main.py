@@ -10,7 +10,7 @@ import torch.cuda
 import logging
 import sys
 import threading
-from src.core.logging.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -88,9 +88,26 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Create logging config from main config
-    log_config = config.logging.to_core_config()
+    log_config = LogConfig(
+        console_level=config.logging.console_level,
+        file_level=config.logging.file_level,
+        log_dir=str(log_dir),
+        filename=config.logging.filename,
+        capture_warnings=config.logging.capture_warnings,
+        console_output=config.logging.console_output,
+        file_output=config.logging.file_output,
+        log_cuda_memory=config.logging.log_cuda_memory,
+        log_system_memory=config.logging.log_system_memory,
+        performance_logging=config.logging.performance_logging,
+        propagate=config.logging.propagate,
+        use_wandb=config.logging.use_wandb,
+        wandb_project=config.logging.wandb_project,
+        wandb_name=config.logging.wandb_name,
+        wandb_tags=config.logging.wandb_tags,
+        wandb_notes=config.logging.wandb_notes
+    )
     
-    # Initialize logger
+    # Initialize logger with the config
     logger = get_logger("main", log_config)
     logger.info("Logging system initialized")
 
@@ -105,7 +122,7 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
             logger.info(f"CUDA Device: {torch.cuda.get_device_name(device.index)}")
             logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
 
-    return device
+    return device, logger
 
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     """Initialize SDXL model components."""
