@@ -9,19 +9,31 @@ from src.core.logging import setup_logging
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
-logger = setup_logging(__name__)
-
 class FlowMatchingTrainer(TrainingMethod):
     name = "flow_matching"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.logger.debug("Initializing Flow Matching Trainer")
+        
+        # Initialize tensor shape tracking
+        self._shape_logs = []
+        
         if hasattr(torch, "compile"):
-            self._compiled_loss = torch.compile(
-                self._compute_loss_impl,
-                mode="reduce-overhead",
-                fullgraph=False
-            )
+            self.logger.debug("Attempting to compile loss computation")
+            try:
+                self._compiled_loss = torch.compile(
+                    self._compute_loss_impl,
+                    mode="reduce-overhead",
+                    fullgraph=False
+                )
+                self.logger.debug("Loss computation successfully compiled")
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to compile loss computation",
+                    exc_info=True,
+                    extra={'error': str(e)}
+                )
 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, Tensor]:
         """Compute training loss."""
