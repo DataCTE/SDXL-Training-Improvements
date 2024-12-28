@@ -1,18 +1,14 @@
 """Centralized logging configuration for SDXL training."""
 import logging
 import sys
-import time
-import traceback
+import threading
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple, Union
+from typing import Optional, Dict, Any
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
-import threading
-import torch
-from dataclasses import dataclass
-from src.data.utils.paths import convert_windows_path
-from src.core.logging.config import LogConfig as LoggingConfig
+from .base import LogConfig
+from .utils import ColoredFormatter
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)

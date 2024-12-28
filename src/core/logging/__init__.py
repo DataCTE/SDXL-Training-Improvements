@@ -3,8 +3,8 @@ from .config import LogConfig
 from .base import LogManager, Logger, get_logger
 from .metrics import MetricsLogger, TrainingMetrics, log_metrics
 from .wandb import WandbLogger
-from .utils import EnhancedFormatter, create_enhanced_logger
-from .logging import setup_logging
+from .utils import EnhancedFormatter, create_enhanced_logger, TensorLogger
+from .setup import setup_logging
 
 __all__ = [
     "LogConfig",
@@ -17,5 +17,6 @@ __all__ = [
     "WandbLogger",
     "EnhancedFormatter",
     "create_enhanced_logger",
+    "TensorLogger",
     "setup_logging"
 ]
