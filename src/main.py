@@ -27,7 +27,7 @@ from src.training.optimizers import AdamWScheduleFreeKahan
 from src.training.optimizers import AdamWBF16
 from src.training.optimizers import SOAP
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from src.core.logging import get_logger, LogConfig, WandbLogger
+from src.core.logging import get_logger, LogConfig, WandbLogger, create_enhanced_logger
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.preprocessing import CacheManager, PreprocessingPipeline, create_tag_weighter_with_index
 from src.data.utils.paths import convert_windows_path
