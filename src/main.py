@@ -10,7 +10,7 @@ import torch.cuda
 import logging
 import sys
 import threading
-from src.core.logging import get_logger, LogConfig
+from src.core.logging import get_logger, LogConfig, setup_logging
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
