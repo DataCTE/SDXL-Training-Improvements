@@ -49,15 +49,49 @@ class DDPMTrainer(TrainingMethod):
             }
             self._shape_logs.append(shape_info)
 
+    def _log_tensor_shapes(self, data: Union[torch.Tensor, Dict], path: str = "", step: str = "") -> None:
+        """Store tensor shapes in the shape logging buffer."""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                current_path = f"{path}.{key}" if path else key
+                self._log_tensor_shapes(value, current_path, step)
+        elif isinstance(data, torch.Tensor):
+            shape_info = {
+                'step': step,
+                'path': path,
+                'shape': tuple(data.shape),
+                'dtype': str(data.dtype),
+                'device': str(data.device),
+                'stats': {
+                    'min': float(data.min().cpu().item()),
+                    'max': float(data.max().cpu().item()),
+                    'mean': float(data.mean().cpu().item()),
+                    'std': float(data.std().cpu().item()) if data.numel() > 1 else 0.0
+                }
+            }
+            self._shape_logs.append(shape_info)
+
     def compute_loss(
         self,
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
-        """Compute training loss."""
+        """Compute training loss with metrics logging."""
         if hasattr(self, '_compiled_loss'):
-            return self._compiled_loss(batch, generator)
-        return self._compute_loss_impl(batch, generator)
+            metrics = self._compiled_loss(batch, generator)
+        else:
+            metrics = self._compute_loss_impl(batch, generator)
+            
+        # Log tensor shapes for debugging
+        self._log_tensor_shapes(batch, step="input")
+        
+        # Update metrics logger
+        self.metrics_logger.update(
+            {k: v.item() if isinstance(v, torch.Tensor) else v 
+             for k, v in metrics.items()}
+        )
+        
+        return metrics
 
     def _compute_loss_impl(
         self,

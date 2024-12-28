@@ -2,10 +2,10 @@
 import torch
 import torch.backends.cudnn
 import torch.nn.functional as F
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 from torch import Tensor
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, MetricsLogger
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
@@ -16,6 +16,9 @@ class FlowMatchingTrainer(TrainingMethod):
     def __init__(self, unet: torch.nn.Module, config: Config):
         super().__init__(unet, config)
         self.logger.debug("Initializing Flow Matching Trainer")
+        
+        # Initialize metrics logger
+        self.metrics_logger = MetricsLogger(window_size=100)
         
         # Initialize tensor shape tracking
         self._shape_logs = []
@@ -92,6 +95,10 @@ class FlowMatchingTrainer(TrainingMethod):
                 }
             }
             
+            # Log shapes for debugging
+            self._log_tensor_shapes({"latents": latents_list[0]}, step="latents")
+            self._log_tensor_shapes({"prompt_embeds": prompt_embeds}, step="embeddings")
+
             # Compute flow matching loss
             loss = self.compute_flow_matching_loss(self.unet, x0, x1, t, cond_emb)
             
@@ -99,10 +106,31 @@ class FlowMatchingTrainer(TrainingMethod):
                 loss = loss * batch["loss_weights"]
             loss = loss.mean()
             
-            return {"loss": loss}
+            # Compute additional metrics
+            metrics = {
+                "loss": loss,
+                "x0_norm": x0.norm().item(),
+                "x1_norm": x1.norm().item(),
+                "time_mean": t.mean().item(),
+                "time_std": t.std().item()
+            }
+            
+            # Update metrics logger
+            self.metrics_logger.update(metrics)
+            
+            return metrics
 
         except Exception as e:
-            self.logger.error(f"Error computing Flow Matching loss: {str(e)}", exc_info=True)
+            self.logger.error(
+                "Error computing Flow Matching loss",
+                exc_info=True,
+                extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'shape_logs': self._shape_logs,
+                    'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None
+                }
+            )
             raise
 
     def sample_logit_normal(self, shape, device, dtype, mean=0.0, std=1.0, generator=None):
