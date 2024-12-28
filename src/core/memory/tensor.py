@@ -9,7 +9,11 @@ import torch
 import accelerate
 from src.core.logging.logging import setup_logging
 
-logger = setup_logging(__name__, level="INFO")
+logger = setup_logging(
+    module_name=__name__,
+    level="INFO",
+    log_dir="outputs/logs"  # Add default log directory
+)
 
 # Initialize accelerator and device
 accelerator = accelerate.Accelerator()
