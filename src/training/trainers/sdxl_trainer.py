@@ -175,50 +175,33 @@ class SDXLTrainer:
         accumulation_step: int = 0
     ) -> Dict[str, float]:
         try:
-            # Add pre-validation
-            logger.debug("=== Pre-Training Step Validation ===")
-            def validate_tensors(data: Union[Dict, torch.Tensor], path: str = "") -> None:
-                if isinstance(data, dict):
-                    for key, value in data.items():
-                        new_path = f"{path}.{key}" if path else key
-                        validate_tensors(value, new_path)
-                elif isinstance(data, torch.Tensor):
-                    if path.endswith("model_input") or "latent" in path:
-                        logger.debug(
-                            f"Validating tensor at {path}: "
-                            f"shape={data.shape}, dtype={data.dtype}, "
-                            f"device={data.device}, "
-                            f"range=[{data.min().item():.3f}, {data.max().item():.3f}]"
-                        )
-
-            validate_tensors(batch)
-
+            # Validate tensors
+            self._validate_batch_sizes(batch)
+            
+            # Compute loss
             loss_dict = self.training_method.compute_loss(batch, generator=generator)
             loss = loss_dict["loss"] / self.gradient_accumulation_steps
+            
+            # Backward pass
             loss.backward()
             
-            grad_norm = 0.0
+            metrics = {
+                "loss": loss_dict["loss"].item(),
+                "learning_rate": self.optimizer.param_groups[0]["lr"],
+                "batch_size": batch["latent"]["model_input"].shape[0] if "latent" in batch else batch["model_input"].shape[0]
+            }
+            
+            # Optimizer step if needed
             if accumulation_step == self.gradient_accumulation_steps - 1:
                 if self.config.training.max_grad_norm > 0:
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                    metrics["grad_norm"] = torch.nn.utils.clip_grad_norm_(
                         self.unet.parameters(),
                         self.config.training.max_grad_norm
                     ).item()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
             
-            metrics = {
-                "loss": loss_dict["loss"].item(),
-                "grad_norm": grad_norm,
-                "learning_rate": self.optimizer.param_groups[0]["lr"],
-                "batch_size": batch["model_input"].shape[0]
-            }
-            
-            # Update metrics logger
-            self.metrics_logger.update(metrics, batch_size=batch["model_input"].shape[0])
-            
-            return {k: v.detach().item() if isinstance(v, torch.Tensor) else v 
-                   for k, v in loss_dict.items()}
+            return metrics
         except Exception as e:
             logger.error(
                 "Error in training step",
