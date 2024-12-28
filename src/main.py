@@ -88,22 +88,22 @@ def setup_device_and_logging(config: Config) -> torch.device:
 
     # Create logging config from main config
     log_config = LogConfig(
-        console_level=config.logging.console_level,
-        file_level=config.logging.file_level,
+        console_level=config.global_config.logging.console_level,
+        file_level=config.global_config.logging.file_level,
         log_dir=str(log_dir),
-        filename=config.logging.filename,
-        capture_warnings=config.logging.capture_warnings,
-        console_output=config.logging.console_output,
-        file_output=config.logging.file_output,
-        log_cuda_memory=config.logging.log_cuda_memory,
-        log_system_memory=config.logging.log_system_memory,
-        performance_logging=config.logging.performance_logging,
-        propagate=config.logging.propagate,
-        use_wandb=config.logging.use_wandb,
-        wandb_project=config.logging.wandb_project,
-        wandb_name=config.logging.wandb_name,
-        wandb_tags=config.logging.wandb_tags,
-        wandb_notes=config.logging.wandb_notes
+        filename=config.global_config.logging.filename,
+        capture_warnings=config.global_config.logging.capture_warnings,
+        console_output=config.global_config.logging.console_output,
+        file_output=config.global_config.logging.file_output,
+        log_cuda_memory=config.global_config.logging.log_cuda_memory,
+        log_system_memory=config.global_config.logging.log_system_memory,
+        performance_logging=config.global_config.logging.performance_logging,
+        propagate=config.global_config.logging.propagate,
+        use_wandb=config.global_config.logging.use_wandb,
+        wandb_project=config.global_config.logging.wandb_project,
+        wandb_name=config.global_config.logging.wandb_name,
+        wandb_tags=config.global_config.logging.wandb_tags,
+        wandb_notes=config.global_config.logging.wandb_notes
     )
     
     # Initialize logger with the config

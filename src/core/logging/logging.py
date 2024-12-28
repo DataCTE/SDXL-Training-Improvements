@@ -234,7 +234,7 @@ def setup_logging(
     module_name: Optional[str] = None,
     capture_warnings: Optional[bool] = None,
     propagate: Optional[bool] = None,
-    console_level: Optional[Union[int, str]] = "INFO"
+    console_level: Optional[Union[int, str]] = None
 ) -> Tuple[logging.Logger, TensorLogger]:
     """Setup logging configuration with detailed action tracking and colored output.
     
@@ -260,7 +260,11 @@ def setup_logging(
         filename = config.filename
         capture_warnings = config.capture_warnings
         propagate = config.propagate
-        console_level = config.console_level
+        console_level = config.console_level  # Use console_level from config
+    
+    # If no console_level specified (either via config or parameter), default to "INFO"
+    if console_level is None:
+        console_level = "INFO"
 
     # Create log directory only for file logging
     if log_dir:

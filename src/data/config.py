@@ -447,20 +447,20 @@ class Config:
         """Validate logging configuration settings."""
         try:
             # Validate log directory
-            log_dir = Path(self.logging.log_dir)
+            log_dir = Path(self.global_config.logging.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
-            
+        
             # Validate console level
             valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-            if self.logging.console_level.upper() not in valid_levels:
-                raise ValueError(f"Invalid console log level: {self.logging.console_level}")
+            if self.global_config.logging.console_level.upper() not in valid_levels:
+                raise ValueError(f"Invalid console log level: {self.global_config.logging.console_level}")
                 
             # Validate file level
-            if self.logging.file_level.upper() not in valid_levels:
-                raise ValueError(f"Invalid file level: {self.logging.file_level}")
+            if self.global_config.logging.file_level.upper() not in valid_levels:
+                raise ValueError(f"Invalid file level: {self.global_config.logging.file_level}")
                 
             # Setup logging based on config
-            setup_logging(config=self.logging)
+            setup_logging(config=self.global_config.logging)
             
         except Exception as e:
             raise ValueError(f"Invalid logging configuration: {str(e)}")
