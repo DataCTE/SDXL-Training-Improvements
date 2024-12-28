@@ -1,11 +1,9 @@
 """Centralized logging system for SDXL training."""
-from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple, Union
 import torch
 from pathlib import Path
 import logging
 import sys
-import time
 import threading
 import wandb
 from PIL import Image
@@ -14,8 +12,7 @@ from colorama import Fore, Style
 from datetime import datetime
 from functools import wraps
 
-# Import config-related items
-from src.data.config import Config, GlobalConfig
+from .config import LogConfig
 # Add a simple reduce_dict implementation here to break the cycle
 def reduce_dict(input_dict: dict, average: bool = True) -> dict:
     """Simple dictionary reduction for non-distributed case."""
@@ -47,53 +44,6 @@ def reduce_dict(input_dict: dict, average: bool = True) -> dict:
 # Initialize colorama
 colorama.init(autoreset=True)
 
-@dataclass 
-class LogConfig:
-    """Unified logging configuration."""
-    # Basic logging config
-    console_level: str = "INFO"
-    file_level: str = "DEBUG"
-    log_dir: str = "outputs/logs"
-    filename: Optional[str] = "training.log"
-    capture_warnings: bool = True
-    console_output: bool = True
-    file_output: bool = True
-    log_cuda_memory: bool = True
-    log_system_memory: bool = True
-    performance_logging: bool = True
-    propagate: bool = True
-    
-    # Metrics config
-    metrics_window_size: int = 100
-    
-    # W&B config
-    use_wandb: bool = False
-    wandb_project: str = "sdxl-training"
-    wandb_name: Optional[str] = None
-    wandb_tags: Optional[List[str]] = None
-    wandb_notes: Optional[str] = None
-    
-    @classmethod
-    def from_config(cls, config: Config) -> 'LogConfig':
-        """Create LogConfig from main Config object."""
-        return cls(
-            console_level=config.logging.console_level,
-            file_level=config.logging.file_level,
-            log_dir=config.logging.log_dir,
-            filename=config.logging.filename,
-            capture_warnings=config.logging.capture_warnings,
-            console_output=config.logging.console_output,
-            file_output=config.logging.file_output,
-            log_cuda_memory=config.logging.log_cuda_memory,
-            log_system_memory=config.logging.log_system_memory,
-            performance_logging=config.logging.performance_logging,
-            propagate=config.logging.propagate,
-            use_wandb=config.logging.use_wandb,
-            wandb_project=config.logging.wandb_project,
-            wandb_name=config.logging.wandb_name,
-            wandb_tags=config.logging.wandb_tags,
-            wandb_notes=config.logging.wandb_notes
-        )
 
 class LogManager:
     """Centralized logging manager."""
