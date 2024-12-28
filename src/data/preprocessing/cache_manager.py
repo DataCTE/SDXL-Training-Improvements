@@ -3,12 +3,12 @@ from pathlib import Path
 import json
 import time
 import torch
-import logging
 from typing import Dict, Optional, Union, Any, List, Tuple, Set
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger, LogConfig
+logger = get_logger(__name__)
 
 class TensorValidator:
     @staticmethod

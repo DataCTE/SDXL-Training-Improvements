@@ -4,7 +4,7 @@ import time
 import torch
 from pathlib import Path
 
-from src.core.logging.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 from src.models.encoders.vae import VAEEncoder
 from src.models.encoders.vae import VAEEncoder 
 from src.models.encoders.clip import CLIPEncoder
@@ -14,7 +14,7 @@ from src.data.preprocessing.cache_manager import CacheManager
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.utils.paths import convert_windows_path
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 class LatentPreprocessor:
     def __init__(

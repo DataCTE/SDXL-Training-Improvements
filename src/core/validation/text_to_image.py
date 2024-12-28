@@ -10,8 +10,9 @@ import matplotlib.pyplot as plt
 from ...models import StableDiffusionXLModel, ModelType
 from ...config import Config
 from .types import ValidationMode, ValidationMetric, ValidationConfig
+from src.core.logging import get_logger, LogConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class TextToImageValidator:
     """Generates validation images during training."""

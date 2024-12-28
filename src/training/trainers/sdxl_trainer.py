@@ -7,10 +7,10 @@ import torch.backends.cudnn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from src.core.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 from src.training.metrics import MetricsLogger
 from src.training.validation import ValidationLogger
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 # Force speed optimizations
 torch.backends.cudnn.benchmark = True
