@@ -2,13 +2,22 @@
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Union
 import torch
+import torch.distributed as dist
 from collections import defaultdict
 import time
 import numpy as np
-from .base import get_logger, LogConfig
+from functools import wraps
+from .base import get_logger, LogConfig, reduce_dict
 from .wandb import WandbLogger
 
 logger = get_logger(__name__)
+
+def make_picklable(func):
+    """Decorator to make functions picklable."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
 
 @dataclass
 class TrainingMetrics:
