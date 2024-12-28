@@ -15,6 +15,9 @@ from dataclasses import dataclass
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
 
+# Global action history dict
+_action_history: Dict[str, Any] = {}
+
 @dataclass
 class LoggingConfig:
     """Centralized logging configuration."""
@@ -214,7 +217,7 @@ class ColoredFormatter(logging.Formatter):
         # Track error levels that cause failures
         if record.levelno >= logging.ERROR:
             with threading.Lock():  # Add thread safety
-                action_history[f'error_{time.time()}'] = {
+                _action_history[f'error_{time.time()}'] = {
                     'level': record.levelno,
                     'level_name': record.levelname,
                     'message': record.msg,
@@ -383,10 +386,10 @@ def cleanup_logging() -> Dict[str, Any]:
     
     # Return action history for analysis
     return {
-        'actions': action_history,
-        'total_actions': len(action_history),
+        'actions': _action_history,
+        'total_actions': len(_action_history),
         'categories': {
-            category: len([a for a in action_history.values() if a['category'] == category])
-            for category in set(a['category'] for a in action_history.values())
+            category: len([a for a in _action_history.values() if a['category'] == category])
+            for category in set(a['category'] for a in _action_history.values())
         }
     }

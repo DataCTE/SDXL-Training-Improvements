@@ -273,7 +273,7 @@ class LoggingConfig:
     performance_logging: bool = True
     propagate: bool = True
     
-    def to_core_config(self) -> 'core.logging.LoggingConfig':
+    def to_core_config(self) -> 'src.core.logging.logging.LoggingConfig':
         """Convert to core logging config."""
         from src.core.logging.logging import LoggingConfig as CoreLoggingConfig
         return CoreLoggingConfig(
