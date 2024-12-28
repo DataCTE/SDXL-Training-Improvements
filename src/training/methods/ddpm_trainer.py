@@ -83,21 +83,29 @@ class DDPMTrainer(TrainingMethod):
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         """Compute training loss with metrics logging."""
-        if hasattr(self, '_compiled_loss'):
-            metrics = self._compiled_loss(batch, generator)
-        else:
-            metrics = self._compute_loss_impl(batch, generator)
+        try:
+            if hasattr(self, '_compiled_loss'):
+                metrics = self._compiled_loss(batch, generator)
+            else:
+                metrics = self._compute_loss_impl(batch, generator)
+                
+            # Log tensor shapes for debugging
+            self._log_tensor_shapes(batch, step="input")
             
-        # Log tensor shapes for debugging
-        self._log_tensor_shapes(batch, step="input")
-        
-        # Update metrics logger
-        self.metrics_logger.update(
-            {k: v.item() if isinstance(v, torch.Tensor) else v 
-             for k, v in metrics.items()}
-        )
-        
-        return metrics
+            # Update metrics logger
+            self.metrics_logger.update(
+                {k: v.item() if isinstance(v, torch.Tensor) else v 
+                 for k, v in metrics.items()}
+            )
+            
+            return metrics
+            
+        except Exception as e:
+            self.tensor_logger.handle_error(e, {
+                'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
+                'has_compiled_loss': hasattr(self, '_compiled_loss')
+            })
+            raise
 
     def _compute_loss_impl(
         self,

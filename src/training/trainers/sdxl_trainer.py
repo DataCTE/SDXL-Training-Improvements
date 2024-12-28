@@ -193,7 +193,7 @@ class SDXLTrainer:
 
             validate_tensors(batch)
 
-            loss_dict = self.training_method.compute_loss(self.unet, batch, generator=generator)
+            loss_dict = self.training_method.compute_loss(batch, generator=generator)
             loss = loss_dict["loss"] / self.gradient_accumulation_steps
             loss.backward()
             
