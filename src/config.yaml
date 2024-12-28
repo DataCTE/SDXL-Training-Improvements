@@ -64,10 +64,10 @@ global_config:
   seed: null
   output_dir: "outputs"
   logging:
-    console_level: "DEBUG"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-    file_level: "DEBUG"
-    log_dir: "outputs/wslref/logs"
-    filename: "train.log"
+    console_level: "INFO"
+    file_level: "DEBUG" 
+    log_dir: "outputs/logs"
+    filename: "training.log"
     capture_warnings: true
     console_output: true
     file_output: true
@@ -75,6 +75,12 @@ global_config:
     log_system_memory: true
     performance_logging: true
     propagate: true
+    # W&B settings
+    use_wandb: false  # Set to true to enable W&B logging
+    wandb_project: "sdxl-training"
+    wandb_name: null  # Optional run name
+    wandb_tags: []    # Optional list of tags
+    wandb_notes: null # Optional run notes
 
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"

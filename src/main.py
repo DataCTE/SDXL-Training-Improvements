@@ -88,7 +88,7 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Create logging config from main config
-    log_config = LogConfig.from_config(config)
+    log_config = config.logging.to_core_config()
     
     # Initialize logger
     logger = get_logger("main", log_config)

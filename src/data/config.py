@@ -273,9 +273,17 @@ class LoggingConfig:
     performance_logging: bool = True
     propagate: bool = True
     
-    def to_core_config(self) -> CoreLoggingConfig:
+    # W&B config fields
+    use_wandb: bool = False
+    wandb_project: str = "sdxl-training"
+    wandb_name: Optional[str] = None
+    wandb_tags: Optional[List[str]] = None
+    wandb_notes: Optional[str] = None
+    
+    def to_core_config(self) -> 'LogConfig':
         """Convert to core logging config."""
-        return CoreLoggingConfig(
+        from src.core.logging.base import LogConfig
+        return LogConfig(
             console_level=self.console_level,
             file_level=self.file_level,
             log_dir=self.log_dir,
@@ -286,7 +294,12 @@ class LoggingConfig:
             log_cuda_memory=self.log_cuda_memory,
             log_system_memory=self.log_system_memory,
             performance_logging=self.performance_logging,
-            propagate=self.propagate
+            propagate=self.propagate,
+            use_wandb=self.use_wandb,
+            wandb_project=self.wandb_project,
+            wandb_name=self.wandb_name,
+            wandb_tags=self.wandb_tags,
+            wandb_notes=self.wandb_notes
         )
 
 @dataclass
