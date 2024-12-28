@@ -115,13 +115,24 @@ class DDPMTrainer(TrainingMethod):
         try:
             # Extract latents and move to correct device/dtype
             if "latent" in batch:
-                self.tensor_logger.log_checkpoint("Initial Latent Data", {"latent": batch["latent"]})
+                self.tensor_logger.log_checkpoint("Initial Batch", {
+                    "latent.model_input": batch["latent"].get("model_input"),
+                    "latent.latent": batch["latent"].get("latent"),
+                    "prompt_embeds": batch["embeddings"]["prompt_embeds"],
+                    "pooled_prompt_embeds": batch["embeddings"]["pooled_prompt_embeds"]
+                })
+                
                 if "model_input" in batch["latent"]:
                     latents = batch["latent"]["model_input"]
                 elif "latent" in batch["latent"] and "model_input" in batch["latent"]["latent"]:
                     latents = batch["latent"]["latent"]["model_input"]
                 else:
                     raise ValueError("Could not find model_input in latent data")
+                    
+                self.tensor_logger.log_checkpoint("Initial Latent Data", {
+                    "latent.model_input": latents,
+                    "latent.latent": batch["latent"].get("latent")
+                })
             else:
                 latents = batch.get("model_input")
                 if latents is None:
@@ -130,6 +141,7 @@ class DDPMTrainer(TrainingMethod):
             # Move to device and convert dtype
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
+            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
             # Generate noise with matching dtype
             if generator is not None:
@@ -138,6 +150,7 @@ class DDPMTrainer(TrainingMethod):
                     noise = torch.randn_like(latents, dtype=target_dtype)
             else:
                 noise = torch.randn_like(latents, dtype=target_dtype)
+            self.tensor_logger.log_checkpoint("Generated Noise", {"noise": noise})
 
             # Get timesteps
             timesteps = torch.randint(
@@ -146,22 +159,29 @@ class DDPMTrainer(TrainingMethod):
                 (latents.shape[0],),
                 device=latents.device
             )
+            self.tensor_logger.log_checkpoint("Timesteps", {"timesteps": timesteps})
 
             # Add noise to latents
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+            self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
             # Get embeddings and ensure correct dtype
             prompt_embeds = batch["embeddings"]["prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
             pooled_prompt_embeds = batch["embeddings"]["pooled_prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
+            self.tensor_logger.log_checkpoint("Embeddings", {
+                "prompt_embeds": prompt_embeds,
+                "pooled_prompt_embeds": pooled_prompt_embeds
+            })
 
             # Get add_time_ids with correct dtype
             add_time_ids = get_add_time_ids(
                 original_sizes=batch["original_sizes"],
                 crop_top_lefts=batch["crop_top_lefts"],
                 target_sizes=batch["target_sizes"],
-                dtype=target_dtype,
+                dtype=target_dtype,  # Use target_dtype consistently
                 device=self.unet.device
             )
+            self.tensor_logger.log_checkpoint("Time IDs", {"add_time_ids": add_time_ids})
 
             # Forward pass
             noise_pred = self.unet(
@@ -173,6 +193,7 @@ class DDPMTrainer(TrainingMethod):
                     "text_embeds": pooled_prompt_embeds
                 }
             ).sample
+            self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
 
             # Compute loss
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
@@ -184,6 +205,8 @@ class DDPMTrainer(TrainingMethod):
                 'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
                 'device': str(self.unet.device),
                 'unet_dtype': str(self.unet.dtype),
-                'error': str(e)
+                'error': str(e),
+                'shape_history': [log for log in self.tensor_logger.get_shape_history()],
+                'traceback': traceback.format_exc()
             })
             raise RuntimeError(f"Loss computation failed - see logs for detailed shape history: {str(e)}") from e

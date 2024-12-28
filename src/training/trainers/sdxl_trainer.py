@@ -175,12 +175,23 @@ class SDXLTrainer:
         accumulation_step: int = 0
     ) -> Dict[str, float]:
         try:
+            # Log initial batch state
+            self.tensor_logger.log_checkpoint("Train Step Input", {
+                "batch": {k: v for k, v in batch.items() if isinstance(v, torch.Tensor)}
+            })
+            
             # Validate tensors
             self._validate_batch_sizes(batch)
             
             # Compute loss
             loss_dict = self.training_method.compute_loss(batch, generator=generator)
             loss = loss_dict["loss"] / self.gradient_accumulation_steps
+            
+            # Log loss computation
+            self.tensor_logger.log_checkpoint("Loss Computation", {
+                "loss": loss,
+                "raw_loss": loss_dict["loss"]
+            })
             
             # Backward pass
             loss.backward()
@@ -194,25 +205,35 @@ class SDXLTrainer:
             # Optimizer step if needed
             if accumulation_step == self.gradient_accumulation_steps - 1:
                 if self.config.training.max_grad_norm > 0:
-                    metrics["grad_norm"] = torch.nn.utils.clip_grad_norm_(
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.unet.parameters(),
                         self.config.training.max_grad_norm
-                    ).item()
+                    )
+                    metrics["grad_norm"] = grad_norm.item()
+                    self.tensor_logger.log_checkpoint("Gradient Clipping", {
+                        "grad_norm": grad_norm
+                    })
+                    
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+                
+                self.tensor_logger.log_checkpoint("Optimization Step", {
+                    "metrics": metrics
+                })
             
             return metrics
+            
         except Exception as e:
-            logger.error(
-                "Error in training step",
-                exc_info=True,
-                extra={
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                    'accumulation_step': accumulation_step
-                }
-            )
+            self.tensor_logger.handle_error(e, {
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
+                'accumulation_step': accumulation_step,
+                'device': str(self.device),
+                'unet_dtype': str(self.unet.dtype),
+                'shape_history': [log for log in self.tensor_logger.get_shape_history()],
+                'traceback': traceback.format_exc()
+            })
             raise
 
     def train_epoch(self) -> Dict[str, float]:
