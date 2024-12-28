@@ -67,11 +67,11 @@ class GlobalConfig:
         cache_latents: bool = True
         cache_validation: bool = True
 
-    from src.core.logging.base import LogConfig
+    from src.core.logging.config import LogConfig as CoreLogConfig
 
-    @dataclass 
-    class LoggingConfig:
-        """Logging configuration."""
+    @dataclass
+    class LoggingConfig(CoreLogConfig):
+        """Logging configuration that extends core LogConfig."""
         console_level: str = "INFO"
         file_level: str = "DEBUG"
         log_dir: str = "outputs/wslref/logs"
