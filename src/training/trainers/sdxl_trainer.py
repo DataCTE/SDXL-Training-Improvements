@@ -293,25 +293,28 @@ class SDXLTrainer:
                             epoch_metrics[k] = []
                         epoch_metrics[k].append(v)
                 except RuntimeError as e:
+                    error_context = {
+                        'error': str(e),
+                        'step': self.global_step,
+                        'batch_size': self.train_dataloader.batch_size,
+                        'device': str(self.device),
+                        'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+                    }
+                    
                     if "out of memory" in str(e):
-                        logger.error(
-                            "GPU OOM at step %d", 
-                            self.global_step, 
-                            exc_info=True,
-                            extra={'stack_info': True}
+                        self.logger.error(
+                            "GPU OOM during training",
+                            extra=error_context,
+                            exc_info=True
                         )
                         if hasattr(torch.cuda, 'empty_cache'):
                             torch.cuda.empty_cache()
                         continue
                     else:
-                        logger.error(
-                            "Error during training step", 
-                            exc_info=True,
-                            extra={
-                                'error': str(e),
-                                'step': self.global_step,
-                                'stack_info': True
-                            }
+                        self.logger.error(
+                            "Error during training step",
+                            extra=error_context,
+                            exc_info=True
                         )
                         raise
 

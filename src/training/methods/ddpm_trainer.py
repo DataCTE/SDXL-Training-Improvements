@@ -116,10 +116,9 @@ class DDPMTrainer(TrainingMethod):
             # Extract latents and move to correct device/dtype
             if "latent" in batch:
                 self.tensor_logger.log_checkpoint("Initial Batch", {
-                    "latent.model_input": batch["latent"].get("model_input"),
-                    "latent.latent": batch["latent"].get("latent"),
-                    "prompt_embeds": batch["embeddings"]["prompt_embeds"],
-                    "pooled_prompt_embeds": batch["embeddings"]["pooled_prompt_embeds"]
+                    "latent": batch["latent"],
+                    "prompt_embeds": batch["prompt_embeds"],
+                    "pooled_prompt_embeds": batch["pooled_prompt_embeds"]
                 })
                 
                 if "model_input" in batch["latent"]:
@@ -165,9 +164,9 @@ class DDPMTrainer(TrainingMethod):
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
             self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
-            # Get embeddings and ensure correct dtype
-            prompt_embeds = batch["embeddings"]["prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
-            pooled_prompt_embeds = batch["embeddings"]["pooled_prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
+            # Get embeddings directly from batch
+            prompt_embeds = batch["prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
             self.tensor_logger.log_checkpoint("Embeddings", {
                 "prompt_embeds": prompt_embeds,
                 "pooled_prompt_embeds": pooled_prompt_embeds
