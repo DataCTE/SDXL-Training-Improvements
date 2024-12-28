@@ -103,8 +103,10 @@ class SDXLTrainer:
             batch_size=train_dataloader.batch_size,
             shuffle=True,
             num_workers=0,  # Use single worker
-            pin_memory=True,
+            pin_memory=False,  # Disable pinned memory
+            persistent_workers=False,  # Disable persistent workers
             drop_last=True,
+            collate_fn=train_dataloader.dataset.collate_fn if hasattr(train_dataloader.dataset, 'collate_fn') else None
         )
         self.training_method = training_method
         self.device = device
