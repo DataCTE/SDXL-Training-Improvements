@@ -107,16 +107,17 @@ class DDPMTrainer(TrainingMethod):
             return metrics
             
         except Exception as e:
+            # Get tensor shapes from the batch
+            tensor_shapes = {}
+            for key in ['add_time_ids', 'pooled_prompt_embeds', 'prompt_embeds', 'noisy_latents']:
+                if key in batch and isinstance(batch[key], torch.Tensor):
+                    tensor_shapes[key] = tuple(batch[key].shape)
+
             self.tensor_logger.handle_error(e, {
                 'error': str(e),
                 'error_type': type(e).__name__,
                 'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                'tensor_shapes': {
-                    'add_time_ids': tuple(add_time_ids.shape) if 'add_time_ids' in locals() else None,
-                    'pooled_prompt_embeds': tuple(pooled_prompt_embeds.shape) if 'pooled_prompt_embeds' in locals() else None,
-                    'prompt_embeds': tuple(prompt_embeds.shape) if 'prompt_embeds' in locals() else None,
-                    'noisy_latents': tuple(noisy_latents.shape) if 'noisy_latents' in locals() else None
-                },
+                'tensor_shapes': tensor_shapes,
                 'traceback': traceback.format_exc()
             })
             raise RuntimeError(f"Loss computation failed - see logs for detailed shape history: {str(e)}") from e
