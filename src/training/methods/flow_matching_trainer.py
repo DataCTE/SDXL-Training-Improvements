@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import Dict, Optional
 from torch import Tensor
 
-from src.core.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
@@ -14,6 +14,8 @@ class FlowMatchingTrainer(TrainingMethod):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.logger = get_logger(f"training.methods.{self.name}", LogConfig.from_config(config))
+        self.tensor_logger = get_logger(f"training.methods.{self.name}.tensor", LogConfig.from_config(config))
         self.logger.debug("Initializing Flow Matching Trainer")
         
         # Initialize tensor shape tracking

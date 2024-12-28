@@ -44,10 +44,8 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
     name: str = None
     
     def __init__(self, unet: torch.nn.Module, config: Config):
-        self.logger, self.tensor_logger = setup_logging(
-            module_name=f"training.methods.{self.name}",
-            config=config.logging.to_core_config()
-        )
+        self.logger = get_logger(f"training.methods.{self.name}", LogConfig.from_config(config))
+        self.tensor_logger = get_logger(f"training.methods.{self.name}.tensor", LogConfig.from_config(config))
         
         self.logger.debug(f"Initializing {self.__class__.__name__}")
         self.logger.debug(f"CUDA settings: benchmark={torch.backends.cudnn.benchmark}, "

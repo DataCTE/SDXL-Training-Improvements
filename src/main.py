@@ -79,23 +79,20 @@ def setup_environment(args: argparse.Namespace):
         cleanup_distributed()
         torch_sync()
 
-def setup_device_and_logging(config: Config) -> torch.device:
+def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
+    """Setup device and logging configuration."""
     # Create output and log directories
     output_dir = Path(config.global_config.output_dir)
     log_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use the setup_logging function from core.logging
-    logger = setup_logging(
-        log_dir=str(log_dir),
-        level=logging.DEBUG,  # Keep full debug logging in file
-        filename="train.log",  # Log to train.log file
-        module_name="main",  # Set module name for main script
-        capture_warnings=True,
-        propagate=True,
-        console_level=logging.DEBUG  # Set console level to DEBUG for now
-    )
+    # Create logging config from main config
+    log_config = LogConfig.from_config(config)
+    
+    # Initialize logger
+    logger = get_logger("main", log_config)
+    logger.info("Logging system initialized")
 
     # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

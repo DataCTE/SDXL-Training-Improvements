@@ -1,3 +1,12 @@
-from .base import Logger, LogConfig, get_logger
+from .base import LogConfig
+from .logging import setup_logging, get_logger
+from .wandb import WandbLogger
+from .metrics import log_metrics
 
-__all__ = ["Logger", "LogConfig", "get_logger"]
+__all__ = [
+    "LogConfig",
+    "setup_logging",
+    "get_logger",
+    "WandbLogger",
+    "log_metrics"
+]
