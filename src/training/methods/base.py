@@ -38,12 +38,15 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
     name: str = None
     
     def __init__(self, unet: torch.nn.Module, config: Config):
+        # Get logger with proper configuration
         self.logger = get_logger(f"training.methods.{self.name}")
         self.tensor_logger = get_logger(f"training.methods.{self.name}.tensor")
         
         self.logger.debug(f"Initializing {self.__class__.__name__}")
+        # Add memory optimization logging
         self.logger.debug(f"CUDA settings: benchmark={torch.backends.cudnn.benchmark}, "
-                         f"allow_tf32={torch.backends.cudnn.allow_tf32}")
+                         f"allow_tf32={torch.backends.cudnn.allow_tf32}, "
+                         f"memory_allocated={torch.cuda.memory_allocated() if torch.cuda.is_available() else 0}")
         
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True

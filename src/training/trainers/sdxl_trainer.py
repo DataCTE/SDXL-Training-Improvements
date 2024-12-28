@@ -40,6 +40,7 @@ class SDXLTrainer:
                optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
                device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
                validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
+        logger = get_logger("training.sdxl")
         logger.debug("Creating SDXLTrainer instance")
         
         # Extract method from training configuration

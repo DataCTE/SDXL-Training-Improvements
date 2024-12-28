@@ -86,8 +86,13 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     # Initialize root logger first
     root_logger = get_logger("root", log_config)
     
-    # Then create main logger
-    logger = get_logger("main", log_config)
+    # Then create main logger with enhanced formatting
+    logger = create_enhanced_logger(
+        "main",
+        level=config.global_config.logging.console_level,
+        log_file=Path(config.global_config.logging.log_dir) / config.global_config.logging.filename,
+        capture_warnings=config.global_config.logging.capture_warnings
+    )
     logger.debug("Logging system initialized")
     
     # Set up device
