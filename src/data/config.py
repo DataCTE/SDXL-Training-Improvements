@@ -457,16 +457,10 @@ class Config:
                 
             # Validate file level
             if self.logging.file_level.upper() not in valid_levels:
-                raise ValueError(f"Invalid file log level: {self.logging.file_level}")
+                raise ValueError(f"Invalid file level: {self.logging.file_level}")
                 
             # Setup logging based on config
-            setup_logging(
-                log_dir=str(log_dir),
-                level=getattr(logging, self.logging.file_level.upper()),
-                console_level=getattr(logging, self.logging.console_level.upper()),
-                filename=self.logging.filename,
-                capture_warnings=self.logging.capture_warnings
-            )
+            setup_logging(config=self.logging)
             
         except Exception as e:
             raise ValueError(f"Invalid logging configuration: {str(e)}")

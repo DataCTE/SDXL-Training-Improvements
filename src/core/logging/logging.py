@@ -251,6 +251,17 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
+    # Use config values if provided, otherwise use fallback values
+    if config:
+        if isinstance(config, dict):
+            config = LogConfig(**config)
+        log_dir = config.log_dir
+        level = config.file_level
+        filename = config.filename
+        capture_warnings = config.capture_warnings
+        propagate = config.propagate
+        console_level = config.console_level
+
     # Create log directory only for file logging
     if log_dir:
         log_path = Path(convert_windows_path(log_dir, make_absolute=True))
