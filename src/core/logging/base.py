@@ -61,6 +61,7 @@ class LogConfig:
     log_cuda_memory: bool = True
     log_system_memory: bool = True
     performance_logging: bool = True
+    propagate: bool = True
     
     # W&B config
     use_wandb: bool = False
