@@ -64,7 +64,7 @@ global_config:
   seed: null
   output_dir: "outputs"
   logging:
-    console_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    console_level: "DEBUG"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
     file_level: "DEBUG"
     log_dir: "outputs/wslref/logs"
     filename: "train.log"
