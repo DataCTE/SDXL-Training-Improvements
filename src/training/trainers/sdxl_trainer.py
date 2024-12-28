@@ -7,8 +7,7 @@ import torch.backends.cudnn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from src.core.logging import get_logger, LogConfig
-from src.training.metrics import MetricsLogger
+from src.core.logging import get_logger, LogConfig, WandbLogger, log_metrics
 from src.training.validation import ValidationLogger
 logger = get_logger(__name__)
 
@@ -19,7 +18,6 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
 from src.core.distributed import is_main_process
-from src.core.logging import WandbLogger, log_metrics
 from src.core.memory import (
     tensors_to_device_,
     tensors_match_device,
