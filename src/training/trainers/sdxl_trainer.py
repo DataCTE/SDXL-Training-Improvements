@@ -221,14 +221,13 @@ class SDXLTrainer:
                    for k, v in loss_dict.items()}
         except Exception as e:
             logger.error(
-                "Error in training step", 
+                "Error in training step",
                 exc_info=True,
                 extra={
                     'error': str(e),
                     'error_type': type(e).__name__,
                     'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                    'accumulation_step': accumulation_step,
-                    'stack_info': True
+                    'accumulation_step': accumulation_step
                 }
             )
             raise
