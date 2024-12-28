@@ -3,12 +3,14 @@ import logging
 import sys
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union, Tuple
+import torch
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
 from .base import LogConfig
 from .utils import ColoredFormatter
+from src.data.utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
@@ -49,10 +51,10 @@ class LogManager:
                 self._tensor_loggers[name] = TensorLogger(self.get_logger(name))
             return self._tensor_loggers[name]
     
-    def configure_from_config(self, config: Union[LoggingConfig, Dict]) -> None:
+    def configure_from_config(self, config: Union[LogConfig, Dict]) -> None:
         """Configure logging from config object or dict."""
         if isinstance(config, dict):
-            config = LoggingConfig(**config)
+            config = LogConfig(**config)
             
         # Create log directory
         log_dir = Path(config.log_dir)
