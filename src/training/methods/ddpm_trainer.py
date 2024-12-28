@@ -5,9 +5,10 @@ import torch.nn.functional as F
 from typing import Dict, Optional, Union
 from torch import Tensor
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, TensorLogger
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
+from src.data.config import Config
 
 logger = get_logger(__name__)
 
