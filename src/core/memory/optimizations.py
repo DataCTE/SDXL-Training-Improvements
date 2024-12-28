@@ -1,5 +1,4 @@
 """Memory optimization utilities for training with extreme speedups."""
-import logging
 import torch
 from typing import Dict, Optional, TYPE_CHECKING
 from pathlib import Path
@@ -9,8 +8,9 @@ if TYPE_CHECKING:
     from src.data.config import Config
 
 from ..types import DataType, ModelWeightDtypes
+from src.core.logging import get_logger, LogConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def setup_memory_optimizations(
     model: Optional[torch.nn.Module] = None,
