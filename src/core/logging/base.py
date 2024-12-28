@@ -250,21 +250,20 @@ class ColoredFormatter(logging.Formatter):
         record.msg = f"{color}{record.msg}{Style.RESET_ALL}"
         return super().format(record)
 
-def get_logger(name: str, config: Optional[LogConfig] = None) -> 'Logger':
+def get_logger(name: str, config: Optional[LogConfig] = None) -> logging.Logger:
     """Get or create a logger instance."""
-    if config is None:
-        # Use default config if none provided
-        config = LogConfig()
+    from .setup import _logger_registry
     
-    logger = LogManager.get_instance().get_logger(name, config)
-    # Add explicit debug message about configuration
-    logger.debug(
-        f"Logger '{name}' initialized",
-        extra={
-            'console_level': config.console_level,
-            'file_level': config.file_level,
-            'log_dir': config.log_dir
-        }
+    # If logger exists in registry, return it
+    if name in _logger_registry:
+        return _logger_registry[name][0]
+    
+    # Otherwise create new logger through setup
+    from .setup import setup_logging
+    logger, _ = setup_logging(
+        config=config,
+        module_name=name,
+        propagate=False  # Always disable propagation
     )
     return logger
 """Base logging configuration and utilities."""
