@@ -283,7 +283,10 @@ def setup_logging(
     # Create and configure logger
     logger_name = module_name or 'root'
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)  # Force DEBUG level for logger
+    
+    # Important: Set the base logger level to the minimum of console and file levels
+    # This ensures lower level messages aren't filtered before reaching handlers
+    logger.setLevel(logging.DEBUG)  
     
     # Remove existing handlers
     for handler in logger.handlers[:]:
@@ -293,12 +296,15 @@ def setup_logging(
         # Create console handler with specified level
         console_handler = logging.StreamHandler(sys.stdout)
         console_formatter = ColoredFormatter(
-            '%(asctime)s | %(levelname)s | %(message)s',  # Remove exc_info from format
+            '%(asctime)s | %(levelname)s | %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_handler.setFormatter(console_formatter)
-        console_handler.setLevel(console_level)  # Use the console_level parameter
+        # Convert level string to logging constant
+        console_level = console_level.upper() if isinstance(console_level, str) else console_level
+        console_handler.setLevel(getattr(logging, console_level))  # Changed: directly use console_level
         logger.addHandler(console_handler)
+        logger.debug(f"Console handler configured with level: {console_level}")  # Add debug message
 
         # Enable warning capture and configure propagation
         logging.captureWarnings(capture_warnings)

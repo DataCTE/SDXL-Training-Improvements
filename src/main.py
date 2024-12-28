@@ -108,7 +108,7 @@ def setup_device_and_logging(config: Config) -> torch.device:
     
     # Initialize logger with the config
     logger = get_logger("main", log_config)
-    logger.info("Logging system initialized")
+    logger.debug(f"Logging initialized with console_level: {log_config.console_level}")  # Add debug message
 
     # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -116,6 +116,7 @@ def setup_device_and_logging(config: Config) -> torch.device:
         device = torch.device(device)
     
     if is_main_process():
+        logger.debug("Debug logging test message")  # Add test debug message
         logger.info(f"Using device: {device}")
         if device.type == "cuda":
             logger.info(f"CUDA Device: {torch.cuda.get_device_name(device.index)}")
