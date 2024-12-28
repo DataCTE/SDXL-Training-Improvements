@@ -1,6 +1,7 @@
 """SDXL trainer implementation with 100x speedups."""
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
+import traceback
 
 import torch
 import torch.backends.cudnn
