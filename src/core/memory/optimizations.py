@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from src.data.config import Config
 
 from ..types import DataType, ModelWeightDtypes
-from src.core.logging import get_logger, LogConfig
+from src.core.logging import get_logger, LogConfig, Logger
 
 logger = get_logger(__name__)
 
@@ -68,7 +68,7 @@ def verify_memory_optimizations(
     model: torch.nn.Module,
     config: "Config",  # type: ignore
     device: torch.device,
-    logger: Optional[logging.Logger] = None
+    logger: Optional["Logger"] = None
 ) -> Dict[str, bool]:
     states = {
         "cuda_available": torch.cuda.is_available(),
