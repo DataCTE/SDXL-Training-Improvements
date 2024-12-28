@@ -255,7 +255,10 @@ def get_logger(name: str, config: Optional[LogConfig] = None) -> 'Logger':
     if config is None:
         # Use default config if none provided
         config = LogConfig()
-    return LogManager.get_instance().get_logger(name, config)
+    
+    logger = LogManager.get_instance().get_logger(name, config)
+    logger.debug(f"Logger '{name}' configured with level: {config.console_level}")  # Add debug message
+    return logger
 """Base logging configuration and utilities."""
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
