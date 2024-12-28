@@ -78,7 +78,7 @@ def setup_environment(args: argparse.Namespace):
         cleanup_distributed()
         torch_sync()
 
-def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
+def setup_device_and_logging(config: Config) -> torch.device:
     """Setup device and logging configuration."""
     # Create output and log directories
     output_dir = Path(config.global_config.output_dir)
@@ -121,7 +121,7 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
             logger.info(f"CUDA Device: {torch.cuda.get_device_name(device.index)}")
             logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
 
-    return device, logger
+    return device
 
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     """Initialize SDXL model components."""
@@ -461,6 +461,7 @@ def main():
         
         with setup_environment(args):
             device = setup_device_and_logging(config)
+            logger = get_logger("main")
             model = setup_model(config, device)
             
             if model is None:
