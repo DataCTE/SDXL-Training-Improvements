@@ -1,5 +1,5 @@
 """DDPM trainer implementation for SDXL with extreme speedups."""
-import sys
+import traceback
 import torch
 import torch.nn.functional as F
 from typing import Dict, Optional, Union
