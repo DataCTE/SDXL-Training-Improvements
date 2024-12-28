@@ -12,7 +12,8 @@ from src.core.logging.logging import setup_logging
 logger = setup_logging(
     module_name=__name__,
     level="INFO",
-    log_dir="outputs/logs"  # Add default log directory
+    console_level="INFO",  # Add explicit console level
+    log_dir="outputs/logs"
 )
 
 # Initialize accelerator and device

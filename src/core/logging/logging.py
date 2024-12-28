@@ -278,7 +278,7 @@ def setup_logging(
     module_name: Optional[str] = None,
     capture_warnings: Optional[bool] = None,
     propagate: Optional[bool] = None,
-    console_level: Optional[Union[int, str]] = None
+    console_level: Optional[Union[int, str]] = "INFO"
 ) -> Tuple[logging.Logger, TensorLogger]:
     """Setup logging configuration with detailed action tracking and colored output.
     
