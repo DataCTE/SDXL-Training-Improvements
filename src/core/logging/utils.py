@@ -77,15 +77,23 @@ class TensorLogger:
             )
             
             for idx, log in enumerate(self._shape_logs):
-                self.logger.error(
-                    f"Shape Log {idx}:\n"
-                    f"  Step: {log['step']}\n"
-                    f"  Path: {log['path']}\n"
-                    f"  Shape: {log['shape']}\n"
-                    f"  Dtype: {log['dtype']}\n"
-                    f"  Device: {log['device']}\n"
-                    f"  Stats: {log['stats']}"
-                )
+                if 'checkpoint' in log:
+                    self.logger.error(
+                        f"Checkpoint {idx}:\n"
+                        f"  Name: {log['checkpoint']}\n"
+                        f"  Timestamp: {log['timestamp']}\n"
+                        f"  Memory Stats: {log['memory_stats']}"
+                    )
+                else:
+                    self.logger.error(
+                        f"Shape Log {idx}:\n"
+                        f"  Step: {log['step']}\n"
+                        f"  Path: {log['path']}\n"
+                        f"  Shape: {log['shape']}\n"
+                        f"  Dtype: {log['dtype']}\n"
+                        f"  Device: {log['device']}\n"
+                        f"  Stats: {log['stats']}"
+                    )
     
     def handle_error(self, error: Exception, context: Optional[Dict] = None) -> None:
         """Handle error by dumping shape history if enabled."""
@@ -102,6 +110,30 @@ class TensorLogger:
         with self._lock:
             return self._shape_logs.copy()
     
+    def log_tensor_state(self, checkpoint_name: str) -> None:
+        """Log the current state of all model tensors at a checkpoint."""
+        with self._lock:
+            try:
+                memory_stats = {
+                    'allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                    'reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
+                    'max_allocated': torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
+                }
+                
+                self._shape_logs.append({
+                    'checkpoint': checkpoint_name,
+                    'timestamp': datetime.now().isoformat(),
+                    'memory_stats': memory_stats
+                })
+                
+                self.logger.debug(
+                    f"Logged tensor state at checkpoint: {checkpoint_name}",
+                    extra={'memory_stats': memory_stats}
+                )
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to log tensor state: {str(e)}", exc_info=True)
+
     def clear_logs(self) -> None:
         """Clear the shape history."""
         with self._lock:

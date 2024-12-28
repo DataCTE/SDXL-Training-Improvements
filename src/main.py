@@ -111,6 +111,9 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
 
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     """Initialize SDXL model components."""
+    logger = get_logger(__name__)
+    tensor_logger = get_logger("tensor")  # Get tensor logger
+    
     logger.info("Loading models...")
     model = None  # Initialize model variable outside try block
     try:
@@ -121,6 +124,9 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
             enable_vae_slicing=config.model.enable_vae_slicing,
             enable_model_cpu_offload=config.model.enable_model_cpu_offload
         )
+        
+        # Log initial model creation
+        tensor_logger.log_tensor_state("Initial model creation")
 
         # Load pretrained components
         logger.info(f"Loading pretrained model from {config.model.pretrained_model_name}")
@@ -129,36 +135,34 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
             dtype=config.model.dtype,
             use_safetensors=True
         )
+        
+        # Log post-loading state
+        tensor_logger.log_tensor_state("After pretrained loading")
 
         # Move model to device after loading
         logger.info(f"Moving model to {device}")
         model.to(device)
         
+        # Log post-device-move state
+        tensor_logger.log_tensor_state("After device move")
+        
         # Verify model components
-        if not all([
-            model.vae,
-            model.text_encoder_1,
-            model.text_encoder_2,
-            model.tokenizer_1,
-            model.tokenizer_2,
-            model.unet,
-            model.noise_scheduler,
-            model.clip_encoder_1,
-            model.clip_encoder_2,
-            model.vae_encoder
-        ]):
-            missing = []
-            if not model.vae: missing.append("VAE")
-            if not model.text_encoder_1: missing.append("Text Encoder 1") 
-            if not model.text_encoder_2: missing.append("Text Encoder 2")
-            if not model.tokenizer_1: missing.append("Tokenizer 1")
-            if not model.tokenizer_2: missing.append("Tokenizer 2")
-            if not model.unet: missing.append("UNet")
-            if not model.noise_scheduler: missing.append("Noise Scheduler")
-            if not model.clip_encoder_1: missing.append("CLIP Encoder 1")
-            if not model.clip_encoder_2: missing.append("CLIP Encoder 2")
-            if not model.vae_encoder: missing.append("VAE Encoder")
-            
+        components = {
+            'VAE': model.vae,
+            'Text Encoder 1': model.text_encoder_1,
+            'Text Encoder 2': model.text_encoder_2,
+            'Tokenizer 1': model.tokenizer_1,
+            'Tokenizer 2': model.tokenizer_2,
+            'UNet': model.unet,
+            'Noise Scheduler': model.noise_scheduler,
+            'CLIP Encoder 1': model.clip_encoder_1,
+            'CLIP Encoder 2': model.clip_encoder_2,
+            'VAE Encoder': model.vae_encoder
+        }
+        
+        missing = [name for name, comp in components.items() if not comp]
+        
+        if missing:
             raise RuntimeError(f"Model initialization incomplete. Missing components: {', '.join(missing)}")
 
         logger.info("Model initialized successfully")
@@ -536,6 +540,11 @@ def main():
             'cuda_available': torch.cuda.is_available(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0
         }
+            
+        # Get tensor history if available
+        tensor_logger = get_logger("tensor")
+        if hasattr(tensor_logger, 'get_shape_history'):
+            error_context['tensor_history'] = tensor_logger.get_shape_history()
         
         # Add config-related info if available
         if 'config' in locals():
