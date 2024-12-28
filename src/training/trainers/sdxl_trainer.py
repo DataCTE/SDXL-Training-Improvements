@@ -8,7 +8,7 @@ import torch.backends.cudnn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from src.core.logging import get_logger, LogConfig, WandbLogger, log_metrics, MetricsLogger
+from src.core.logging import get_logger, LogConfig, WandbLogger, log_metrics, MetricsLogger, TensorLogger
 from src.training.validation import ValidationLogger
 logger = get_logger(__name__)
 
@@ -94,6 +94,11 @@ class SDXLTrainer:
         wandb_logger: Optional[WandbLogger] = None,
         validation_prompts: Optional[List[str]] = None
     ):
+        # Get logger first
+        self.logger = get_logger(__name__)
+        # Initialize TensorLogger
+        self.tensor_logger = TensorLogger(self.logger)
+        
         self.config = config
         self.model = model
         self.unet = model.unet
