@@ -176,6 +176,9 @@ def log_metrics(
         if not is_main_process:
             return
             
+        # Get logger for metrics
+        logger = get_logger("metrics")
+            
         # Add prefix if specified
         if metric_prefix:
             metrics = {f"{metric_prefix}/{k}": v for k, v in metrics.items()}
