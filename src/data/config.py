@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import yaml
 import logging
-from src.core.logging.logging import setup_logging
+from src.core.logging.logging import setup_logging, LoggingConfig as CoreLoggingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -273,9 +273,8 @@ class LoggingConfig:
     performance_logging: bool = True
     propagate: bool = True
     
-    def to_core_config(self) -> 'CoreLoggingConfig':
+    def to_core_config(self) -> CoreLoggingConfig:
         """Convert to core logging config."""
-        from src.core.logging.logging import LoggingConfig as CoreLoggingConfig
         return CoreLoggingConfig(
             console_level=self.console_level,
             file_level=self.file_level,
