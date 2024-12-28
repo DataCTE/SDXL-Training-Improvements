@@ -34,8 +34,6 @@ from src.data.config import Config
 from src.models import StableDiffusionXLModel
 from src.training.methods.base import TrainingMethod
 
-logger = logging.getLogger(__name__)
-
 class SDXLTrainer:
     @classmethod
     def create(cls, config: Config, model: StableDiffusionXLModel, 
