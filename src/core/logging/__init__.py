@@ -1,4 +1,4 @@
-from .base import LogConfig, LogManager, Logger, get_logger
+from .base import LogConfig, LogManager, Logger, get_logger, reduce_dict
 from .wandb import WandbLogger
 from .metrics import log_metrics
 
@@ -8,5 +8,6 @@ __all__ = [
     "Logger", 
     "get_logger",
     "WandbLogger",
-    "log_metrics"
+    "log_metrics",
+    "reduce_dict"
 ]

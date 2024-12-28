@@ -13,7 +13,33 @@ import colorama
 from colorama import Fore, Style
 from datetime import datetime
 from functools import wraps
-from ..distributed import reduce_dict
+# Add a simple reduce_dict implementation here to break the cycle
+def reduce_dict(input_dict: dict, average: bool = True) -> dict:
+    """Simple dictionary reduction for non-distributed case."""
+    if not torch.distributed.is_initialized():
+        return input_dict
+        
+    world_size = torch.distributed.get_world_size()
+    if world_size < 2:
+        return input_dict
+        
+    with torch.no_grad():
+        names = []
+        values = []
+        
+        for k, v in sorted(input_dict.items()):
+            names.append(k)
+            values.append(v)
+            
+        values = torch.stack(values, dim=0)
+        torch.distributed.all_reduce(values)
+        
+        if average:
+            values /= world_size
+            
+        reduced_dict = {k: v for k, v in zip(names, values)}
+        
+    return reduced_dict
 
 # Initialize colorama
 colorama.init(autoreset=True)
