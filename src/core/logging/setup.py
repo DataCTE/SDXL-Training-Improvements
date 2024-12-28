@@ -150,3 +150,83 @@ def setup_logging(
     tensor_logger = TensorLogger(logger)
     
     return logger, tensor_logger
+"""Logging setup and configuration."""
+import logging
+import sys
+from pathlib import Path
+from typing import Optional, Union, Tuple, Dict
+from .base import LogConfig
+from .utils import EnhancedFormatter, TensorLogger
+
+# Global logger registry to prevent duplicates
+_logger_registry = {}
+
+def setup_logging(
+    config: Optional[Union[LogConfig, Dict]] = None,
+    log_dir: Optional[str] = "outputs/logs", 
+    level: Optional[Union[int, str]] = None,
+    filename: Optional[str] = None,
+    module_name: Optional[str] = None,
+    capture_warnings: Optional[bool] = None,
+    propagate: Optional[bool] = None,
+    console_level: Optional[Union[int, str]] = None
+) -> Tuple[logging.Logger, TensorLogger]:
+    """Setup logging system with configuration."""
+    global _logger_registry
+    
+    # If logger already exists for this module, return it
+    if module_name in _logger_registry:
+        return _logger_registry[module_name]
+    
+    # Configure root logger first
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Allow all messages through
+    root_logger.handlers.clear()  # Remove any existing handlers
+    root_logger.propagate = False  # Prevent propagation to avoid duplicates
+    
+    # Create console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, (console_level or "INFO").upper()))
+    console_handler.setFormatter(EnhancedFormatter(
+        '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    root_logger.addHandler(console_handler)
+    
+    # Add file handler if filename provided
+    if filename:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(
+            log_path / filename,
+            encoding='utf-8'
+        )
+        file_handler.setLevel(getattr(logging, (level or "DEBUG").upper()))
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
+            '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
+            '%(funcName)s |\n%(message)s\n',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        root_logger.addHandler(file_handler)
+    
+    # Configure warning capture
+    logging.captureWarnings(capture_warnings if capture_warnings is not None else True)
+    
+    # Create module logger
+    logger = logging.getLogger(module_name or 'root')
+    logger.propagate = False if propagate is None else propagate
+    logger.setLevel(logging.DEBUG)  # Allow all messages through
+    
+    # Create tensor logger
+    tensor_logger = TensorLogger(logger, dump_on_error=True)
+    
+    # Store in registry
+    _logger_registry[module_name or 'root'] = (logger, tensor_logger)
+    
+    # Suppress specific loggers that might cause duplicates
+    for logger_name in ["PIL", "torch", "transformers", "diffusers"]:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+        logging.getLogger(logger_name).propagate = False
+    
+    return logger, tensor_logger
