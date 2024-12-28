@@ -101,11 +101,11 @@ class DDPMTrainer(TrainingMethod):
         """Compute training loss with detailed shape logging."""
         try:
             # Log initial batch shapes
-            self._log_tensor_shapes(batch, step="initial_batch")
+            self.tensor_logger.log_checkpoint("Initial Batch", batch)
 
             # Extract latents with shape logging
             if "latent" in batch:
-                self._log_tensor_shapes(batch["latent"], step="latent_extraction")
+                self.tensor_logger.log_checkpoint("Latent Extraction", {"latent": batch["latent"]})
                 if "model_input" in batch["latent"]:
                     latents = batch["latent"]["model_input"]
                 elif "latent" in batch["latent"] and "model_input" in batch["latent"]["latent"]:
@@ -117,11 +117,11 @@ class DDPMTrainer(TrainingMethod):
                 if latents is None:
                     raise KeyError("No latent data found in batch")
             
-            self._log_tensor_shapes(latents, "latents", "after_extraction")
+            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
             # Generate noise with shape logging
             noise = torch.randn_like(latents, generator=generator)
-            self._log_tensor_shapes(noise, "noise", "after_generation")
+            self.tensor_logger.log_checkpoint("Generated Noise", {"noise": noise})
 
             # Generate timesteps
             timesteps = torch.randint(
@@ -130,11 +130,11 @@ class DDPMTrainer(TrainingMethod):
                 (latents.shape[0],),
                 device=latents.device
             )
-            self._log_tensor_shapes(timesteps, "timesteps", "after_generation")
+            self.tensor_logger.log_checkpoint("Timesteps", {"timesteps": timesteps})
 
             # Add noise to latents with shape logging
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-            self._log_tensor_shapes(noisy_latents, "noisy_latents", "after_noise_addition")
+            self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
             # Extract embeddings with shape logging
             if "embeddings" in batch:
@@ -147,8 +147,10 @@ class DDPMTrainer(TrainingMethod):
             if prompt_embeds is None or pooled_prompt_embeds is None:
                 raise ValueError("Missing required embeddings")
 
-            self._log_tensor_shapes(prompt_embeds, "prompt_embeds", "before_unet")
-            self._log_tensor_shapes(pooled_prompt_embeds, "pooled_prompt_embeds", "before_unet")
+            self.tensor_logger.log_checkpoint("Embeddings", {
+                "prompt_embeds": prompt_embeds,
+                "pooled_prompt_embeds": pooled_prompt_embeds
+            })
 
             # Get add_time_ids with shape logging
             add_time_ids = get_add_time_ids(

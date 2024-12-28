@@ -20,6 +20,7 @@ class TensorLogger:
         self._shape_logs = []
         self._lock = threading.Lock()
         self._dump_on_error = dump_on_error
+        self._checkpoint_counter = 0
         
     def log_tensor(self, tensor: 'torch.Tensor', path: str, step: str) -> None:
         """Log tensor shape and statistics."""
@@ -61,39 +62,80 @@ class TensorLogger:
         except Exception:
             return {'error': 'Failed to compute statistics'}
     
+    def log_checkpoint(self, name: str, tensors: Dict[str, Any] = None) -> None:
+        """Log a named checkpoint with optional tensor state."""
+        with self._lock:
+            checkpoint = {
+                'checkpoint_id': self._checkpoint_counter,
+                'name': name,
+                'timestamp': datetime.now().isoformat(),
+                'tensors': {},
+                'memory': {
+                    'allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                    'reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+                }
+            }
+            
+            if tensors:
+                for key, tensor in tensors.items():
+                    if isinstance(tensor, torch.Tensor):
+                        checkpoint['tensors'][key] = {
+                            'shape': tuple(tensor.shape),
+                            'dtype': str(tensor.dtype),
+                            'device': str(tensor.device),
+                            'stats': self._compute_tensor_stats(tensor)
+                        }
+                    elif isinstance(tensor, dict):
+                        for subkey, subtensor in tensor.items():
+                            if isinstance(subtensor, torch.Tensor):
+                                full_key = f"{key}.{subkey}"
+                                checkpoint['tensors'][full_key] = {
+                                    'shape': tuple(subtensor.shape),
+                                    'dtype': str(subtensor.dtype),
+                                    'device': str(subtensor.device),
+                                    'stats': self._compute_tensor_stats(subtensor)
+                                }
+            
+            self._shape_logs.append(checkpoint)
+            self._checkpoint_counter += 1
+            
+            # Log checkpoint immediately
+            self.logger.debug(
+                f"Checkpoint {name}:\n" + 
+                "\n".join(f"  {k}: {v}" for k, v in checkpoint['tensors'].items())
+            )
+
     def dump_shape_history(self, error_context: Optional[Dict] = None) -> None:
-        """Dump complete shape history to logger."""
+        """Dump complete shape history with improved formatting."""
         with self._lock:
             if not self._shape_logs:
                 self.logger.warning("No shape history available")
                 return
-                
-            self.logger.error(
-                "=== Tensor Shape History ===",
-                extra={
-                    'shape_history': self._shape_logs,
-                    'error_context': error_context
-                }
-            )
+
+            history = ["=== Tensor Shape History ==="]
             
-            for idx, log in enumerate(self._shape_logs):
-                if 'checkpoint' in log:
-                    self.logger.error(
-                        f"Checkpoint {idx}:\n"
-                        f"  Name: {log['checkpoint']}\n"
-                        f"  Timestamp: {log['timestamp']}\n"
-                        f"  Memory Stats: {log['memory_stats']}"
-                    )
-                else:
-                    self.logger.error(
-                        f"Shape Log {idx}:\n"
-                        f"  Step: {log['step']}\n"
-                        f"  Path: {log['path']}\n"
-                        f"  Shape: {log['shape']}\n"
-                        f"  Dtype: {log['dtype']}\n"
-                        f"  Device: {log['device']}\n"
-                        f"  Stats: {log['stats']}"
-                    )
+            if error_context:
+                history.append("\nError Context:")
+                history.extend(f"  {k}: {v}" for k, v in error_context.items())
+            
+            history.append("\nCheckpoint History:")
+            for checkpoint in self._shape_logs:
+                history.append(f"\nCheckpoint: {checkpoint['name']}")
+                history.append(f"Timestamp: {checkpoint['timestamp']}")
+                history.append(f"Memory Allocated: {checkpoint['memory']['allocated'] / 1024**2:.2f}MB")
+                history.append(f"Memory Reserved: {checkpoint['memory']['reserved'] / 1024**2:.2f}MB")
+                
+                if checkpoint['tensors']:
+                    history.append("Tensors:")
+                    for tensor_name, tensor_info in checkpoint['tensors'].items():
+                        history.append(f"  {tensor_name}:")
+                        history.append(f"    Shape: {tensor_info['shape']}")
+                        history.append(f"    Device: {tensor_info['device']}")
+                        history.append(f"    Dtype: {tensor_info['dtype']}")
+                        if 'stats' in tensor_info:
+                            history.append(f"    Stats: {tensor_info['stats']}")
+
+            self.logger.error("\n".join(history))
     
     def handle_error(self, error: Exception, context: Optional[Dict] = None) -> None:
         """Handle error by dumping shape history if enabled."""

@@ -548,39 +548,23 @@ def main():
         tensor_logger = TensorLogger(logger)
             
         # Use print since logger might not be initialized yet
-        print(f"Training failed: {str(e)}")
-        print(f"Error context: {error_context}")
-        
-        if isinstance(e, TrainingSetupError) and hasattr(e, 'context'):
-            print(f"Error context: {e.context}")
+        # Create TensorLogger for error handling
+        logger = get_logger(__name__)
+        tensor_logger = TensorLogger(logger)
             
-        # Dump tensor history if available
-        if hasattr(tensor_logger, '_shape_logs') and tensor_logger._shape_logs:
-            print("\nTensor Shape History:")
-            tensor_logger.dump_shape_history({
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'stack_trace': traceback.format_exc()
-            })
-        
-        # Add config-related info if available
-        if 'config' in locals():
-            error_context['model_name'] = config.model.pretrained_model_name
-            
-        # Add CUDA memory info if available
-        if torch.cuda.is_available():
-            error_context.update({
-                'cuda_memory_allocated': torch.cuda.memory_allocated(),
-                'cuda_memory_reserved': torch.cuda.memory_reserved(),
-                'cuda_max_memory': torch.cuda.max_memory_allocated()
-            })
-            
-        # Use print since logger might not be initialized yet
-        print(f"Training failed: {str(e)}")
-        print(f"Error context: {error_context}")
-            
-        if isinstance(e, TrainingSetupError) and hasattr(e, 'context'):
-            print(f"Error context: {e.context}")
+        # Dump tensor history with full context
+        tensor_logger.dump_shape_history({
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'stack_trace': traceback.format_exc(),
+            'device': str(device) if device is not None else 'unknown',
+            'cuda_available': torch.cuda.is_available(),
+            'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            'model_name': config.model.pretrained_model_name if 'config' in locals() else None,
+            'cuda_memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+            'cuda_memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
+            'cuda_max_memory': torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
+        })
                 
         sys.exit(1)
 
