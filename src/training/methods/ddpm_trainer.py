@@ -202,14 +202,10 @@ class DDPMTrainer(TrainingMethod):
                 "pooled_prompt_embeds": pooled_prompt_embeds
             })
 
-            # Reshape time embeddings to match expected dimensions
-            # From (batch_size, 6) to (batch_size, 1, 6)
-            add_time_ids = add_time_ids.unsqueeze(1)
-            
-            # Take first embedding and reshape pooled_prompt_embeds
-            # From (batch_size, 2, 768) to (batch_size, 1, 768)
-            pooled_prompt_embeds = pooled_prompt_embeds[:, 0:1]  # Keep dim with slice
-            
+            # Take first embedding from pooled_prompt_embeds
+            # From (batch_size, 2, 768) to (batch_size, 768)
+            pooled_prompt_embeds = pooled_prompt_embeds[:, 0]
+
             # Verify shapes after reshaping
             self.tensor_logger.log_checkpoint("Reshaped Embeddings", {
                 "add_time_ids": add_time_ids,
@@ -222,8 +218,8 @@ class DDPMTrainer(TrainingMethod):
                 timesteps,
                 prompt_embeds,
                 added_cond_kwargs={
-                    "time_ids": add_time_ids,  # Now (batch_size, 1, 6)
-                    "text_embeds": pooled_prompt_embeds  # Now (batch_size, 1, 768)
+                    "time_ids": add_time_ids,  # Now (batch_size, 6)
+                    "text_embeds": pooled_prompt_embeds  # Now (batch_size, 768)
                 }
             ).sample
             self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
