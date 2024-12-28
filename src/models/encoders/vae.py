@@ -2,9 +2,9 @@
 from typing import Dict, Optional, Union
 import torch
 from diffusers import AutoencoderKL
-import logging
+from src.core.logging import get_logger, LogConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class VAEEncoder:
     """Optimized VAE encoder for stable diffusion."""

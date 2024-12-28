@@ -5,9 +5,9 @@ import torch
 from collections import defaultdict
 import time
 import numpy as np
-from src.core.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 @dataclass
 class TrainingMetrics:

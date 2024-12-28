@@ -1,14 +1,13 @@
 """Training throughput monitoring utilities with extreme speedups."""
 import time
-import logging
 from typing import Dict, Optional, Any, Union
 from collections import deque
 import functools
 
 import torch
+from src.core.logging import get_logger, LogConfig
 
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def make_picklable(func):
     """Decorator to make functions picklable."""

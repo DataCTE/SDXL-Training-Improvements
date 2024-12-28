@@ -1,13 +1,13 @@
 """Distributed training utilities."""
-import logging
 import os
 from typing import Optional, Tuple
 
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
+from src.core.logging import get_logger, LogConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def setup_distributed(
     rank: Optional[int] = None,

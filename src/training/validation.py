@@ -3,10 +3,10 @@ import torch
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import numpy as np
-from src.core.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 from src.models.sdxl import StableDiffusionXLModel
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 class ValidationLogger:
     """Handles validation metrics and image generation."""

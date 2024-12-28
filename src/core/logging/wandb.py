@@ -1,5 +1,4 @@
 """Weights & Biases logging utilities."""
-import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 import functools
@@ -9,8 +8,9 @@ import functools
 import torch
 import wandb
 from PIL import Image
+from src.core.logging import get_logger, LogConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def make_picklable(func):

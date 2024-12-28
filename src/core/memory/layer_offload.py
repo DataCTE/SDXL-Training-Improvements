@@ -1,5 +1,4 @@
 """Layer offloading utilities for memory optimization with extreme speedups."""
-import logging
 import torch
 import torch.nn as nn
 from typing import Dict, Optional
@@ -18,8 +17,9 @@ from .tensor import (
     tensors_record_stream,
     device_equals
 )
+from src.core.logging import get_logger, LogConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 @dataclass
 class LayerOffloadConfig:

@@ -2,7 +2,6 @@
 
 import json
 from collections import defaultdict
-import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
 import numpy as np
@@ -11,7 +10,9 @@ import torch
 if TYPE_CHECKING:
     from src.data.config import Config
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger, LogConfig
+
+logger = get_logger(__name__)
 
 class TagWeighter:
     def __init__(
