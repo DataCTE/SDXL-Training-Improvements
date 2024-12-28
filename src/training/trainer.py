@@ -1,5 +1,5 @@
 """SDXL trainer wrapper for backward compatibility."""
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
 import torch
 from src.core.logging import setup_logging, WandbLogger
 from src.data.config import Config

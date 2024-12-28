@@ -12,10 +12,8 @@ from src.training.schedulers import get_add_time_ids
 class FlowMatchingTrainer(TrainingMethod):
     name = "flow_matching"
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.logger = get_logger(f"training.methods.{self.name}", LogConfig.from_config(config))
-        self.tensor_logger = get_logger(f"training.methods.{self.name}.tensor", LogConfig.from_config(config))
+    def __init__(self, unet: torch.nn.Module, config: Config):
+        super().__init__(unet, config)
         self.logger.debug("Initializing Flow Matching Trainer")
         
         # Initialize tensor shape tracking

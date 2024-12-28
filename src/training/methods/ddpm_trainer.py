@@ -9,7 +9,7 @@ from src.core.logging import get_logger, LogConfig
 from src.training.methods.base import TrainingMethod
 from src.training.schedulers import get_add_time_ids
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"

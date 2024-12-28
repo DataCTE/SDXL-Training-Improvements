@@ -268,7 +268,10 @@ def get_logger(name: str, config: Optional[LogConfig] = None) -> Logger:
     return LogManager.get_instance().get_logger(name, config)
 """Base logging configuration and utilities."""
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.data.config import Config
 
 @dataclass 
 class LogConfig:
