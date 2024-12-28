@@ -122,7 +122,7 @@ def setup_logging(
     capture_warnings: bool = True,
     propagate: bool = True,
     console_level: int = logging.INFO  # Add new parameter for console output level
-) -> logging.Logger:
+) -> Tuple[logging.Logger, TensorLogger]:
     """Setup logging configuration with detailed action tracking and colored output.
     
     Args:
@@ -199,7 +199,14 @@ def setup_logging(
     if not logger.handlers:
         logger.info(f"Logging system initialized for {logger_name} at level {logging.getLevelName(level)}")
     
-    return logger
+    # Create tensor logger
+    tensor_logger = TensorLogger(logger)
+        
+    # Enable warning capture and configure propagation
+    logging.captureWarnings(capture_warnings)
+    logger.propagate = propagate
+        
+    return logger, tensor_logger
     
 def cleanup_logging() -> Dict[str, Any]:
     """Cleanup logging handlers and return action history.
