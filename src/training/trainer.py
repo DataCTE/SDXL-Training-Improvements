@@ -1,12 +1,13 @@
 """SDXL trainer wrapper for backward compatibility."""
 from typing import Dict, List, Optional, Union, Tuple
 import torch
-from src.core.logging import setup_logging, WandbLogger
+from src.core.logging import get_logger, LogConfig, WandbLogger
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXLModel
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 
-logger = setup_logging(__name__)
+# Create logger with default config
+logger = get_logger(__name__, LogConfig())
 
 def create_trainer(
     config: Config,
