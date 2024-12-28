@@ -210,9 +210,12 @@ class SDXLTrainer:
                 "learning_rate": self.optimizer.param_groups[0]["lr"],
                 "batch_size": batch["model_input"].shape[0]
             }
-            self.metrics_logger.update(metrics)
             
-            return {k: v.detach().item() for k, v in loss_dict.items()}
+            # Update metrics logger
+            self.metrics_logger.update(metrics, batch_size=batch["model_input"].shape[0])
+            
+            return {k: v.detach().item() if isinstance(v, torch.Tensor) else v 
+                   for k, v in loss_dict.items()}
         except Exception as e:
             logger.error(
                 "Error in training step", 
@@ -242,8 +245,41 @@ class SDXLTrainer:
                     for i, micro_batch in enumerate(micro_batches):
                         metrics = self.train_step(micro_batch, accumulation_step=i)
                         step_metrics.update(metrics)
-                    self.throughput_monitor.update(batch["model_input"].shape[0])
-                    step_metrics.update(self.throughput_monitor.get_metrics())
+                    # Log metrics at appropriate intervals
+                    if self.global_step % self.config.training.log_steps == 0:
+                        log_metrics(
+                            step_metrics,
+                            self.global_step,
+                            is_main_process=is_main_process(),
+                            use_wandb=self.config.training.use_wandb,
+                            wandb_logger=self.wandb_logger,
+                            step_type="step"
+                        )
+                        
+                    # Run validation if configured
+                    if (
+                        self.validation_logger is not None and
+                        self.global_step % self.config.training.validation_steps == 0
+                    ):
+                        validation_metrics = self.validation_logger.run_validation(
+                            self.global_step,
+                            self.wandb_logger
+                        )
+                        if validation_metrics:
+                            log_metrics(
+                                validation_metrics,
+                                self.global_step,
+                                is_main_process=is_main_process(),
+                                use_wandb=self.config.training.use_wandb,
+                                wandb_logger=self.wandb_logger,
+                                step_type="validation"
+                            )
+
+                    # Update epoch metrics
+                    for k, v in step_metrics.items():
+                        if k not in epoch_metrics:
+                            epoch_metrics[k] = []
+                        epoch_metrics[k].append(v)
                 except RuntimeError as e:
                     if "out of memory" in str(e):
                         logger.error(
