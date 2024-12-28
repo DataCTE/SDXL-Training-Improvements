@@ -186,17 +186,16 @@ class DDPMTrainer(TrainingMethod):
                 "traceback": traceback.format_exc()
             }
             
-            # Log the full error report
-            self.logger.error(
-                "Loss computation failed",
-                exc_info=True,
-                extra={
-                    "error_report": error_report,
-                    "shape_logs": self._shape_logs
-                }
-            )
+            error_context = {
+                'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
+                'device': str(batch['model_input'].device) if isinstance(batch, dict) and 'model_input' in batch else 'unknown',
+                'step': self.global_step if hasattr(self, 'global_step') else None,
+                'error_report': error_report
+            }
+            # Use tensor logger's error handling
+            self.tensor_logger.handle_error(e, error_context)
             
             # Clear shape logs for next attempt
             self._shape_logs = []
             
-            raise RuntimeError(f"Loss computation failed with detailed shapes logged above: {str(e)}") from e
+            raise RuntimeError(f"Loss computation failed - see logs for detailed shape history: {str(e)}") from e
