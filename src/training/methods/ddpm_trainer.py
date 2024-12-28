@@ -108,10 +108,18 @@ class DDPMTrainer(TrainingMethod):
             
         except Exception as e:
             self.tensor_logger.handle_error(e, {
+                'error': str(e),
+                'error_type': type(e).__name__,
                 'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                'has_compiled_loss': hasattr(self, '_compiled_loss')
+                'tensor_shapes': {
+                    'add_time_ids': tuple(add_time_ids.shape) if 'add_time_ids' in locals() else None,
+                    'pooled_prompt_embeds': tuple(pooled_prompt_embeds.shape) if 'pooled_prompt_embeds' in locals() else None,
+                    'prompt_embeds': tuple(prompt_embeds.shape) if 'prompt_embeds' in locals() else None,
+                    'noisy_latents': tuple(noisy_latents.shape) if 'noisy_latents' in locals() else None
+                },
+                'traceback': traceback.format_exc()
             })
-            raise
+            raise RuntimeError(f"Loss computation failed - see logs for detailed shape history: {str(e)}") from e
 
     def _compute_loss_impl(
         self,
@@ -178,7 +186,7 @@ class DDPMTrainer(TrainingMethod):
                 "pooled_prompt_embeds": pooled_prompt_embeds
             })
 
-            # Get add_time_ids with correct dtype
+            # Get add_time_ids with correct shape and dtype
             add_time_ids = get_add_time_ids(
                 original_sizes=batch["original_sizes"],
                 crop_top_lefts=batch["crop_top_lefts"],
@@ -186,15 +194,26 @@ class DDPMTrainer(TrainingMethod):
                 dtype=target_dtype,  # Use target_dtype consistently
                 device=self.unet.device
             )
+            
+            # Log initial shapes
+            self.tensor_logger.log_checkpoint("Initial Time IDs", {
+                "add_time_ids": add_time_ids,
+                "pooled_prompt_embeds": pooled_prompt_embeds
+            })
+
             # Reshape time embeddings to match expected dimensions
             # From (batch_size, 6) to (batch_size, 1, 6)
             add_time_ids = add_time_ids.unsqueeze(1)
-            self.tensor_logger.log_checkpoint("Time IDs", {"add_time_ids": add_time_ids})
-
-            # Move pooled_prompt_embeds to match expected shape
-            # From (batch_size, 2, 768) to (batch_size, 1, 768) by taking first embedding
-            pooled_prompt_embeds = pooled_prompt_embeds[:, 0].unsqueeze(1)
-            self.tensor_logger.log_checkpoint("Pooled Embeds", {"pooled_prompt_embeds": pooled_prompt_embeds})
+            
+            # Take first embedding and reshape pooled_prompt_embeds
+            # From (batch_size, 2, 768) to (batch_size, 1, 768)
+            pooled_prompt_embeds = pooled_prompt_embeds[:, 0:1]  # Keep dim with slice
+            
+            # Verify shapes after reshaping
+            self.tensor_logger.log_checkpoint("Reshaped Embeddings", {
+                "add_time_ids": add_time_ids,
+                "pooled_prompt_embeds": pooled_prompt_embeds
+            })
 
             # Forward pass with corrected shapes
             noise_pred = self.unet(
