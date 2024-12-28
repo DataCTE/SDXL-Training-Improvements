@@ -163,24 +163,30 @@ class ColoredFormatter(logging.Formatter):
     """Custom formatter for colored console output with detailed context."""
     
     COLORS = {
-        'DEBUG': Fore.CYAN,
+        'DEBUG': Fore.CYAN + Style.DIM,
         'INFO': Fore.GREEN,
-        'WARNING': Fore.YELLOW,
+        'WARNING': Fore.YELLOW + Style.BRIGHT,
         'ERROR': Fore.RED + Style.BRIGHT,
-        'CRITICAL': Fore.RED + Style.BRIGHT + Style.DIM
+        'CRITICAL': Fore.MAGENTA + Style.BRIGHT + Style.DIM
     }
 
-    # Extended context fields for detailed logging
-    CONTEXT_FIELDS = [
-        'function', 'line_number', 'file_path',
-        'input_data', 'expected_type', 'actual_type',
-        'shape', 'device', 'dtype', 'error_type',
-        'stack_info'
-    ]
-    
-    # Fields to exclude from console output
-    exclude_fields = ['process', 'thread', 'processName', 'threadName']
-    
+    HIGHLIGHT_COLORS = {
+        'file_path': Fore.BLUE,
+        'line_number': Fore.CYAN,
+        'function': Fore.MAGENTA,
+        'error': Fore.RED + Style.BRIGHT,
+        'success': Fore.GREEN + Style.BRIGHT,
+        'warning': Fore.YELLOW + Style.BRIGHT
+    }
+
+    KEYWORDS = {
+        'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
+        'success': (Fore.GREEN, ['Complete', 'Finished', 'Saved', 'Success']),
+        'error': (Fore.RED, ['Error', 'Failed', 'Exception']),
+        'warning': (Fore.YELLOW, ['Warning', 'Caution']),
+        'progress': (Fore.BLUE, ['Processing', 'Loading', 'Computing'])
+    }
+
     def format(self, record):
         """Enhanced formatter with detailed context and error tracking."""
         # Create a copy of the record to avoid modifying the original
@@ -189,53 +195,24 @@ class ColoredFormatter(logging.Formatter):
         # Get timestamp once for consistency
         timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')
         
-        # Filter out excluded fields from the copy
-        for field in self.exclude_fields:
-            if hasattr(filtered_record, field):
-                delattr(filtered_record, field)
-        
-        # Track error levels that cause failures
-        if record.levelno >= logging.ERROR:
-            with threading.Lock():  # Add thread safety
-                _action_history[f'error_{time.time()}'] = {
-                    'level': record.levelno,
-                    'level_name': record.levelname,
-                    'message': record.msg,
-                    'timestamp': timestamp
-                }
-        
-        # Build detailed context string
-        context_parts = []
-        for field in self.CONTEXT_FIELDS:
-            if hasattr(record, field):
-                value = getattr(record, field)
-                if value is not None:
-                    if isinstance(value, (dict, list, tuple)):
-                        value_str = f"\n    {repr(value)}"
-                    else:
-                        value_str = str(value)
-                    context_parts.append(f"{field}: {value_str}")
-        
-        # Add exception info and stack trace only when they exist
-        if record.exc_info:
-            exception_text = self.formatException(record.exc_info)
-            record.msg = f"{record.msg}\nException:\n{exception_text}"
-        
-        if record.levelno >= logging.ERROR and record.stack_info:
-            stack_info_text = self.formatStack(record.stack_info)
-            record.msg = f"{record.msg}\nStack Trace:\n{stack_info_text}"
-
-        # Add context information if there are any context parts
-        if context_parts:
-            record.msg = f"{record.msg}\nContext:\n{chr(10).join(context_parts)}"
-        
         # Get the base color for the entire message based on level
         base_color = self.COLORS.get(record.levelname, '')
         
         # Format the record using the parent formatter
-        formatted_message = super().format(record)
+        formatted_message = super().format(filtered_record)
         
-        # Apply the color to the entire formatted message
+        # Apply keyword highlighting
+        for keyword, (color, words) in self.KEYWORDS.items():
+            for word in words:
+                formatted_message = formatted_message.replace(word, f"{color}{word}{Style.RESET_ALL}")
+        
+        # Apply context highlighting
+        for context, color in self.HIGHLIGHT_COLORS.items():
+            if hasattr(record, context):
+                value = getattr(record, context)
+                formatted_message = formatted_message.replace(str(value), f"{color}{value}{Style.RESET_ALL}")
+        
+        # Apply the base color to the entire formatted message
         colored_message = f"{base_color}{formatted_message}{Style.RESET_ALL}"
         
         return colored_message
