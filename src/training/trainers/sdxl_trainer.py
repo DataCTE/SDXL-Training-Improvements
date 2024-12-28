@@ -7,7 +7,7 @@ import torch.backends.cudnn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from src.core.logging import get_logger, LogConfig, WandbLogger, log_metrics
+from src.core.logging import get_logger, LogConfig, WandbLogger, log_metrics, MetricsLogger
 from src.training.validation import ValidationLogger
 logger = get_logger(__name__)
 
