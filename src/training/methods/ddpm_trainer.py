@@ -15,6 +15,12 @@ logger = get_logger(__name__)
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"
 
+    def _prepare_time_ids(self, add_time_ids: torch.Tensor) -> torch.Tensor:
+        """Reshape time IDs to match expected dimensions."""
+        # add_time_ids comes in as (batch_size, 6)
+        # Need to expand to (batch_size, 1, 6) to match expected dimensions
+        return add_time_ids.unsqueeze(1)
+
     def __init__(self, unet: torch.nn.Module, config: Config):
         super().__init__(unet, config)
         logger = get_logger(__name__)
@@ -183,12 +189,15 @@ class DDPMTrainer(TrainingMethod):
             self.tensor_logger.log_checkpoint("Time IDs", {"add_time_ids": add_time_ids})
 
             # Forward pass
+            # Prepare time embeddings with correct shape
+            add_time_ids = self._prepare_time_ids(add_time_ids)
+            
             noise_pred = self.unet(
                 noisy_latents,
                 timesteps,
                 prompt_embeds,
                 added_cond_kwargs={
-                    "time_ids": add_time_ids,
+                    "time_ids": add_time_ids,  # Now has shape (batch_size, 1, 6)
                     "text_embeds": pooled_prompt_embeds
                 }
             ).sample
