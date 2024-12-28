@@ -458,9 +458,6 @@ def main():
         check_system_limits()
         
         device = None
-    try:
-        args = parse_args()
-        config = Config.from_yaml(args.config)
         
         with setup_environment(args):
             device = setup_device_and_logging(config)
