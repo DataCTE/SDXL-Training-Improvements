@@ -7,9 +7,9 @@ from dataclasses import dataclass
 import packaging
 import torch
 import accelerate
-from src.core.logging.utils import create_basic_logger
+from src.core.logging.utils import create_enhanced_logger
 
-logger = create_basic_logger(__name__)
+logger = create_enhanced_logger(__name__)
 
 # Initialize accelerator and device
 accelerator = accelerate.Accelerator()
