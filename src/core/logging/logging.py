@@ -4,18 +4,76 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
-from pathlib import Path
 import threading
+import torch
+
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
 
-
 # Track actions and their timing
 action_history: Dict[str, Any] = {}
+
+class TensorLogger:
+    """Specialized logger for tracking tensor shapes and statistics."""
+    
+    def __init__(self, parent_logger: logging.Logger):
+        self.logger = parent_logger
+        self._shape_logs = []
+        self._lock = threading.Lock()
+        
+    def log_tensor(self, tensor: 'torch.Tensor', path: str, step: str) -> None:
+        """Log tensor shape and statistics."""
+        with self._lock:
+            try:
+                shape_info = {
+                    'step': step,
+                    'path': path,
+                    'shape': tuple(tensor.shape),
+                    'dtype': str(tensor.dtype),
+                    'device': str(tensor.device),
+                    'stats': self._compute_tensor_stats(tensor)
+                }
+                self._shape_logs.append(shape_info)
+            except Exception as e:
+                self.logger.warning(f"Failed to log tensor: {str(e)}", exc_info=True)
+    
+    def log_dict(self, data: Dict, path: str = "", step: str = "") -> None:
+        """Recursively log dictionary of tensors."""
+        for key, value in data.items():
+            current_path = f"{path}.{key}" if path else key
+            if isinstance(value, dict):
+                self.log_dict(value, current_path, step)
+            elif hasattr(value, 'shape'):  # Tensor-like object
+                self.log_tensor(value, current_path, step)
+    
+    def _compute_tensor_stats(self, tensor: 'torch.Tensor') -> Dict[str, float]:
+        """Compute basic statistics for a tensor."""
+        try:
+            with torch.no_grad():
+                tensor_cpu = tensor.detach().float().cpu()
+                return {
+                    'min': float(tensor_cpu.min().item()),
+                    'max': float(tensor_cpu.max().item()),
+                    'mean': float(tensor_cpu.mean().item()),
+                    'std': float(tensor_cpu.std().item()) if tensor_cpu.numel() > 1 else 0.0,
+                    'numel': tensor_cpu.numel()
+                }
+        except Exception:
+            return {'error': 'Failed to compute statistics'}
+    
+    def get_shape_history(self) -> List[Dict[str, Any]]:
+        """Get the complete shape history."""
+        with self._lock:
+            return self._shape_logs.copy()
+    
+    def clear_logs(self) -> None:
+        """Clear the shape history."""
+        with self._lock:
+            self._shape_logs.clear()
 
 class ColoredFormatter(logging.Formatter):
     """Custom formatter for colored console output with detailed context."""
@@ -27,12 +85,6 @@ class ColoredFormatter(logging.Formatter):
         'ERROR': Fore.RED + Style.BRIGHT,
         'CRITICAL': Fore.RED + Style.BRIGHT + Style.DIM
     }
-
-    def format(self, record):
-        """Enhanced formatter with detailed context and error tracking."""
-        # Always show DEBUG messages with visual separator
-        if record.levelno == logging.DEBUG:
-            record.msg = f"[DEBUG] {record.msg}"
 
     # Extended context fields for detailed logging
     CONTEXT_FIELDS = [
