@@ -204,7 +204,10 @@ class ColoredFormatter(logging.Formatter):
         # Apply keyword highlighting
         for keyword, (color, words) in self.KEYWORDS.items():
             for word in words:
-                formatted_message = formatted_message.replace(word, f"{color}{word}{Style.RESET_ALL}")
+                if word in formatted_message:
+                    formatted_message = formatted_message.replace(word, f"{color}{word}{Style.RESET_ALL}")
+                    # Add keyword to the record for context
+                    setattr(record, 'keyword', keyword)
         
         # Apply context highlighting
         for context, color in self.HIGHLIGHT_COLORS.items():
@@ -212,19 +215,15 @@ class ColoredFormatter(logging.Formatter):
                 value = getattr(record, context)
                 formatted_message = formatted_message.replace(str(value), f"{color}{value}{Style.RESET_ALL}")
         
+        # Add timestamp to the formatted message
+        formatted_message = f"{Fore.WHITE}{timestamp}{Style.RESET_ALL} | {formatted_message}"
+        
         # Apply the base color to the entire formatted message
         colored_message = f"{base_color}{formatted_message}{Style.RESET_ALL}"
         
         return colored_message
     
-    KEYWORDS = {
-        'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
-        'success': (Fore.GREEN, ['Complete', 'Finished', 'Saved', 'Success']),
-        'error': (Fore.RED, ['Error', 'Failed', 'Exception']),
-        'warning': (Fore.YELLOW, ['Warning', 'Caution']),
-        'progress': (Fore.BLUE, ['Processing', 'Loading', 'Computing'])
-    }
-    
+   
     
 
 def setup_logging(
