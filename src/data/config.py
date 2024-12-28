@@ -450,15 +450,20 @@ class Config:
             log_dir = Path(self.logging.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             
-            # Validate log level
+            # Validate console level
             valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-            if self.logging.level.upper() not in valid_levels:
-                raise ValueError(f"Invalid log level: {self.logging.level}")
+            if self.logging.console_level.upper() not in valid_levels:
+                raise ValueError(f"Invalid console log level: {self.logging.console_level}")
+                
+            # Validate file level
+            if self.logging.file_level.upper() not in valid_levels:
+                raise ValueError(f"Invalid file log level: {self.logging.file_level}")
                 
             # Setup logging based on config
             setup_logging(
                 log_dir=str(log_dir),
-                level=getattr(logging, self.logging.level.upper()),
+                level=getattr(logging, self.logging.file_level.upper()),
+                console_level=getattr(logging, self.logging.console_level.upper()),
                 filename=self.logging.filename,
                 capture_warnings=self.logging.capture_warnings
             )
