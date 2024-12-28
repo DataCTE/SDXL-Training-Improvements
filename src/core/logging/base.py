@@ -73,17 +73,6 @@ class LogConfig:
     def __post_init__(self):
         """Initialize optional fields."""
         self.wandb_tags = self.wandb_tags or []
-    
-    # W&B config
-    use_wandb: bool = False
-    wandb_project: str = "sdxl-training"
-    wandb_name: Optional[str] = None
-    wandb_tags: Optional[List[str]] = None
-    wandb_notes: Optional[str] = None
-    
-    def __post_init__(self):
-        """Initialize optional fields."""
-        self.wandb_tags = self.wandb_tags or []
 
 class LogManager:
     """Centralized logging manager."""
