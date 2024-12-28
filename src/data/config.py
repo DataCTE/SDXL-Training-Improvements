@@ -141,7 +141,7 @@ class GlobalConfig:
         
     image: ImageConfig = field(default_factory=ImageConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
-    logging: "LoggingConfig" = field(default_factory=lambda: LoggingConfig())
+    logging: "LoggingConfig" = field(default_factory=lambda: GlobalConfig.LoggingConfig())
     seed: Optional[int] = None
     output_dir: str = "outputs"
 
