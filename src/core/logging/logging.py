@@ -228,7 +228,7 @@ class ColoredFormatter(logging.Formatter):
     
 
 def setup_logging(
-    config: Optional[Union[LoggingConfig, Dict]] = None,
+    config: Optional[Union[LogConfig, Dict]] = None,
     log_dir: Optional[str] = "outputs/logs",
     level: Optional[Union[int, str]] = None,
     filename: Optional[str] = None,
@@ -240,16 +240,17 @@ def setup_logging(
     """Setup logging configuration with detailed action tracking and colored output.
     
     Args:
-        log_dir: Directory for log files
-        level: Logging level for file output
-        filename: Optional log file name
+        config: LogConfig object or dict containing logging configuration
+        log_dir: Directory for log files (fallback if not in config)
+        level: Logging level for file output (fallback if not in config)
+        filename: Optional log file name (fallback if not in config)
         module_name: Optional module name for logger
-        capture_warnings: Whether to capture Python warnings
-        propagate: Whether to propagate logs to parent loggers
-        console_level: Logging level for console output (default: INFO)
+        capture_warnings: Whether to capture Python warnings (fallback if not in config)
+        propagate: Whether to propagate logs to parent loggers (fallback if not in config)
+        console_level: Logging level for console output (fallback if not in config)
         
     Returns:
-        Configured logger instance
+        Tuple of (configured logger instance, tensor logger instance)
     """
     # Use config values if provided, otherwise use fallback values
     if config:
