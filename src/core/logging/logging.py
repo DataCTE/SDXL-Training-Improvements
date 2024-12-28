@@ -1,21 +1,122 @@
-"""Logging configuration for training with detailed action tracking."""
+"""Centralized logging configuration for SDXL training."""
 import logging
 import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
 import threading
 import torch
+from dataclasses import dataclass
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
 
-# Track actions and their timing
-action_history: Dict[str, Any] = {}
+@dataclass
+class LoggingConfig:
+    """Centralized logging configuration."""
+    console_level: str = "INFO"
+    file_level: str = "DEBUG"
+    log_dir: str = "outputs/wslref/logs"
+    filename: str = "train.log"
+    capture_warnings: bool = True
+    console_output: bool = True
+    file_output: bool = True
+    log_cuda_memory: bool = True
+    log_system_memory: bool = True
+    performance_logging: bool = True
+    propagate: bool = True
+    module_name: Optional[str] = None
+    
+    def get_console_level(self) -> int:
+        """Convert string level to logging constant."""
+        return getattr(logging, self.console_level.upper())
+    
+    def get_file_level(self) -> int:
+        """Convert string level to logging constant."""
+        return getattr(logging, self.file_level.upper())
+
+class LogManager:
+    """Centralized logging manager."""
+    _instance = None
+    _loggers: Dict[str, logging.Logger] = {}
+    _tensor_loggers: Dict[str, 'TensorLogger'] = {}
+    _action_history: Dict[str, Any] = {}
+    
+    def __init__(self):
+        self._lock = threading.Lock()
+        
+    @classmethod
+    def get_instance(cls) -> 'LogManager':
+        """Get singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
+    def get_logger(self, name: str) -> logging.Logger:
+        """Get or create logger by name."""
+        with self._lock:
+            if name not in self._loggers:
+                self._loggers[name] = logging.getLogger(name)
+            return self._loggers[name]
+    
+    def get_tensor_logger(self, name: str) -> 'TensorLogger':
+        """Get or create tensor logger by name."""
+        with self._lock:
+            if name not in self._tensor_loggers:
+                self._tensor_loggers[name] = TensorLogger(self.get_logger(name))
+            return self._tensor_loggers[name]
+    
+    def configure_from_config(self, config: Union[LoggingConfig, Dict]) -> None:
+        """Configure logging from config object or dict."""
+        if isinstance(config, dict):
+            config = LoggingConfig(**config)
+            
+        # Create log directory
+        log_dir = Path(config.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Configure root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(config.get_file_level())
+        
+        # Clear existing handlers
+        root_logger.handlers.clear()
+        
+        # Add console handler if enabled
+        if config.console_output:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(config.get_console_level())
+            console_handler.setFormatter(ColoredFormatter(
+                '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ))
+            root_logger.addHandler(console_handler)
+        
+        # Add file handler if enabled
+        if config.file_output and config.filename:
+            file_handler = logging.FileHandler(
+                log_dir / config.filename,
+                mode='a',
+                encoding='utf-8'
+            )
+            file_handler.setLevel(config.get_file_level())
+            file_handler.setFormatter(logging.Formatter(
+                '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
+                '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
+                '%(funcName)s |\n%(message)s\n',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ))
+            root_logger.addHandler(file_handler)
+        
+        # Configure warning capture
+        logging.captureWarnings(config.capture_warnings)
+        
+        # Store config
+        self.config = config
 
 class TensorLogger:
     """Specialized logger for tracking tensor shapes and statistics."""
@@ -167,13 +268,14 @@ class ColoredFormatter(logging.Formatter):
     
 
 def setup_logging(
-    log_dir: str = "outputs/wslref/logs",
-    level: int = logging.DEBUG,  # Keep DEBUG as default for file logging
+    config: Optional[Union[LoggingConfig, Dict]] = None,
+    log_dir: Optional[str] = None,
+    level: Optional[Union[int, str]] = None,
     filename: Optional[str] = None,
     module_name: Optional[str] = None,
-    capture_warnings: bool = True,
-    propagate: bool = True,
-    console_level: int = logging.INFO  # Add new parameter for console output level
+    capture_warnings: Optional[bool] = None,
+    propagate: Optional[bool] = None,
+    console_level: Optional[Union[int, str]] = None
 ) -> Tuple[logging.Logger, TensorLogger]:
     """Setup logging configuration with detailed action tracking and colored output.
     

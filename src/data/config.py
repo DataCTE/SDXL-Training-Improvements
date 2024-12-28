@@ -262,7 +262,8 @@ class PreprocessingConfig:
 class LoggingConfig:
     """Logging configuration settings."""
     log_dir: str = "logs"
-    level: str = "INFO"
+    console_level: str = "INFO"
+    file_level: str = "DEBUG"
     filename: Optional[str] = "training.log"
     capture_warnings: bool = True
     console_output: bool = True
@@ -270,6 +271,24 @@ class LoggingConfig:
     log_cuda_memory: bool = True
     log_system_memory: bool = True
     performance_logging: bool = True
+    propagate: bool = True
+    
+    def to_core_config(self) -> 'core.logging.LoggingConfig':
+        """Convert to core logging config."""
+        from src.core.logging.logging import LoggingConfig as CoreLoggingConfig
+        return CoreLoggingConfig(
+            console_level=self.console_level,
+            file_level=self.file_level,
+            log_dir=self.log_dir,
+            filename=self.filename,
+            capture_warnings=self.capture_warnings,
+            console_output=self.console_output,
+            file_output=self.file_output,
+            log_cuda_memory=self.log_cuda_memory,
+            log_system_memory=self.log_system_memory,
+            performance_logging=self.performance_logging,
+            propagate=self.propagate
+        )
 
 @dataclass
 class Config:

@@ -68,6 +68,13 @@ global_config:
     file_level: "DEBUG"
     log_dir: "outputs/wslref/logs"
     filename: "train.log"
+    capture_warnings: true
+    console_output: true
+    file_output: true
+    log_cuda_memory: true
+    log_system_memory: true
+    performance_logging: true
+    propagate: true
 
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
