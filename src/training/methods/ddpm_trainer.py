@@ -112,12 +112,8 @@ class DDPMTrainer(TrainingMethod):
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
-        """Compute training loss with detailed shape logging."""
         try:
-            # Log initial batch shapes
-            self.tensor_logger.log_checkpoint("Initial Batch", batch)
-
-            # Extract and validate latents with shape logging
+            # Extract latents and move to correct device/dtype
             if "latent" in batch:
                 self.tensor_logger.log_checkpoint("Initial Latent Data", {"latent": batch["latent"]})
                 if "model_input" in batch["latent"]:
@@ -130,83 +126,44 @@ class DDPMTrainer(TrainingMethod):
                 latents = batch.get("model_input")
                 if latents is None:
                     raise KeyError("No latent data found in batch")
-                
-            self.tensor_logger.log_checkpoint("Processed Latents", {
-                "latents": latents,
-                "shape": latents.shape,
-                "dtype": str(latents.dtype),
-                "device": str(latents.device),
-                "stats": {
-                    "min": float(latents.min().item()),
-                    "max": float(latents.max().item()),
-                    "mean": float(latents.mean().item()),
-                    "std": float(latents.std().item())
-                }
-            })
-            
-            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
-            # Generate noise with proper generator handling
+            # Move to device and convert dtype
+            target_dtype = self.unet.dtype
+            latents = latents.to(device=self.unet.device, dtype=target_dtype)
+
+            # Generate noise with matching dtype
             if generator is not None:
                 with torch.random.fork_rng(devices=[latents.device]):
                     torch.random.manual_seed(generator.initial_seed())
-                    noise = torch.randn_like(latents)
+                    noise = torch.randn_like(latents, dtype=target_dtype)
             else:
-                noise = torch.randn_like(latents)
-            
-            self.tensor_logger.log_checkpoint("Generated Noise", {
-                "noise": noise,
-                "shape": noise.shape,
-                "dtype": str(noise.dtype),
-                "device": str(noise.device),
-                "stats": {
-                    "min": float(noise.min().item()),
-                    "max": float(noise.max().item()),
-                    "mean": float(noise.mean().item()),
-                    "std": float(noise.std().item())
-                }
-            })
+                noise = torch.randn_like(latents, dtype=target_dtype)
 
-            # Generate timesteps
+            # Get timesteps
             timesteps = torch.randint(
                 0,
                 self.noise_scheduler.config.num_train_timesteps,
                 (latents.shape[0],),
                 device=latents.device
             )
-            self.tensor_logger.log_checkpoint("Timesteps", {"timesteps": timesteps})
 
-            # Add noise to latents with shape logging
+            # Add noise to latents
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-            self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
-            # Extract embeddings with shape logging
-            if "embeddings" in batch:
-                prompt_embeds = batch["embeddings"].get("prompt_embeds")
-                pooled_prompt_embeds = batch["embeddings"].get("pooled_prompt_embeds")
-            else:
-                prompt_embeds = batch.get("prompt_embeds")
-                pooled_prompt_embeds = batch.get("pooled_prompt_embeds")
+            # Get embeddings and ensure correct dtype
+            prompt_embeds = batch["embeddings"]["prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
+            pooled_prompt_embeds = batch["embeddings"]["pooled_prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
 
-            if prompt_embeds is None or pooled_prompt_embeds is None:
-                raise ValueError("Missing required embeddings")
-
-            self.tensor_logger.log_checkpoint("Embeddings", {
-                "prompt_embeds": prompt_embeds,
-                "pooled_prompt_embeds": pooled_prompt_embeds
-            })
-
-            # Get add_time_ids with shape logging
+            # Get add_time_ids with correct dtype
             add_time_ids = get_add_time_ids(
-                original_sizes=batch.get("original_sizes", [(1024, 1024)]),
-                crop_top_lefts=batch.get("crop_top_lefts", [(0, 0)]),
-                target_sizes=batch.get("target_sizes", [(1024, 1024)]),
-                dtype=prompt_embeds.dtype,
-                device=prompt_embeds.device
+                original_sizes=batch["original_sizes"],
+                crop_top_lefts=batch["crop_top_lefts"],
+                target_sizes=batch["target_sizes"],
+                dtype=target_dtype,
+                device=self.unet.device
             )
-            self._log_tensor_shapes(add_time_ids, "add_time_ids", "before_unet")
 
-            # UNet forward pass with shape logging
+            # Forward pass
             noise_pred = self.unet(
                 noisy_latents,
                 timesteps,
@@ -214,9 +171,8 @@ class DDPMTrainer(TrainingMethod):
                 added_cond_kwargs={
                     "time_ids": add_time_ids,
                     "text_embeds": pooled_prompt_embeds
-                },
+                }
             ).sample
-            self._log_tensor_shapes(noise_pred, "noise_pred", "after_unet")
 
             # Compute loss
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
@@ -224,24 +180,10 @@ class DDPMTrainer(TrainingMethod):
             return {"loss": loss}
 
         except Exception as e:
-            # Create detailed error report with shape history
-            error_report = {
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "shape_history": self._shape_logs,
-                "traceback": traceback.format_exc()
-            }
-            
-            error_context = {
+            self.tensor_logger.handle_error(e, {
                 'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                'device': str(batch['model_input'].device) if isinstance(batch, dict) and 'model_input' in batch else 'unknown',
-                'step': self.global_step if hasattr(self, 'global_step') else None,
-                'error_report': error_report
-            }
-            # Use tensor logger's error handling
-            self.tensor_logger.handle_error(e, error_context)
-            
-            # Clear shape logs for next attempt
-            self._shape_logs = []
-            
+                'device': str(self.unet.device),
+                'unet_dtype': str(self.unet.dtype),
+                'error': str(e)
+            })
             raise RuntimeError(f"Loss computation failed - see logs for detailed shape history: {str(e)}") from e
