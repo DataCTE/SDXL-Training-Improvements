@@ -110,18 +110,8 @@ class Logger:
             file_handler.setLevel(getattr(logging, self.config.file_level.upper()))
             self.logger.addHandler(file_handler)
         
-        # Initialize W&B if enabled
-        if self.config.use_wandb:
-            try:
-                self.wandb_run = wandb.init(
-                    project=self.config.wandb_project,
-                    name=self.config.wandb_name,
-                    tags=self.config.wandb_tags,
-                    notes=self.config.wandb_notes
-                )
-            except Exception as e:
-                self.error(f"Failed to initialize W&B: {str(e)}", exc_info=True)
-                self.wandb_run = None
+        # Initialize W&B lazily - will be set up when needed
+        self.wandb_run = None
 
     def log_metrics(
         self,

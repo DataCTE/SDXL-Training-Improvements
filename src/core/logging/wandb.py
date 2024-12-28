@@ -7,10 +7,10 @@ from functools import wraps
 import torch
 import wandb
 from PIL import Image
-from src.core.logging import get_logger
+import logging
 from src.core.logging.base import LogConfig
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def make_picklable(func):
