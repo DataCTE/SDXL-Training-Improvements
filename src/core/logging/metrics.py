@@ -1,36 +1,56 @@
-"""Training metrics logging utilities."""
-import logging
-from functools import wraps
-from typing import Any, Dict, Optional, List, Union
+"""Centralized metrics collection and logging for SDXL training."""
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, Union
+import torch
+from collections import defaultdict
 import time
 import numpy as np
-import torch
-import torch.distributed as dist
-from collections import defaultdict
-
-from ..distributed import reduce_dict
+from .base import get_logger, LogConfig
 from .wandb import WandbLogger
-from .base import get_logger
 
 logger = get_logger(__name__)
 
-def make_picklable(func):
-    """Decorator to make functions picklable."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    return wrapper
-
-class MetricsTracker:
-    """Track and compute moving averages of metrics."""
+@dataclass
+class TrainingMetrics:
+    """Container for training metrics."""
+    loss: float = 0.0
+    grad_norm: float = 0.0
+    learning_rate: float = 0.0
+    batch_size: int = 0
+    steps_per_second: float = 0.0
+    samples_per_second: float = 0.0
+    gpu_memory_allocated: float = 0.0
+    gpu_memory_reserved: float = 0.0
     
-    def __init__(self, window_size: int = 100):
+    def to_dict(self) -> Dict[str, float]:
+        """Convert metrics to dictionary."""
+        return {
+            "loss": self.loss,
+            "grad_norm": self.grad_norm,
+            "learning_rate": self.learning_rate,
+            "batch_size": self.batch_size,
+            "steps_per_second": self.steps_per_second,
+            "samples_per_second": self.samples_per_second,
+            "gpu_memory_allocated_gb": self.gpu_memory_allocated / (1024**3),
+            "gpu_memory_reserved_gb": self.gpu_memory_reserved / (1024**3)
+        }
+
+class MetricsLogger:
+    """Centralized metrics logging with moving averages."""
+    
+    def __init__(
+        self, 
+        window_size: int = 100,
+        wandb_logger: Optional[WandbLogger] = None,
+        log_prefix: str = ""
+    ):
         self.window_size = window_size
         self.metrics_history = defaultdict(list)
         self.start_time = time.time()
         self.step_times = []
-        self.total_samples = 0
-        self.last_logged = {}
+        self.current_metrics = TrainingMetrics()
+        self.wandb_logger = wandb_logger
+        self.log_prefix = log_prefix
         
     def update(self, metrics: Dict[str, Any], batch_size: Optional[int] = None) -> None:
         """Update metrics history.
