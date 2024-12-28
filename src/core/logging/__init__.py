@@ -1,5 +1,5 @@
 from .config import LogConfig
-from .base import LogManager, Logger, get_logger, reduce_dict
+from .base import LogManager, Logger, get_logger
 from .metrics import log_metrics
 
 __all__ = [
@@ -7,6 +7,5 @@ __all__ = [
     "LogManager",
     "Logger", 
     "get_logger",
-    "log_metrics",
-    "reduce_dict"
+    "log_metrics"
 ]
