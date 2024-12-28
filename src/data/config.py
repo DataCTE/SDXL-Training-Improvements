@@ -258,6 +258,8 @@ class PreprocessingConfig:
     dali_output_dtype: str = "float32"
     enable_async_loading: bool = True
 
+from src.core.logging.base import LogConfig
+
 @dataclass 
 class LoggingConfig:
     """Logging configuration settings."""
