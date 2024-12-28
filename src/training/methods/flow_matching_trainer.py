@@ -101,7 +101,7 @@ class FlowMatchingTrainer(TrainingMethod):
             return {"loss": loss}
 
         except Exception as e:
-            logger.error(f"Error computing Flow Matching loss: {str(e)}", exc_info=True)
+            self.logger.error(f"Error computing Flow Matching loss: {str(e)}", exc_info=True)
             raise
 
     def sample_logit_normal(self, shape, device, dtype, mean=0.0, std=1.0, generator=None):
