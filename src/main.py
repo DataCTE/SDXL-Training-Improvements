@@ -437,23 +437,27 @@ def main():
     print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
     
-    # Setup logging once at the start
-    from src.core.logging import setup_logging
-    logger, tensor_logger = setup_logging(
-        config=config.global_config.logging,
-        log_dir=config.global_config.logging.log_dir,
-        level=config.global_config.logging.file_level,
-        filename=config.global_config.logging.filename,
-        module_name="main",
-        capture_warnings=config.global_config.logging.capture_warnings,
-        propagate=False,  # Explicitly disable propagation
-        console_level=config.global_config.logging.console_level
-    )
-    
-    # Check and configure system limits
-    check_system_limits()
-    
-    device = None
+    try:
+        # Parse args and load config first
+        args = parse_args()
+        config = Config.from_yaml(args.config)
+        
+        # Then setup logging with the loaded config
+        logger, tensor_logger = setup_logging(
+            config=config.global_config.logging,
+            log_dir=config.global_config.logging.log_dir,
+            level=config.global_config.logging.file_level,
+            filename=config.global_config.logging.filename,
+            module_name="main",
+            capture_warnings=config.global_config.logging.capture_warnings,
+            propagate=False,  # Explicitly disable propagation
+            console_level=config.global_config.logging.console_level
+        )
+        
+        # Check and configure system limits
+        check_system_limits()
+        
+        device = None
     try:
         args = parse_args()
         config = Config.from_yaml(args.config)
@@ -548,11 +552,13 @@ def main():
                 'cuda_max_memory': torch.cuda.max_memory_allocated()
             })
             
-        logger.error(f"Training failed: {str(e)}", extra=error_context)
-        
-        if isinstance(e, TrainingSetupError) and e.context:
-            logger.error(f"Error context: {e.context}")
+        # Use print since logger might not be initialized yet
+        print(f"Training failed: {str(e)}")
+        print(f"Error context: {error_context}")
             
+        if isinstance(e, TrainingSetupError) and hasattr(e, 'context'):
+            print(f"Error context: {e.context}")
+                
         sys.exit(1)
 
 if __name__ == "__main__":
