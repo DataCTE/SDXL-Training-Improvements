@@ -186,19 +186,24 @@ class DDPMTrainer(TrainingMethod):
                 dtype=target_dtype,  # Use target_dtype consistently
                 device=self.unet.device
             )
+            # Reshape time embeddings to match expected dimensions
+            # From (batch_size, 6) to (batch_size, 1, 6)
+            add_time_ids = add_time_ids.unsqueeze(1)
             self.tensor_logger.log_checkpoint("Time IDs", {"add_time_ids": add_time_ids})
 
-            # Forward pass
-            # Prepare time embeddings with correct shape
-            add_time_ids = self._prepare_time_ids(add_time_ids)
-            
+            # Move pooled_prompt_embeds to match expected shape
+            # From (batch_size, 2, 768) to (batch_size, 1, 768) by taking first embedding
+            pooled_prompt_embeds = pooled_prompt_embeds[:, 0].unsqueeze(1)
+            self.tensor_logger.log_checkpoint("Pooled Embeds", {"pooled_prompt_embeds": pooled_prompt_embeds})
+
+            # Forward pass with corrected shapes
             noise_pred = self.unet(
                 noisy_latents,
                 timesteps,
                 prompt_embeds,
                 added_cond_kwargs={
-                    "time_ids": add_time_ids,  # Now has shape (batch_size, 1, 6)
-                    "text_embeds": pooled_prompt_embeds
+                    "time_ids": add_time_ids,  # Now (batch_size, 1, 6)
+                    "text_embeds": pooled_prompt_embeds  # Now (batch_size, 1, 768)
                 }
             ).sample
             self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
