@@ -112,7 +112,7 @@ class GlobalConfig:
         
     image: ImageConfig = field(default_factory=ImageConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
-    logging: GlobalConfig.LoggingConfig = field(default_factory=GlobalConfig.LoggingConfig)
+    logging: "LoggingConfig" = field(default_factory=lambda: LoggingConfig())
     seed: Optional[int] = None
     output_dir: str = "outputs"
 
@@ -305,7 +305,7 @@ class Config:
     tag_weighting: TagWeightingConfig = field(default_factory=TagWeightingConfig)
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     transforms: TransformsConfig = field(default_factory=TransformsConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    logging: GlobalConfig.LoggingConfig = field(default_factory=GlobalConfig.LoggingConfig)
 
     def __iter__(self):
         """Make Config iterable to access its sections."""
