@@ -9,7 +9,7 @@ import colorama
 from colorama import Fore, Style
 from datetime import datetime
 from .base import LogConfig
-from .utils import ColoredFormatter
+from .utils import ColoredFormatter, TensorLogger
 from src.data.utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
