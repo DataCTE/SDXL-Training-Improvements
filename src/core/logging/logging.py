@@ -195,6 +195,9 @@ def setup_logging(
     # Get root logger
     root_logger = logging.getLogger()
     
+    # Important: Set propagate=False for root logger to prevent duplicates
+    root_logger.propagate = False
+    
     # Set root logger to DEBUG to allow all messages through
     root_logger.setLevel(logging.DEBUG)
     
@@ -228,9 +231,12 @@ def setup_logging(
     # Configure warning capture
     logging.captureWarnings(capture_warnings if capture_warnings is not None else True)
     
-    # Create and return loggers
+    # Create logger with propagation explicitly set to False
     logger = logging.getLogger(module_name or 'root')
-    tensor_logger = TensorLogger(logger)
+    logger.propagate = False if propagate is None else propagate
+    
+    # Create tensor logger with enhanced error reporting
+    tensor_logger = TensorLogger(logger, dump_on_error=True)
     
     return logger, tensor_logger
     """Setup logging configuration with detailed action tracking and colored output.

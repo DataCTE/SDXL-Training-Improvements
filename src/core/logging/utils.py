@@ -15,10 +15,11 @@ colorama.init(autoreset=True)
 class TensorLogger:
     """Specialized logger for tracking tensor shapes and statistics."""
     
-    def __init__(self, parent_logger: logging.Logger):
+    def __init__(self, parent_logger: logging.Logger, dump_on_error: bool = True):
         self.logger = parent_logger
         self._shape_logs = []
         self._lock = threading.Lock()
+        self._dump_on_error = dump_on_error
         
     def log_tensor(self, tensor: 'torch.Tensor', path: str, step: str) -> None:
         """Log tensor shape and statistics."""
@@ -60,6 +61,42 @@ class TensorLogger:
         except Exception:
             return {'error': 'Failed to compute statistics'}
     
+    def dump_shape_history(self, error_context: Optional[Dict] = None) -> None:
+        """Dump complete shape history to logger."""
+        with self._lock:
+            if not self._shape_logs:
+                self.logger.warning("No shape history available")
+                return
+                
+            self.logger.error(
+                "=== Tensor Shape History ===",
+                extra={
+                    'shape_history': self._shape_logs,
+                    'error_context': error_context
+                }
+            )
+            
+            for idx, log in enumerate(self._shape_logs):
+                self.logger.error(
+                    f"Shape Log {idx}:\n"
+                    f"  Step: {log['step']}\n"
+                    f"  Path: {log['path']}\n"
+                    f"  Shape: {log['shape']}\n"
+                    f"  Dtype: {log['dtype']}\n"
+                    f"  Device: {log['device']}\n"
+                    f"  Stats: {log['stats']}"
+                )
+    
+    def handle_error(self, error: Exception, context: Optional[Dict] = None) -> None:
+        """Handle error by dumping shape history if enabled."""
+        if self._dump_on_error:
+            error_context = {
+                'error_type': type(error).__name__,
+                'error_message': str(error),
+                'context': context
+            }
+            self.dump_shape_history(error_context)
+
     def get_shape_history(self) -> List[Dict[str, Any]]:
         """Get the complete shape history."""
         with self._lock:
