@@ -10,7 +10,8 @@ import torch.cuda
 import logging
 import sys
 import threading
-from src.core.logging import get_logger, LogConfig, setup_logging
+from src.core.logging import get_logger, LogConfig, setup_logging, TensorLogger
+import traceback
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -112,7 +113,8 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
 def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
     """Initialize SDXL model components."""
     logger = get_logger(__name__)
-    tensor_logger = get_logger("tensor")  # Get tensor logger
+    # Create TensorLogger instance directly
+    tensor_logger = TensorLogger(logger)
     
     logger.info("Loading models...")
     model = None  # Initialize model variable outside try block
@@ -541,10 +543,25 @@ def main():
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0
         }
             
-        # Get tensor history if available
-        tensor_logger = get_logger("tensor")
-        if hasattr(tensor_logger, 'get_shape_history'):
-            error_context['tensor_history'] = tensor_logger.get_shape_history()
+        # Create TensorLogger for error handling
+        logger = get_logger(__name__)
+        tensor_logger = TensorLogger(logger)
+            
+        # Use print since logger might not be initialized yet
+        print(f"Training failed: {str(e)}")
+        print(f"Error context: {error_context}")
+        
+        if isinstance(e, TrainingSetupError) and hasattr(e, 'context'):
+            print(f"Error context: {e.context}")
+            
+        # Dump tensor history if available
+        if hasattr(tensor_logger, '_shape_logs') and tensor_logger._shape_logs:
+            print("\nTensor Shape History:")
+            tensor_logger.dump_shape_history({
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'stack_trace': traceback.format_exc()
+            })
         
         # Add config-related info if available
         if 'config' in locals():
