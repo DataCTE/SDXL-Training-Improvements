@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from src.core.logging import setup_logging
+from src.training.metrics import MetricsLogger
+from src.training.validation import ValidationLogger
 logger = setup_logging(__name__)
 
 # Force speed optimizations
@@ -144,7 +146,15 @@ class SDXLTrainer:
         self.max_steps = config.training.max_train_steps or (
             len(train_dataloader) * config.training.num_epochs
         )
-        self.throughput_monitor = ThroughputMonitor()
+        self.metrics_logger = MetricsLogger(window_size=100)
+        if validation_prompts:
+            self.validation_logger = ValidationLogger(
+                model=model,
+                prompts=validation_prompts,
+                output_dir=Path(config.global_config.output_dir)
+            )
+        else:
+            self.validation_logger = None
 
         self.gradient_accumulation_steps = (
             train_dataloader.batch_size // config.training.micro_batch_size
@@ -185,14 +195,25 @@ class SDXLTrainer:
             loss_dict = self.training_method.compute_loss(self.unet, batch, generator=generator)
             loss = loss_dict["loss"] / self.gradient_accumulation_steps
             loss.backward()
+            
+            grad_norm = 0.0
             if accumulation_step == self.gradient_accumulation_steps - 1:
                 if self.config.training.max_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.unet.parameters(),
                         self.config.training.max_grad_norm
-                    )
+                    ).item()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+            
+            metrics = {
+                "loss": loss_dict["loss"].item(),
+                "grad_norm": grad_norm,
+                "learning_rate": self.optimizer.param_groups[0]["lr"],
+                "batch_size": batch["model_input"].shape[0]
+            }
+            self.metrics_logger.update(metrics)
+            
             return {k: v.detach().item() for k, v in loss_dict.items()}
         except Exception as e:
             logger.error(
@@ -254,12 +275,23 @@ class SDXLTrainer:
                 epoch_metrics[k].append(v)
 
             if self.global_step % self.config.training.log_steps == 0:
-                log_metrics(
-                    step_metrics,
+                self.metrics_logger.log_metrics(
                     self.global_step,
-                    is_main_process=is_main_process(),
-                    use_wandb=self.wandb_logger is not None,
-                    wandb_logger=self.wandb_logger
+                    self.wandb_logger
+                )
+                
+            if (
+                self.validation_logger is not None and
+                self.global_step % self.config.training.validation_steps == 0
+            ):
+                validation_metrics = self.validation_logger.run_validation(
+                    self.global_step,
+                    self.wandb_logger
+                )
+                self.metrics_logger.log_metrics(
+                    self.global_step,
+                    self.wandb_logger,
+                    additional_metrics=validation_metrics
                 )
 
             if (
