@@ -146,8 +146,14 @@ class DDPMTrainer(TrainingMethod):
             
             self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
-            # Generate and validate noise with shape logging
-            noise = torch.randn_like(latents, generator=generator)
+            # Generate noise with proper generator handling
+            if generator is not None:
+                with torch.random.fork_rng(devices=[latents.device]):
+                    torch.random.manual_seed(generator.initial_seed())
+                    noise = torch.randn_like(latents)
+            else:
+                noise = torch.randn_like(latents)
+            
             self.tensor_logger.log_checkpoint("Generated Noise", {
                 "noise": noise,
                 "shape": noise.shape,
