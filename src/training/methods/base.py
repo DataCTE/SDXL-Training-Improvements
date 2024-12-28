@@ -8,9 +8,9 @@ from torch import Tensor
 from diffusers import DDPMScheduler
 from src.data.config import Config
 from src.training.schedulers import configure_noise_scheduler
+from src.core.logging import setup_logging
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Ensure base class logger is at DEBUG level
+logger = setup_logging(__name__)
 
 class TrainingMethodMeta(ABCMeta):
     _methods: Dict[str, Type['TrainingMethod']] = {}
