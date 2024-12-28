@@ -477,10 +477,7 @@ class Config:
                 propagate=self.global_config.logging.propagate
             )
             
-            # Setup logging with validated config
-            from src.core.logging import setup_logging
-            setup_logging(log_config)
-            
+            # Initialize logging but don't setup yet
             return log_config
             
         except Exception as e:

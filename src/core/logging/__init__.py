@@ -4,6 +4,7 @@ from .base import LogManager, Logger, get_logger
 from .metrics import MetricsLogger, TrainingMetrics, log_metrics
 from .wandb import WandbLogger
 from .utils import EnhancedFormatter, create_enhanced_logger
+from .logging import setup_logging
 
 __all__ = [
     "LogConfig",
@@ -15,5 +16,6 @@ __all__ = [
     "log_metrics",
     "WandbLogger",
     "EnhancedFormatter",
-    "create_enhanced_logger"
+    "create_enhanced_logger",
+    "setup_logging"
 ]

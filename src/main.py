@@ -437,6 +437,10 @@ def main():
     print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
     
+    # Initialize basic logging first
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
     # Check and configure system limits
     check_system_limits()
     
@@ -444,6 +448,19 @@ def main():
     try:
         args = parse_args()
         config = Config.from_yaml(args.config)
+        
+        # Now setup proper logging
+        from src.core.logging import setup_logging
+        logger, tensor_logger = setup_logging(
+            config=config.global_config.logging,
+            log_dir=config.global_config.logging.log_dir,
+            level=config.global_config.logging.file_level,
+            filename=config.global_config.logging.filename,
+            module_name="main",
+            capture_warnings=config.global_config.logging.capture_warnings,
+            propagate=config.global_config.logging.propagate,
+            console_level=config.global_config.logging.console_level
+        )
         
         with setup_environment(args):
             device = setup_device_and_logging(config)
