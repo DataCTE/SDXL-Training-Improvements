@@ -1,8 +1,8 @@
 """Custom exceptions for preprocessing pipeline with detailed error context."""
 from typing import Optional, Any, Dict
-from src.core.logging.logging import setup_logging
+from src.core.logging import get_logger, LogConfig
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 class PreprocessingError(Exception):
     """Base exception for preprocessing errors with enhanced context tracking."""

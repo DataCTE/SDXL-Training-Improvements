@@ -17,7 +17,7 @@ from .distributed import (
     get_world_size,
     reduce_dict
 )
-from .logging import setup_logging, cleanup_logging, WandbLogger
+from .logging import get_logger, LogConfig, LogManager, Logger, WandbLogger
 
 __all__ = [
     "DataType",
@@ -38,7 +38,9 @@ __all__ = [
     "is_main_process",
     "get_world_size",
     "reduce_dict",
-    "setup_logging",
-    "cleanup_logging",
+    "get_logger",
+    "LogConfig", 
+    "LogManager",
+    "Logger",
     "WandbLogger"
 ]
