@@ -28,6 +28,7 @@ class ValidationLogger:
         # Create validation directory
         self.validation_dir = output_dir / "validation"
         self.validation_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Created validation directory: {self.validation_dir}")
         
     @torch.no_grad()
     def run_validation(

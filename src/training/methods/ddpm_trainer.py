@@ -153,12 +153,12 @@ class DDPMTrainer(TrainingMethod):
             }
             
             # Log the full error report
-            logger.error(
-                "Loss computation failed with shape history:",
+            self.logger.error(
+                "Loss computation failed",
+                exc_info=True,
                 extra={
                     "error_report": error_report,
-                    "shape_logs": self._shape_logs,
-                    "stack_info": True
+                    "shape_logs": self._shape_logs
                 }
             )
             

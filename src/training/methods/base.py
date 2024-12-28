@@ -7,22 +7,16 @@ from torch import Tensor
 from diffusers import DDPMScheduler
 from src.data.config import Config
 from src.training.schedulers import configure_noise_scheduler
-from src.core.logging import get_logger, LogConfig, setup_logging
+from src.core.logging import get_logger, LogConfig
 
 class TrainingMethodMeta(ABCMeta):
     _methods: Dict[str, Type['TrainingMethod']] = {}
-    _logger = None
+    _logger = get_logger("training.methods")
 
     def __new__(mcs, name, bases, attrs):
         cls = super().__new__(mcs, name, bases, attrs)
         if 'name' in attrs:
             mcs._methods[attrs['name']] = cls
-            # Setup method-specific logger
-            if not mcs._logger:
-                mcs._logger, _ = setup_logging(
-                    module_name="training.methods",
-                    console_level="DEBUG"
-                )
             mcs._logger.debug(f"Registered training method: {attrs['name']}")
         return cls
     
@@ -44,8 +38,8 @@ class TrainingMethod(metaclass=TrainingMethodMeta):
     name: str = None
     
     def __init__(self, unet: torch.nn.Module, config: Config):
-        self.logger = get_logger(f"training.methods.{self.name}", LogConfig.from_config(config))
-        self.tensor_logger = get_logger(f"training.methods.{self.name}.tensor", LogConfig.from_config(config))
+        self.logger = get_logger(f"training.methods.{self.name}")
+        self.tensor_logger = get_logger(f"training.methods.{self.name}.tensor")
         
         self.logger.debug(f"Initializing {self.__class__.__name__}")
         self.logger.debug(f"CUDA settings: benchmark={torch.backends.cudnn.benchmark}, "

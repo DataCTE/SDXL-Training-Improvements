@@ -7,7 +7,7 @@ from src.models.sdxl import StableDiffusionXLModel
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 
 # Create logger with default config
-logger = get_logger(__name__, LogConfig())
+logger = get_logger(__name__)
 
 def create_trainer(
     config: Config,
