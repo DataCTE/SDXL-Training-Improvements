@@ -109,9 +109,9 @@ class DDPMTrainer(TrainingMethod):
             # Log initial batch shapes
             self.tensor_logger.log_checkpoint("Initial Batch", batch)
 
-            # Extract latents with shape logging
+            # Extract and validate latents with shape logging
             if "latent" in batch:
-                self.tensor_logger.log_checkpoint("Latent Extraction", {"latent": batch["latent"]})
+                self.tensor_logger.log_checkpoint("Initial Latent Data", {"latent": batch["latent"]})
                 if "model_input" in batch["latent"]:
                     latents = batch["latent"]["model_input"]
                 elif "latent" in batch["latent"] and "model_input" in batch["latent"]["latent"]:
@@ -122,12 +122,36 @@ class DDPMTrainer(TrainingMethod):
                 latents = batch.get("model_input")
                 if latents is None:
                     raise KeyError("No latent data found in batch")
+                
+            self.tensor_logger.log_checkpoint("Processed Latents", {
+                "latents": latents,
+                "shape": latents.shape,
+                "dtype": str(latents.dtype),
+                "device": str(latents.device),
+                "stats": {
+                    "min": float(latents.min().item()),
+                    "max": float(latents.max().item()),
+                    "mean": float(latents.mean().item()),
+                    "std": float(latents.std().item())
+                }
+            })
             
             self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
-            # Generate noise with shape logging
+            # Generate and validate noise with shape logging
             noise = torch.randn_like(latents, generator=generator)
-            self.tensor_logger.log_checkpoint("Generated Noise", {"noise": noise})
+            self.tensor_logger.log_checkpoint("Generated Noise", {
+                "noise": noise,
+                "shape": noise.shape,
+                "dtype": str(noise.dtype),
+                "device": str(noise.device),
+                "stats": {
+                    "min": float(noise.min().item()),
+                    "max": float(noise.max().item()),
+                    "mean": float(noise.mean().item()),
+                    "std": float(noise.std().item())
+                }
+            })
 
             # Generate timesteps
             timesteps = torch.randint(
