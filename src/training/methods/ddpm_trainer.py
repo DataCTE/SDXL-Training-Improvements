@@ -224,8 +224,15 @@ class DDPMTrainer(TrainingMethod):
             ).sample
             self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
 
-            # Compute loss
-            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+            # Compute loss with optional weighting
+            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none")
+            
+            # Apply loss weights if provided
+            if "loss_weights" in batch:
+                loss = loss * batch["loss_weights"].view(-1, 1, 1, 1)
+            
+            # Take mean for final loss
+            loss = loss.mean()
             
             return {"loss": loss}
 
