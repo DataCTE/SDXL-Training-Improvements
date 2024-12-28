@@ -12,6 +12,7 @@ import threading
 import torch
 from dataclasses import dataclass
 from src.data.utils.paths import convert_windows_path
+from src.core.logging.config import LogConfig as LoggingConfig
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
