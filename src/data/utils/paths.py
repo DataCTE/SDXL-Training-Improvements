@@ -4,9 +4,9 @@ import platform
 import re
 from pathlib import Path, PureWindowsPath
 from typing import Union, List, Optional
-from src.core.logging.logging import setup_logging
+from src.core.logging.utils import create_basic_logger
 
-logger = setup_logging(__name__)
+logger = create_basic_logger(__name__)
 
 def is_wsl() -> bool:
     """Check if running in Windows Subsystem for Linux."""

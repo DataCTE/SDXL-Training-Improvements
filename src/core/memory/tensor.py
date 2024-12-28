@@ -7,14 +7,9 @@ from dataclasses import dataclass
 import packaging
 import torch
 import accelerate
-from src.core.logging.logging import setup_logging
+from src.core.logging.utils import create_basic_logger
 
-logger = setup_logging(
-    module_name=__name__,
-    level="INFO",
-    console_level="INFO",  # Add explicit console level
-    log_dir="outputs/logs"
-)
+logger = create_basic_logger(__name__)
 
 # Initialize accelerator and device
 accelerator = accelerate.Accelerator()
