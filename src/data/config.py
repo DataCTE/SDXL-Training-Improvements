@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import yaml
 import logging
-from src.core.logging.logging import setup_logging, LoggingConfig as CoreLoggingConfig
+from src.core.logging.base import LogConfig
+from src.core.logging.logging import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class GlobalConfig:
         wandb_tags: Optional[List[str]] = None
         wandb_notes: Optional[str] = None
         
-        def to_core_config(self) -> 'LogConfig':
+        def to_core_config(self) -> LogConfig:
             """Convert to core logging config."""
             from src.core.logging.base import LogConfig
             return LogConfig(
@@ -111,7 +112,7 @@ class GlobalConfig:
         
     image: ImageConfig = field(default_factory=ImageConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    logging: GlobalConfig.LoggingConfig = field(default_factory=GlobalConfig.LoggingConfig)
     seed: Optional[int] = None
     output_dir: str = "outputs"
 
