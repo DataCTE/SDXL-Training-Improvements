@@ -5,6 +5,7 @@ import traceback
 
 import torch
 import torch.backends.cudnn
+import torch.nn as nn  # <--- for up-projection
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -109,14 +110,18 @@ class SDXLTrainer:
             batch_size=train_dataloader.batch_size,
             shuffle=True,
             num_workers=0,  # Use single worker
-            pin_memory=False,  # Disable pinned memory
-            persistent_workers=False,  # Disable persistent workers
+            pin_memory=False,
+            persistent_workers=False,
             drop_last=True,
             collate_fn=train_dataloader.dataset.collate_fn if hasattr(train_dataloader.dataset, 'collate_fn') else None
         )
         self.training_method = training_method
         self.device = device
         self.wandb_logger = wandb_logger
+
+        # Up-projection for embeddings (768 → 1280)
+        # We keep it in the unet’s device & dtype, so weights are bfloat16
+        self.up_proj = nn.Linear(768, 1280).to(self.unet.device, self.unet.dtype)
 
         base_dtype = DataType.from_str(config.model.dtype)
         fallback_dtype = DataType.from_str(config.model.fallback_dtype)
@@ -189,6 +194,22 @@ class SDXLTrainer:
             # Validate tensors
             self._validate_batch_sizes(batch)
             
+            # Apply up-projection if text encoder yields 768 dims
+            # For SDXL: usually prompt_embeds is [batch, 2, 77, 768], pooled_prompt_embeds is [batch, 2, 768]
+            # Convert them to the up_proj layer’s dtype & device before calling up_proj
+            if "prompt_embeds" in batch and isinstance(batch["prompt_embeds"], torch.Tensor):
+                emb = batch["prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
+                # shape: [batch, 2, 77, 768], take emb[:, 0]
+                batch_size = emb.shape[0]
+                batch["prompt_embeds"] = self.up_proj(
+                    emb[:, 0].reshape(-1, 768)
+                ).reshape(batch_size, 77, 1280)
+            
+            if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
+                p_emb = batch["pooled_prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
+                # shape: [batch, 2, 768], take p_emb[:, 0]
+                batch["pooled_prompt_embeds"] = self.up_proj(p_emb[:, 0])
+
             # Compute loss
             loss_dict = self.training_method.compute_loss(batch, generator=generator)
             loss = loss_dict["loss"] / self.gradient_accumulation_steps
@@ -204,9 +225,13 @@ class SDXLTrainer:
             
             metrics = {
                 "loss": loss_dict["loss"].item(),
-                "learning_rate": self.optimizer.param_groups[0]["lr"],
-                "batch_size": batch["latent"]["model_input"].shape[0] if "latent" in batch else batch["model_input"].shape[0]
+                "learning_rate": self.optimizer.param_groups[0]["lr"]
             }
+            # For logging batch_size, handle both new & legacy
+            if "latent" in batch and "model_input" in batch["latent"]:
+                metrics["batch_size"] = batch["latent"]["model_input"].shape[0]
+            else:
+                metrics["batch_size"] = batch["model_input"].shape[0] if "model_input" in batch else 0
             
             # Optimizer step if needed
             if accumulation_step == self.gradient_accumulation_steps - 1:
@@ -446,11 +471,11 @@ class SDXLTrainer:
         
         # Update tensor keys to match cache format
         tensor_keys = [
-            "latent",  # New cache format
-            "embeddings",  # New cache format
-            "model_input",  # Legacy format
-            "prompt_embeds",  # Legacy format
-            "pooled_prompt_embeds"  # Legacy format
+            "latent",
+            "embeddings",
+            "model_input",
+            "prompt_embeds",
+            "pooled_prompt_embeds"
         ]
         
         for i in range(self.gradient_accumulation_steps):
