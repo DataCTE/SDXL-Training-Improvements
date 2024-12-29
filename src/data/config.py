@@ -184,6 +184,7 @@ class ModelConfig:
     dtype: str = "bfloat16"
     fallback_dtype: str = "float32"
     prediction_type: str = "v_prediction"
+    resolution: int = 1024
     # Component-specific dtypes (fallback to main dtype if not specified)
     unet_dtype: Optional[str] = None
     prior_dtype: Optional[str] = None

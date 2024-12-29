@@ -145,19 +145,9 @@ class DDPMTrainer(TrainingMethod):
             
             # Process latents
             latent_dict = batch.get("latent", None)
-
             if isinstance(latent_dict, dict):
-                # Log initial batch state
-                self.tensor_logger.log_checkpoint("Initial Batch", {
-                    "latent": latent_dict,
-                    "prompt_embeds": batch.get("prompt_embeds"),
-                    "pooled_prompt_embeds": batch.get("pooled_prompt_embeds")
-                })
-
-                # Check "model_input" directly in latent_dict
                 if "model_input" in latent_dict:
                     latents = latent_dict["model_input"]
-                # Or check if there's a nested "latent" dict
                 elif "latent" in latent_dict and latent_dict["latent"] is not None and isinstance(latent_dict["latent"], dict):
                     if "model_input" in latent_dict["latent"]:
                         latents = latent_dict["latent"]["model_input"]
@@ -165,16 +155,24 @@ class DDPMTrainer(TrainingMethod):
                         raise ValueError("Could not find 'model_input' in 'latent' dictionary")
                 else:
                     raise ValueError("Could not find model_input in latent data")
-
-                self.tensor_logger.log_checkpoint("Initial Latent Data", {
-                    "latent.model_input": latents,
-                    "latent.latent": latent_dict.get("latent")
-                })
             else:
-                # If 'latent' is not a dict, fallback to top-level "model_input"
                 latents = batch.get("model_input")
                 if latents is None:
                     raise KeyError("No latent data found in batch")
+
+            # Move latents to correct device and dtype
+            latents = latents.to(device=self.unet.device, dtype=self.unet.dtype)
+            
+            # Remove extra dimensions - latents should be [batch_size, channels, height, width]
+            if latents.dim() == 5:
+                # If shape is [batch_size, 1, channels, height, width]
+                latents = latents.squeeze(1)
+            
+            # Validate latent dimensions
+            if latents.dim() != 4:
+                raise ValueError(f"Latents must be 4D [batch_size, channels, height, width], got shape {latents.shape}")
+
+            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
             # Process embeddings once
             prompt_embeds = batch.get("prompt_embeds", None)

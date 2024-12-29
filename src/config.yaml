@@ -92,6 +92,7 @@ model:
   dtype: "bfloat16"
   fallback_dtype: "float32"
   prediction_type: "v_prediction"
+  resolution: 1024  # Add this line for SDXL's default resolution
 
 training:
   batch_size: 4
