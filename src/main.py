@@ -248,7 +248,7 @@ def setup_training(
     device: torch.device,
     image_paths: List[str],
     captions: List[str]
-) -> tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
+) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger], TrainingMethod]:
     try:
         if torch.cuda.is_available():
             logger.info(f"Initial CUDA memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
@@ -353,6 +353,11 @@ def setup_training(
             logger.error(f"Failed to create dataloader: {str(e)}", exc_info=True)
             raise
         
+        logger.info("Initializing training method...")
+        # Instantiate the training method
+        training_method_cls = TrainingMethod.get_method(config.training.method)
+        training_method = training_method_cls(model.unet, config)
+        
         logger.info("Setting up optimizer...")
         try:
             optimizer_kwargs = {
@@ -364,7 +369,10 @@ def setup_training(
 
             # Select optimizer based on config and hardware capabilities
             if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                optimizer = AdamWBF16(model.unet.parameters(), **optimizer_kwargs)
+                optimizer = AdamWBF16(
+                    list(model.unet.parameters()) + list(training_method.parameters()),
+                    **optimizer_kwargs
+                )
                 logger.info("Using BF16-optimized AdamW optimizer")
             elif config.training.method == "flow_matching":
                 optimizer = SOAP(
@@ -383,7 +391,10 @@ def setup_training(
                 )
                 logger.info("Using Schedule-free AdamW with Kahan summation")
             else:
-                optimizer = torch.optim.AdamW(model.unet.parameters(), **optimizer_kwargs)
+                optimizer = torch.optim.AdamW(
+                    list(model.unet.parameters()) + list(training_method.parameters()),
+                    **optimizer_kwargs
+                )
                 logger.info("Using standard AdamW optimizer")
         except Exception as e:
             logger.error(f"Failed to setup optimizer: {str(e)}", exc_info=True)
@@ -431,7 +442,7 @@ def setup_training(
                 logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
                 wandb_logger = None
 
-        return train_dataloader, optimizer, wandb_logger
+        return train_dataloader, optimizer, wandb_logger, training_method
 
     except TimeoutError:
         logger.error("Setup timed out after 5 minutes", exc_info=True)
@@ -529,7 +540,7 @@ def main():
             image_paths, captions = load_training_data(config)
             
             logger.info("Setting up training...")
-            train_dataloader, optimizer, wandb_logger = setup_training(
+            train_dataloader, optimizer, wandb_logger, training_method = setup_training(
                 config=config,
                 model=model,  # Fixed: was using undefined 'models'
                 device=device,
@@ -543,6 +554,7 @@ def main():
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,
                 device=device,
+                training_method=training_method,
                 wandb_logger=wandb_logger
             )
             

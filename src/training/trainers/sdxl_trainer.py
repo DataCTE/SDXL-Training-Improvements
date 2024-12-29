@@ -40,39 +40,12 @@ class SDXLTrainer:
     @classmethod
     def create(cls, config: Config, model: StableDiffusionXLModel, 
                optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
-               device: Union[str, torch.device], wandb_logger: Optional[WandbLogger] = None,
+               device: Union[str, torch.device], training_method: TrainingMethod,
+               wandb_logger: Optional[WandbLogger] = None,
                validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
         logger = get_logger("training.sdxl")
         logger.debug("Creating SDXLTrainer instance")
         
-        # Extract method from training configuration
-        method = config.training.method
-        if not isinstance(method, str):
-            logger.error(f"Invalid training method type: {type(method)}")
-            raise ValueError(f"Training method must be a string, got {type(method)}")
-            
-        method = method.lower()
-        logger.debug(f"Using training method: {method}")
-        
-        trainer_cls = TrainingMethod.get_method(method)
-        logger.debug(f"Selected trainer class: {trainer_cls.__name__}")
-        
-        try:
-            training_method = trainer_cls(unet=model.unet, config=config)
-            logger.debug("Training method initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize training method: {str(e)}", exc_info=True)
-            logger.error(
-                "Error initializing training method",
-                extra={
-                    'error_type': type(e).__name__,
-                    'error_msg': str(e),
-                    'method_name': method,
-                    'config': str(config)
-                },
-                exc_info=True
-            )
-            raise
         return cls(
             config=config,
             model=model,
