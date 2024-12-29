@@ -114,7 +114,7 @@ training:
     timestep_spacing: "uniform" #options are "leading", "trailing", "uniform"
     rescale_betas_zero_snr: true
   optimizer:
-    type: "AdamWScheduleFreeKahan"  # Choose from "AdamWBF16", "AdamWScheduleFreeKahan", or "SOAP"
+    type: "AdamWBF16"  # Choose from "AdamWBF16", "AdamWScheduleFreeKahan", or "SOAP"
 
 data:
   # Supports both Windows and Unix paths

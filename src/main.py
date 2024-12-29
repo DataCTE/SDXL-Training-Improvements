@@ -81,9 +81,6 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     # First validate the logging config
     log_config = config.validate_logging_config()
     
-    # Initialize root logger first
-    root_logger = get_logger("root", log_config)
-    
     # Then create main logger with enhanced formatting
     logger = create_enhanced_logger(
         "main",
@@ -529,6 +526,7 @@ def main():
             image_paths, captions = load_training_data(config)
             
             logger.info("Setting up training...")
+        
         train_dataloader, optimizer, wandb_logger, training_method = setup_training(
             config=config,
             model=model,
