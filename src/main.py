@@ -546,12 +546,12 @@ def main():
             training_method=training_method,
             wandb_logger=wandb_logger
         )
-            
-            logger.info("Starting training...")
-            trainer.train()
-            
-            if is_main_process():
-                logger.info("Training complete!")
+        
+        logger.info("Starting training...")
+        trainer.train()
+        
+        if is_main_process():
+            logger.info("Training complete!")
     except Exception as e:
         error_context = {
             'error_type': type(e).__name__,
