@@ -2,12 +2,14 @@
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 import torch
 import torch.backends.cudnn
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
+from PIL import Image
+import numpy as np
 
 # Force speed optimizations
 torch.backends.cudnn.benchmark = True
@@ -114,6 +116,72 @@ class AspectBucketDataset(Dataset):
             logger.error("Failed to initialize dataset", exc_info=True)
             raise
 
+    def _process_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
+        """Process a single image according to configuration settings.
+        
+        Args:
+            image_path: Path to image file
+            
+        Returns:
+            Optional[Dict[str, Any]]: Processed image data or None if processing fails
+        """
+        try:
+            # Load and validate image
+            img = Image.open(image_path).convert('RGB')
+            w, h = img.size
+            
+            # Calculate aspect ratio
+            aspect_ratio = w / h
+            
+            # Check if aspect ratio is within bounds
+            if aspect_ratio > self.config.global_config.image.max_aspect_ratio or \
+               aspect_ratio < (1 / self.config.global_config.image.max_aspect_ratio):
+                logger.warning(f"Skipping image {image_path} - aspect ratio {aspect_ratio:.2f} exceeds bounds")
+                return None
+            
+            # Find best matching bucket dimensions
+            target_w, target_h = self.preprocessing_pipeline.get_aspect_buckets(self.config)[0]
+            min_diff = float('inf')
+            
+            for bucket_w, bucket_h in self.preprocessing_pipeline.get_aspect_buckets(self.config):
+                bucket_ratio = bucket_w / bucket_h
+                diff = abs(aspect_ratio - bucket_ratio)
+                if diff < min_diff:
+                    min_diff = diff
+                    target_w, target_h = bucket_w, bucket_h
+            
+            # Calculate resize dimensions while preserving aspect ratio
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            # Resize image
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            # Center crop if needed
+            if new_w != target_w or new_h != target_h:
+                left = (new_w - target_w) // 2
+                top = (new_h - target_h) // 2
+                right = left + target_w
+                bottom = top + target_h
+                img = img.crop((left, top, right, bottom))
+            
+            # Convert to tensor and normalize
+            img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
+            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
+            
+            return {
+                "image": img_tensor,
+                "original_size": (w, h),
+                "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0),
+                "target_size": (target_w, target_h),
+                "bucket_dims": (target_w, target_h)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to process image {image_path}: {e}")
+            return None
+
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Get a single item from the dataset with robust error handling."""
         try:
@@ -121,53 +189,45 @@ class AspectBucketDataset(Dataset):
             caption = self.captions[idx]
 
             # Try to load from cache first
-            cached_data = self.cache_manager.load_latents(image_path)
-            if cached_data is not None:
-                self.stats.cache_hits += 1
-                result = {
-                    "latents": cached_data["latents"],
-                    "metadata": cached_data["metadata"],
-                    "text": caption
-                }
-                
-                # Add tag weight if enabled
-                if self.tag_weighter:
-                    result["tag_weight"] = self.tag_weighter.get_caption_weight(caption)
-                    
-                return result
+            if self.config.global_config.cache.use_cache:
+                cached_data = self.cache_manager.load_latents(image_path)
+                if cached_data is not None:
+                    self.stats.cache_hits += 1
+                    return cached_data
 
             self.stats.cache_misses += 1
 
-            # Process image if not in cache
-            processed = self.preprocessing_pipeline._process_image(image_path)
+            # Process image
+            processed = self._process_image(image_path)
             if processed is None:
-                raise ValueError(f"Failed to process image {image_path}")
+                # Skip to next image if processing fails
+                return self.__getitem__((idx + 1) % len(self))
 
             # Get text embeddings
             encoded_text = self.preprocessing_pipeline.encode_prompt(
                 batch={"text": [caption]},
-                proportion_empty_prompts=self.config.data.proportion_empty_prompts
+                proportion_empty_prompts=0.0
             )
 
             result = {
-                "latents": processed["model_input"],
-                "metadata": processed["metadata"],
-                "text": caption,
+                "pixel_values": processed["image"],
+                "original_size": processed["original_size"],
+                "crop_coords": processed["crop_coords"],
+                "target_size": processed["target_size"],
                 "prompt_embeds": encoded_text["prompt_embeds"],
-                "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
+                "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
+                "text": caption
             }
 
-            # Add tag weight if enabled
-            if self.tag_weighter:
-                result["tag_weight"] = self.tag_weighter.get_caption_weight(caption)
-
-            # Cache the processed data
+            # Cache if enabled
             if self.config.global_config.cache.use_cache:
                 self.cache_manager.save_latents(
-                    latents=processed["model_input"],
+                    latents=result["pixel_values"],
                     original_path=image_path,
                     metadata={
-                        **processed["metadata"],
+                        "original_size": result["original_size"],
+                        "crop_coords": result["crop_coords"],
+                        "target_size": result["target_size"],
                         "text_embeddings": {
                             "prompt_embeds": encoded_text["prompt_embeds"],
                             "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
