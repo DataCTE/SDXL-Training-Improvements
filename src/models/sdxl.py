@@ -52,6 +52,14 @@ class StableDiffusionXL:
         
         instance.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
+        # Add direct access to components for compatibility
+        instance.vae = instance.vae_encoder.vae
+        instance.text_encoder_1 = instance.text_encoders[0]
+        instance.text_encoder_2 = instance.text_encoders[1]
+        instance.tokenizer_1 = instance.tokenizers[0]
+        instance.tokenizer_2 = instance.tokenizers[1]
+        instance.scheduler = pipeline.scheduler
+        
         logger.info(f"Initialized {model_type.value} model on {device}")
         return instance
 
