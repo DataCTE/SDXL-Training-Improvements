@@ -112,7 +112,7 @@ class AspectBucketDataset(Dataset):
                 'tag_weighting_enabled': self.tag_weighter is not None
             })
 
-        except Exception as e:
+            except Exception as e:
             logger.error("Failed to initialize dataset", exc_info=True)
             raise
 
@@ -188,12 +188,18 @@ class AspectBucketDataset(Dataset):
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
 
+            logger.debug(f"Processing item at index {idx}: {image_path}")
+
             # Try to load from cache first
             if self.config.global_config.cache.use_cache:
                 cached_data = self.cache_manager.load_latents(image_path)
                 if cached_data is not None:
                     self.stats.cache_hits += 1
+                    logger.debug(f"Cache hit for {image_path}")
                     return cached_data
+
+                self.stats.cache_misses += 1
+                logger.debug(f"Cache miss for {image_path}")
 
             self.stats.cache_misses += 1
 
@@ -242,10 +248,35 @@ class AspectBucketDataset(Dataset):
                     metadata=metadata
                 )
 
+            logger.debug(f"Encoded text for {image_path}")
+
+            # Cache if enabled
+            if self.config.global_config.cache.use_cache:
+                # Save tensors and metadata separately
+                metadata = {
+                    "original_size": processed["original_size"],
+                    "crop_coords": processed["crop_coords"],
+                    "target_size": processed["target_size"],
+                    "text": caption
+                }
+
+                tensors = {
+                    "pixel_values": result["pixel_values"].cpu(),
+                    "prompt_embeds": encoded_text["prompt_embeds"].cpu(),
+                    "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"].cpu()
+                }
+
+                self.cache_manager.save_latents(
+                    tensors=tensors,
+                    original_path=image_path,
+                    metadata=metadata
+                )
+                logger.debug(f"Cached data for {image_path}")
+
             return result
 
         except Exception as e:
-            logger.error(f"Error processing dataset item {idx}", exc_info=True)
+            logger.error(f"Error processing dataset item {idx}: {e}", exc_info=True)
             # Skip this item
             return None
 
@@ -263,9 +294,12 @@ class AspectBucketDataset(Dataset):
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents for all images."""
-        logger.info("Starting latent precomputation...")
+        logger.info(f"Precomputing completed. Total images: {total_images}, Skipped images: {skipped_images}")
         
-        for idx in tqdm(range(len(self)), desc="Precomputing latents"):
+        total_images = len(self)
+        skipped_images = 0
+
+        for idx in tqdm(range(total_images), desc="Precomputing latents"):
             try:
                 item = self.__getitem__(idx)
                 if item is None:
@@ -273,7 +307,11 @@ class AspectBucketDataset(Dataset):
                     continue
             except Exception as e:
                 logger.error(f"Failed to precompute latents for index {idx}", exc_info=True)
+                skipped_images += 1
+                logger.debug(f"Skipped item at index {idx}")
                 continue
+            else:
+                logger.debug(f"Successfully processed item at index {idx}")
 
     def __len__(self) -> int:
         return len(self.image_paths)
