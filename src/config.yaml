@@ -74,10 +74,6 @@ global_config:
       - [1024, 1024]   # Square
       - [1024, 1536]   # Portrait
       - [1536, 1024]   # Landscape
-      - [1024, 1536]   # Portrait
-      - [1536, 1024]   # Landscape
-      - [1024, 1536]   # Portrait
-      - [1536, 1024]   # Landscape
     max_aspect_ratio: 2.0  # Maximum allowed aspect ratio deviation
     target_size: [1024, 1024]  # Target image size for training
     max_size: [1536, 1536]    # Maximum allowed image dimensions
