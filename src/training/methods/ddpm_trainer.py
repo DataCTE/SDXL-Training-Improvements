@@ -28,6 +28,15 @@ class DDPMTrainer(TrainingMethod):
         super().__init__(unet, config)
         self.logger.debug("Initializing DDPMTrainer")
 
+        # Validate noise scheduler initialization
+        if not hasattr(self, 'noise_scheduler'):
+            raise ValueError("noise_scheduler not initialized by parent class")
+        
+        if self.noise_scheduler is None:
+            raise ValueError("noise_scheduler is None")
+
+        self.logger.debug(f"Noise scheduler type: {type(self.noise_scheduler)}")
+
         # Create dedicated tensor logger for shape/diagnostics
         self.tensor_logger = TensorLogger(self.logger)
         self._shape_logs = []
@@ -167,6 +176,22 @@ class DDPMTrainer(TrainingMethod):
                 device=latents.device
             )
             self.tensor_logger.log_checkpoint("Timesteps", {"timesteps": timesteps})
+
+            # Validate noise scheduler state
+            if self.noise_scheduler is None:
+                raise ValueError("noise_scheduler is not initialized")
+
+            if not hasattr(self.noise_scheduler, 'alphas_cumprod'):
+                raise ValueError("noise_scheduler missing required attribute 'alphas_cumprod'")
+
+            if self.noise_scheduler.alphas_cumprod is None:
+                raise ValueError("noise_scheduler.alphas_cumprod is None")
+
+            # Log noise scheduler state for debugging
+            self.tensor_logger.log_checkpoint("Noise Scheduler State", {
+                "alphas_cumprod": self.noise_scheduler.alphas_cumprod,
+                "timesteps": timesteps,
+            })
 
             # ----------------------------------------------------------
             # 3. Add noise to latents (DDPM forward noising)
