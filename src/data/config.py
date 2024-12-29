@@ -26,7 +26,7 @@ class OptimizerConfig:
     beta1: float = 0.9
     beta2: float = 0.999
     epsilon: float = 1e-8
-    optimizer_type: str = "adamw"  # or "adamw_bf16", "adamw_8bit", "lion", "prodigy"
+    optimizer_type: str = "adamw_bf16"  # or "adamw", "adamw_bf16", "adamw_schedule_free_kahan", "SOAP"
 
 @dataclass
 class SchedulerConfig:

@@ -116,102 +116,25 @@ class AspectBucketDataset(Dataset):
             logger.error("Failed to initialize dataset", exc_info=True)
             raise
 
-    def _process_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
-        """Process a single image according to configuration settings.
-        
-        Args:
-            image_path: Path to image file
-            
-        Returns:
-            Optional[Dict[str, Any]]: Processed image data or None if processing fails
-        """
-        try:
-            # Load and validate image
-            img = Image.open(image_path).convert('RGB')
-            w, h = img.size
-            
-            # Calculate aspect ratio
-            aspect_ratio = w / h
-            
-            # Check if aspect ratio is within bounds
-            if aspect_ratio > self.config.global_config.image.max_aspect_ratio or \
-               aspect_ratio < (1 / self.config.global_config.image.max_aspect_ratio):
-                logger.warning(f"Skipping image {image_path} - aspect ratio {aspect_ratio:.2f} exceeds bounds")
-                return None
-            
-            # Find best matching bucket dimensions
-            target_w, target_h = self.preprocessing_pipeline.get_aspect_buckets(self.config)[0]
-            min_diff = float('inf')
-            bucket_idx = 0
-            
-            for idx, (bucket_w, bucket_h) in enumerate(self.preprocessing_pipeline.get_aspect_buckets(self.config)):
-                bucket_ratio = bucket_w / bucket_h
-                diff = abs(aspect_ratio - bucket_ratio)
-                if diff < min_diff:
-                    min_diff = diff
-                    target_w, target_h = bucket_w, bucket_h
-                    bucket_idx = idx
-            
-            # Calculate resize dimensions while preserving aspect ratio
-            scale = min(target_w / w, target_h / h)
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            
-            # Resize image
-            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            
-            # Center crop if needed
-            if new_w != target_w or new_h != target_h:
-                left = (new_w - target_w) // 2
-                top = (new_h - target_h) // 2
-                right = left + target_w
-                bottom = top + target_h
-                img = img.crop((left, top, right, bottom))
-            
-            # Convert to tensor and normalize
-            img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
-            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
-            
-            # Ensure tensor is contiguous
-            img_tensor = img_tensor.contiguous()
-            if not img_tensor.is_floating_point():
-                img_tensor = img_tensor.float()
-            
-            # Return in the format expected by the pipeline
-            return {
-                "model_input": img_tensor,
-                "metadata": {
-                    "original_size": (w, h),
-                    "bucket_size": (target_w, target_h),
-                    "bucket_index": bucket_idx,
-                    "path": str(image_path),
-                    "timestamp": time.time(),
-                    "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to process image {image_path}: {e}")
-            return None
-
     def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
         """Get a single item from the dataset with robust error handling."""
         try:
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
 
-            # Process image
-            processed = self._process_image(image_path)
+            # Try cache first if enabled
+            if self.config.global_config.cache.use_cache:
+                cached_data = self.cache_manager.load_latents(image_path)
+                if cached_data is not None:
+                    return cached_data
+
+            # Process single image using pipeline
+            processed = self.preprocessing_pipeline._process_single_image(
+                image_path=image_path,
+                config=self.config
+            )
             if processed is None:
                 return None
-
-            # Here we need to convert from pipeline format to dataset format
-            processed_image = {
-                "pixel_values": processed["model_input"],  # Changed from processed["image"]
-                "original_size": processed["metadata"]["original_size"],
-                "crop_coords": processed["metadata"]["crop_coords"],
-                "target_size": processed["metadata"]["bucket_size"],  # Changed from target_size
-            }
 
             # Get text embeddings
             encoded_text = self.preprocessing_pipeline.encode_prompt(
@@ -219,12 +142,33 @@ class AspectBucketDataset(Dataset):
                 proportion_empty_prompts=0.0
             )
 
+            # Combine results
             result = {
-                **processed_image,
+                "pixel_values": processed["model_input"],
+                "original_size": processed["original_size"],
+                "crop_coords": processed["crop_coords"],
+                "target_size": processed["bucket_size"],
                 "prompt_embeds": encoded_text["prompt_embeds"],
                 "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
                 "text": caption
             }
+
+            # Cache if enabled
+            if self.config.global_config.cache.use_cache:
+                self.cache_manager.save_latents(
+                    tensors={
+                        "model_input": processed["model_input"],
+                        "prompt_embeds": encoded_text["prompt_embeds"],
+                        "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
+                    },
+                    original_path=image_path,
+                    metadata={
+                        "original_size": processed["original_size"],
+                        "crop_coords": processed["crop_coords"],
+                        "target_size": processed["bucket_size"],
+                        "text": caption
+                    }
+                )
 
             return result
 

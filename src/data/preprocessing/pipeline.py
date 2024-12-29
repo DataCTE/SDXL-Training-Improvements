@@ -407,3 +407,80 @@ class PreprocessingPipeline:
         except Exception as e:
             logger.error("Failed to encode prompt batch", exc_info=True)
             raise
+
+    def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
+        """Process a single image with aspect ratio bucketing.
+        
+        Args:
+            image_path: Path to image file
+            config: Configuration object
+            
+        Returns:
+            Optional[Dict[str, Any]]: Processed image data or None if processing fails
+        """
+        try:
+            # Load and validate image
+            img = Image.open(image_path).convert('RGB')
+            w, h = img.size
+            
+            # Calculate aspect ratio
+            aspect_ratio = w / h
+            
+            # Check if aspect ratio is within bounds
+            if aspect_ratio > config.global_config.image.max_aspect_ratio or \
+               aspect_ratio < (1 / config.global_config.image.max_aspect_ratio):
+                logger.warning(f"Skipping image {image_path} - aspect ratio {aspect_ratio:.2f} exceeds bounds")
+                return None
+            
+            # Find best matching bucket dimensions
+            target_w, target_h = self.get_aspect_buckets(config)[0]
+            min_diff = float('inf')
+            bucket_idx = 0
+            
+            for idx, (bucket_w, bucket_h) in enumerate(self.get_aspect_buckets(config)):
+                bucket_ratio = bucket_w / bucket_h
+                diff = abs(aspect_ratio - bucket_ratio)
+                if diff < min_diff:
+                    min_diff = diff
+                    target_w, target_h = bucket_w, bucket_h
+                    bucket_idx = idx
+            
+            # Calculate resize dimensions while preserving aspect ratio
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            # Resize image
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            # Center crop if needed
+            if new_w != target_w or new_h != target_h:
+                left = (new_w - target_w) // 2
+                top = (new_h - target_h) // 2
+                right = left + target_w
+                bottom = top + target_h
+                img = img.crop((left, top, right, bottom))
+            
+            # Convert to tensor and normalize
+            img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
+            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
+            
+            # Ensure tensor is contiguous
+            img_tensor = img_tensor.contiguous()
+            if not img_tensor.is_floating_point():
+                img_tensor = img_tensor.float()
+            
+            # Return in the format expected by the pipeline
+            return {
+                "model_input": img_tensor,
+                "original_size": (w, h),
+                "bucket_size": (target_w, target_h),
+                "bucket_index": bucket_idx,
+                "path": str(image_path),
+                "timestamp": time.time(),
+                "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to process image {image_path}: {e}")
+            return None

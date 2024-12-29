@@ -17,7 +17,7 @@ optimizer:
   beta1: 0.9
   beta2: 0.999
   epsilon: 1.0e-8
-  optimizer_type: "adamw_bf16"  # Options: adamw, adamw_bf16, adamw_8bit, lion, prodigy
+  optimizer_type: "adamw_bf16"  # Options: adamw, adamw_bf16, adamw_schedule_free_kahan, SOAP
 
 # Training configuration
 training:

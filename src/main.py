@@ -54,6 +54,11 @@ from src.core.distributed import (
     cleanup_distributed,
     is_main_process
 )
+from src.training.optimizers import (
+    AdamWBF16,
+    AdamWScheduleFreeKahan,
+    SOAP
+)
 
 logger = get_logger(__name__)
 
@@ -257,9 +262,8 @@ def setup_training(
         optimizer_cls = {
             "adamw": torch.optim.AdamW,
             "adamw_bf16": AdamWBF16,
-            "adamw_8bit": AdamW8bit,
-            "lion": Lion,
-            "prodigy": Prodigy
+            "adamw_schedule_free_kahan": AdamWScheduleFreeKahan,
+            "SOAP": SOAP
         }[config.optimizer.optimizer_type]
         
         optimizer = optimizer_cls(
