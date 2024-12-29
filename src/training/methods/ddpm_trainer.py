@@ -195,6 +195,14 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
             pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
 
+            # Reshape prompt_embeds from [batch_size, 2, seq_length, embed_dim] to [batch_size, 2 * seq_length, embed_dim]
+            batch_size, num_encoders, seq_length, embed_dim = prompt_embeds.shape
+            prompt_embeds = prompt_embeds.view(batch_size, num_encoders * seq_length, embed_dim)
+            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D after reshaping, got shape {prompt_embeds.shape}"
+
+            # Reshape pooled_prompt_embeds from [batch_size, 2, embed_dim] to [batch_size, 2 * embed_dim]
+            pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size, -1)
+
            
 
 
