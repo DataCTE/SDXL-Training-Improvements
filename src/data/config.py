@@ -78,6 +78,10 @@ class ImageConfig:
         [1536, 1024],  # Landscape
     ])
     max_aspect_ratio: float = 2.0
+    target_size: List[int] = field(default_factory=lambda: [1024, 1024])
+    max_size: List[int] = field(default_factory=lambda: [1536, 1536])
+    min_size: List[int] = field(default_factory=lambda: [512, 512])
+    bucket_step: int = 64
 
 @dataclass
 class CacheConfig:
