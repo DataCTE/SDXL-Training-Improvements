@@ -18,8 +18,15 @@ class DDPMTrainer(TrainingMethod):
     def _prepare_time_ids(self, add_time_ids: torch.Tensor) -> torch.Tensor:
         """Reshape time IDs to match expected dimensions."""
         # add_time_ids comes in as (batch_size, 6)
-        # Need to expand to (batch_size, 1, 6) to match expected dimensions
-        return add_time_ids.unsqueeze(1)
+        # Need to reshape to (batch_size, 6, 1, 1)
+        if add_time_ids.ndim == 2:
+            add_time_ids = add_time_ids.unsqueeze(-1).unsqueeze(-1)
+        
+        # Ensure correct dtype
+        if hasattr(self.unet, 'dtype'):
+            add_time_ids = add_time_ids.to(dtype=self.unet.dtype)
+            
+        return add_time_ids
 
     def __init__(self, unet: torch.nn.Module, config: Config):
         super().__init__(unet, config)
@@ -218,8 +225,8 @@ class DDPMTrainer(TrainingMethod):
                 timesteps,
                 prompt_embeds,
                 added_cond_kwargs={
-                    "time_ids": add_time_ids,  # Now (batch_size, 6)
-                    "text_embeds": pooled_prompt_embeds  # Now (batch_size, 768)
+                    "time_ids": add_time_ids,  # Now has shape (batch_size, 6, 1, 1)
+                    "text_embeds": pooled_prompt_embeds[:, 0]  # Take first embedding
                 }
             ).sample
             self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
