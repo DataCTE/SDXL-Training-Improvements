@@ -142,13 +142,15 @@ class AspectBucketDataset(Dataset):
             # Find best matching bucket dimensions
             target_w, target_h = self.preprocessing_pipeline.get_aspect_buckets(self.config)[0]
             min_diff = float('inf')
+            bucket_idx = 0
             
-            for bucket_w, bucket_h in self.preprocessing_pipeline.get_aspect_buckets(self.config):
+            for idx, (bucket_w, bucket_h) in enumerate(self.preprocessing_pipeline.get_aspect_buckets(self.config)):
                 bucket_ratio = bucket_w / bucket_h
                 diff = abs(aspect_ratio - bucket_ratio)
                 if diff < min_diff:
                     min_diff = diff
                     target_w, target_h = bucket_w, bucket_h
+                    bucket_idx = idx
             
             # Calculate resize dimensions while preserving aspect ratio
             scale = min(target_w / w, target_h / h)
@@ -170,12 +172,17 @@ class AspectBucketDataset(Dataset):
             img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
             img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
             
+            # Return in the format expected by the pipeline
             return {
-                "image": img_tensor,
-                "original_size": (w, h),
-                "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0),
-                "target_size": (target_w, target_h),
-                "bucket_dims": (target_w, target_h)
+                "model_input": img_tensor,
+                "metadata": {
+                    "original_size": (w, h),
+                    "bucket_size": (target_w, target_h),
+                    "bucket_index": bucket_idx,
+                    "path": str(image_path),
+                    "timestamp": time.time(),
+                    "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
+                }
             }
             
         except Exception as e:
