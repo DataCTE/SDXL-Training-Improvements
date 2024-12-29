@@ -37,15 +37,43 @@ def configure_noise_scheduler(
         rescale_betas_zero_snr=config.training.method_config.scheduler.rescale_betas_zero_snr
     )
     
-    # Move scheduler's tensors to device
-    if hasattr(scheduler, 'betas'):
-        scheduler.betas = scheduler.betas.to(device)
-    if hasattr(scheduler, 'alphas'):
-        scheduler.alphas = scheduler.alphas.to(device)
-    if hasattr(scheduler, 'alphas_cumprod'):
-        scheduler.alphas_cumprod = scheduler.alphas_cumprod.to(device)
-    if hasattr(scheduler, 'final_alpha_cumprod'):
-        scheduler.final_alpha_cumprod = scheduler.final_alpha_cumprod.to(device)
+    # Ensure scheduler is initialized
+    if not hasattr(scheduler, 'alphas_cumprod'):
+        logger.warning("Scheduler missing alphas_cumprod - initializing")
+        scheduler.set_timesteps(scheduler.num_train_timesteps)
+    
+    # Move all relevant tensors to device
+    tensor_attributes = [
+        'betas',
+        'alphas',
+        'alphas_cumprod',
+        'alphas_cumprod_prev',
+        'sqrt_alphas_cumprod',
+        'sqrt_one_minus_alphas_cumprod', 
+        'log_one_minus_alphas_cumprod',
+        'sqrt_recip_alphas_cumprod',
+        'sqrt_recipm1_alphas_cumprod',
+        'posterior_variance',
+        'posterior_log_variance_clipped',
+        'posterior_mean_coef1',
+        'posterior_mean_coef2',
+        'final_alpha_cumprod'
+    ]
+    
+    for attr in tensor_attributes:
+        if hasattr(scheduler, attr):
+            tensor = getattr(scheduler, attr)
+            if tensor is not None and isinstance(tensor, torch.Tensor):
+                setattr(scheduler, attr, tensor.to(device))
+                logger.debug(f"Moved scheduler.{attr} to {device}")
+            elif tensor is None:
+                logger.warning(f"Scheduler.{attr} is None")
+    
+    # Verify critical tensors
+    if scheduler.alphas_cumprod is None:
+        raise ValueError("Scheduler alphas_cumprod is None after initialization")
+        
+    logger.debug(f"Scheduler initialized with {len(scheduler.alphas_cumprod)} timesteps")
     
     return scheduler
 
