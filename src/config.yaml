@@ -68,7 +68,7 @@ global_config:
     capture_warnings: true
     log_every: 10
 
-  # Image processing settings (referenced in pipeline.py)
+  # Image processing settings
   image:
     supported_dims:
       - [1024, 1024]   # Square

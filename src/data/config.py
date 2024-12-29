@@ -1,6 +1,6 @@
 """Configuration management for SDXL training."""
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 from pathlib import Path
 import yaml
 from omegaconf import OmegaConf
@@ -68,6 +68,16 @@ class TrainingConfig:
     method_config: MethodConfig = field(default_factory=MethodConfig)
 
 @dataclass
+class ImageConfig:
+    """Image processing configuration."""
+    supported_dims: List[List[int]] = field(default_factory=lambda: [
+        [1024, 1024],  # Square
+        [1024, 1536],  # Portrait
+        [1536, 1024],  # Landscape
+    ])
+    max_aspect_ratio: float = 2.0
+
+@dataclass
 class CacheConfig:
     cache_dir: Union[str, Path] = "cache"
     max_cache_size: int = 10000
@@ -98,8 +108,10 @@ class DataConfig:
 
 @dataclass
 class GlobalConfig:
+    """Global configuration settings."""
     cache: CacheConfig = field(default_factory=CacheConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    image: ImageConfig = field(default_factory=ImageConfig)
 
 @dataclass
 class Config:
@@ -122,20 +134,16 @@ class Config:
         
         # Convert to dict and create config
         config_dict = OmegaConf.to_container(yaml_config, resolve=True)
-        return cls(**config_dict)
+        return cls.from_dict(config_dict)
 
-    def to_dict(self) -> dict:
-        """Convert config to dictionary."""
-        return {
-            "model": vars(self.model),
-            "optimizer": vars(self.optimizer),
-            "training": vars(self.training),
-            "data": vars(self.data),
-            "global_config": {
-                "cache": vars(self.global_config.cache),
-                "logging": vars(self.global_config.logging)
-            }
-        }
+    @classmethod
+    def from_dict(cls, config_dict: Dict) -> "Config":
+        """Create Config instance from dictionary."""
+        return OmegaConf.structured(cls(**config_dict))
+
+    def to_dict(self) -> Dict:
+        """Convert Config to dictionary."""
+        return OmegaConf.to_container(self, resolve=True)
 
     def save(self, path: Union[str, Path]):
         """Save configuration to YAML file."""
