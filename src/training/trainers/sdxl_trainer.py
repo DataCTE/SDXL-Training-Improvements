@@ -200,15 +200,23 @@ class SDXLTrainer:
     
                 if emb.dim() == 4:
                     batch_size, num_images, seq_len, embed_dim = emb.shape
-                    emb = emb.view(batch_size, num_images * seq_len, embed_dim)
+                    emb = emb.view(batch_size * num_images, seq_len, embed_dim)
                 elif emb.dim() == 3:
                     batch_size, seq_len, embed_dim = emb.shape
                 else:
                     raise ValueError(f"Unexpected prompt_embeds shape: {emb.shape}")
-    
+
                 if embed_dim == 768:
+                    emb = emb.view(-1, embed_dim)
                     emb = self.up_proj(emb)
-    
+                    new_embed_dim = emb.shape[-1]
+                    emb = emb.view(-1, seq_len, new_embed_dim)
+
+                if num_images != 1:
+                    emb = emb.view(batch_size, num_images, seq_len, new_embed_dim)
+                else:
+                    emb = emb.view(batch_size, seq_len, new_embed_dim)
+
                 batch["prompt_embeds"] = emb
             
             if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
@@ -216,15 +224,21 @@ class SDXLTrainer:
     
                 if p_emb.dim() == 3:
                     batch_size, num_images, embed_dim = p_emb.shape
-                    p_emb = p_emb.view(batch_size, num_images * embed_dim)
+                    p_emb = p_emb.view(batch_size * num_images, embed_dim)
                 elif p_emb.dim() == 2:
                     batch_size, embed_dim = p_emb.shape
                 else:
                     raise ValueError(f"Unexpected pooled_prompt_embeds shape: {p_emb.shape}")
-    
+
                 if embed_dim == 768:
                     p_emb = self.up_proj(p_emb)
-    
+
+                new_embed_dim = p_emb.shape[-1]
+                if num_images != 1:
+                    p_emb = p_emb.view(batch_size, num_images, new_embed_dim)
+                else:
+                    p_emb = p_emb.view(batch_size, new_embed_dim)
+
                 batch["pooled_prompt_embeds"] = p_emb
 
             # Verify shapes of embeddings after processing

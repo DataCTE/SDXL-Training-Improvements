@@ -125,7 +125,13 @@ class DDPMTrainer(TrainingMethod):
         """
         try:
             # 1. Safely extract latents from the batch
-            # ----------------------------------------------------------
+            self.tensor_logger.log_checkpoint("Before Model Forward Pass", {
+                "noisy_latents.shape": noisy_latents.shape,
+                "timesteps.shape": timesteps.shape,
+                "prompt_embeds.shape": prompt_embeds.shape,
+                "text_embeds.shape": text_embeds.shape,
+                "add_time_ids.shape": add_time_ids.shape
+            })
             # Log initial batch state
             self.tensor_logger.log_checkpoint("Initial Batch", {
                 "latent": batch.get("latent"),
