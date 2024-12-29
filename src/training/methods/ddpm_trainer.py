@@ -142,6 +142,8 @@ class DDPMTrainer(TrainingMethod):
                 "prompt_embeds": batch.get("prompt_embeds"),
                 "pooled_prompt_embeds": batch.get("pooled_prompt_embeds")
             })
+            
+            # Process latents
             latent_dict = batch.get("latent", None)
 
             if isinstance(latent_dict, dict):
@@ -174,18 +176,7 @@ class DDPMTrainer(TrainingMethod):
                 if latents is None:
                     raise KeyError("No latent data found in batch")
 
-
-            # Validate noise scheduler state
-            if self.noise_scheduler is None:
-                raise ValueError("noise_scheduler is not initialized")
-
-            if not hasattr(self.noise_scheduler, 'alphas_cumprod'):
-                raise ValueError("noise_scheduler missing required attribute 'alphas_cumprod'")
-
-            if self.noise_scheduler.alphas_cumprod is None:
-                raise ValueError("noise_scheduler.alphas_cumprod is None")
-
-            # Retrieve embeddings
+            # Process embeddings
             prompt_embeds = batch.get("prompt_embeds", None)
             pooled_prompt_embeds = batch.get("pooled_prompt_embeds", None)
             if prompt_embeds is None or pooled_prompt_embeds is None:
@@ -195,13 +186,26 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
             pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
 
-            # Reshape prompt_embeds from [batch_size, 2, seq_length, embed_dim] to [batch_size, 2 * seq_length, embed_dim]
+            # Reshape prompt_embeds from [batch_size, num_encoders, seq_length, embed_dim] 
+            # to [batch_size, num_encoders * seq_length, embed_dim]
             batch_size, num_encoders, seq_length, embed_dim = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.view(batch_size, num_encoders * seq_length, embed_dim)
-            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D after reshaping, got shape {prompt_embeds.shape}"
+            prompt_embeds = prompt_embeds.reshape(batch_size, num_encoders * seq_length, embed_dim)
+            
+            # Log the shape after reshaping
+            self.tensor_logger.log_checkpoint("Reshaped Embeddings", {
+                "prompt_embeds": prompt_embeds,
+                "prompt_embeds_shape": torch.tensor(prompt_embeds.shape)
+            })
 
-            # Reshape pooled_prompt_embeds from [batch_size, 2, embed_dim] to [batch_size, 2 * embed_dim]
-            pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size, -1)
+            # Reshape pooled_prompt_embeds from [batch_size, num_encoders, embed_dim] 
+            # to [batch_size, num_encoders * embed_dim]
+            pooled_prompt_embeds = pooled_prompt_embeds.reshape(batch_size, -1)
+
+            # Validate shapes before proceeding
+            if prompt_embeds.dim() != 3:
+                raise ValueError(f"Expected prompt_embeds to be 3D after reshaping, got shape {prompt_embeds.shape}")
+            if pooled_prompt_embeds.dim() != 2:
+                raise ValueError(f"Expected pooled_prompt_embeds to be 2D after reshaping, got shape {pooled_prompt_embeds.shape}")
 
             # Ensure embeddings have correct dimensions
             target_dtype = self.unet.dtype
