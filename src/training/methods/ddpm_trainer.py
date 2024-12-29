@@ -95,6 +95,8 @@ class DDPMTrainer(TrainingMethod):
         if pooled_prompt_embeds.shape[-1] == 768:
             pooled_prompt_embeds = self.up_proj(pooled_prompt_embeds)
         return prompt_embeds, pooled_prompt_embeds
+
+    def compute_loss(
         self,
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
