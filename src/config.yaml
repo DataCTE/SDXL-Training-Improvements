@@ -79,3 +79,11 @@ global_config:
       - [1024, 1536]   # Portrait
       - [1536, 1024]   # Landscape
     max_aspect_ratio: 2.0  # Maximum allowed aspect ratio deviation
+
+# Tag weighting configuration
+tag_weighting:
+  enable_tag_weighting: true    # Set to true to enable tag weighting
+  use_cache: true
+  min_weight: 0.1
+  max_weight: 3.0
+  default_weight: 1.0

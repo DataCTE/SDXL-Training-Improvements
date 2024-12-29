@@ -116,6 +116,15 @@ class GlobalConfig:
     image: ImageConfig = field(default_factory=ImageConfig)
 
 @dataclass
+class TagWeightingConfig:
+    """Configuration for tag weighting."""
+    enable_tag_weighting: bool = False
+    use_cache: bool = True
+    min_weight: float = 0.1
+    max_weight: float = 3.0
+    default_weight: float = 1.0
+
+@dataclass
 class Config:
     """Main configuration class for SDXL training."""
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -123,6 +132,7 @@ class Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     data: DataConfig = field(default_factory=DataConfig)
     global_config: GlobalConfig = field(default_factory=GlobalConfig)
+    tag_weighting: TagWeightingConfig = field(default_factory=TagWeightingConfig)
 
     @classmethod
     def from_yaml(cls, path: Union[str, Path]) -> "Config":
@@ -173,6 +183,10 @@ class Config:
                     image=image_config
                 )
             
+            # Update tag weighting config
+            if 'tag_weighting' in raw_config:
+                config.tag_weighting = TagWeightingConfig(**raw_config['tag_weighting'])
+            
             return config
             
         except Exception as e:
@@ -195,5 +209,6 @@ class Config:
                 'cache': asdict(self.global_config.cache),
                 'logging': asdict(self.global_config.logging),
                 'image': asdict(self.global_config.image)
-            }
+            },
+            'tag_weighting': asdict(self.tag_weighting)
         }
