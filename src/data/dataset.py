@@ -182,7 +182,7 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Failed to process image {image_path}: {e}")
             return None
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
         """Get a single item from the dataset with robust error handling."""
         try:
             image_path = self.image_paths[idx]
@@ -200,8 +200,9 @@ class AspectBucketDataset(Dataset):
             # Process image
             processed = self._process_image(image_path)
             if processed is None:
-                # Skip to next image if processing fails
-                return self.__getitem__((idx + 1) % len(self))
+                # Skip this image
+                logger.warning(f"Processing failed for image {image_path}, skipping.")
+                return None
 
             # Get text embeddings
             encoded_text = self.preprocessing_pipeline.encode_prompt(
@@ -245,8 +246,8 @@ class AspectBucketDataset(Dataset):
 
         except Exception as e:
             logger.error(f"Error processing dataset item {idx}", exc_info=True)
-            # Try next item
-            return self.__getitem__((idx + 1) % len(self))
+            # Skip this item
+            return None
 
     def _setup_image_config(self):
         """Set up image configuration parameters."""
@@ -266,7 +267,10 @@ class AspectBucketDataset(Dataset):
         
         for idx in tqdm(range(len(self)), desc="Precomputing latents"):
             try:
-                self.__getitem__(idx)
+                item = self.__getitem__(idx)
+                if item is None:
+                    # Item was skipped due to processing failure
+                    continue
             except Exception as e:
                 logger.error(f"Failed to precompute latents for index {idx}", exc_info=True)
                 continue
