@@ -111,43 +111,43 @@ def __init__(
         embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
     )
 
-        self._setup_memory_management(
-            batch_size=train_dataloader.batch_size,
-            micro_batch_size=config.training.micro_batch_size
-        )
-        if not tensors_match_device(self.model.state_dict(), device):
-            with create_stream_context(torch.cuda.current_stream()):
-                tensors_to_device_(self.model.state_dict(), device)
-                if hasattr(self.optimizer, 'state'):
-                    tensors_to_device_(self.optimizer.state, device)
-            torch.cuda.current_stream().synchronize()
-        torch_sync()
+    self._setup_memory_management(
+        batch_size=train_dataloader.batch_size,
+        micro_batch_size=config.training.micro_batch_size
+    )
+    if not tensors_match_device(self.model.state_dict(), device):
+        with create_stream_context(torch.cuda.current_stream()):
+            tensors_to_device_(self.model.state_dict(), device)
+            if hasattr(self.optimizer, 'state'):
+                tensors_to_device_(self.optimizer.state, device)
+        torch.cuda.current_stream().synchronize()
+    torch_sync()
 
-        self.global_step = 0
-        self.epoch = 0
-        self.max_steps = config.training.max_train_steps or (
-            len(train_dataloader) * config.training.num_epochs
+    self.global_step = 0
+    self.epoch = 0
+    self.max_steps = config.training.max_train_steps or (
+        len(train_dataloader) * config.training.num_epochs
+    )
+    self.metrics_logger = MetricsLogger(window_size=100)
+    if validation_prompts:
+        self.validation_logger = ValidationLogger(
+            model=model,
+            prompts=validation_prompts,
+            output_dir=Path(config.global_config.output_dir)
         )
-        self.metrics_logger = MetricsLogger(window_size=100)
-        if validation_prompts:
-            self.validation_logger = ValidationLogger(
-                model=model,
-                prompts=validation_prompts,
-                output_dir=Path(config.global_config.output_dir)
-            )
-        else:
-            self.validation_logger = None
+    else:
+        self.validation_logger = None
 
-        self.gradient_accumulation_steps = (
-            train_dataloader.batch_size // config.training.micro_batch_size
-            if config.training.micro_batch_size else 1
-        )
+    self.gradient_accumulation_steps = (
+        train_dataloader.batch_size // config.training.micro_batch_size
+        if config.training.micro_batch_size else 1
+    )
 
-        # Compile for speed if available
-        if hasattr(torch, "compile"):
-            self.train_step = torch.compile(self.train_step, mode="reduce-overhead", fullgraph=False)
-            self.train_epoch = torch.compile(self.train_epoch, mode="reduce-overhead", fullgraph=False)
-            self.train = torch.compile(self.train, mode="reduce-overhead", fullgraph=False)
+    # Compile for speed if available
+    if hasattr(torch, "compile"):
+        self.train_step = torch.compile(self.train_step, mode="reduce-overhead", fullgraph=False)
+        self.train_epoch = torch.compile(self.train_epoch, mode="reduce-overhead", fullgraph=False)
+        self.train = torch.compile(self.train, mode="reduce-overhead", fullgraph=False)
 
     def train_step(
         self,

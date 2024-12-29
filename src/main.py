@@ -357,89 +357,89 @@ def setup_training(
         training_method_cls = TrainingMethod.get_method(config.training.method)
         training_method = training_method_cls(model.unet, config)
         
-    try:
-        logger.info("Setting up optimizer...")
-        optimizer_kwargs = {
-            "lr": config.training.learning_rate,
-            "betas": config.training.optimizer_betas,
-            "weight_decay": config.training.weight_decay,
-            "eps": config.training.optimizer_eps
-        }
-
-        # Map optimizer names to classes
-        optimizer_classes = {
-            'AdamWBF16': optimizers.AdamWBF16,
-            'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
-            'SOAP': optimizers.SOAP,
-            # Add other optimizers here as needed
-        }
-
-        # Get optimizer name from config
-        optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
-
-        if optimizer_name not in optimizer_classes:
-            raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
-
-        optimizer_class = optimizer_classes[optimizer_name]
-
-        # Include parameters from model.unet and training_method
-        optimizer = optimizer_class(
-            list(model.unet.parameters()) + list(training_method.parameters()),
-            **optimizer_kwargs
-        )
-
-        logger.info(f"Using optimizer: {optimizer_name}")
-
-        # Add timeout handling
-        timeout = 300  # 5 minutes timeout
-        start_time = time.time()
-        
-        while time.time() - start_time < timeout:
-            if not torch.cuda.is_available() or torch.cuda.current_stream().query():
-                break
-            time.sleep(0.1)
-            
-        if time.time() - start_time >= timeout:
-            raise TimeoutError("CUDA operations timed out")
-
-        # Force CUDA synchronization
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            logger.info("CUDA synchronized successfully")
-
         try:
-            if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-                model.unet = torch.nn.parallel.DistributedDataParallel(
-                    model.unet, device_ids=[device] if device.type == "cuda" else None
-                )
-        except Exception as e:
-            logger.error(f"Failed to setup distributed training: {str(e)}", exc_info=True)
-            raise
+            logger.info("Setting up optimizer...")
+            optimizer_kwargs = {
+                "lr": config.training.learning_rate,
+                "betas": config.training.optimizer_betas,
+                "weight_decay": config.training.weight_decay,
+                "eps": config.training.optimizer_eps
+            }
 
-        wandb_logger = None
-        if config.training.use_wandb and is_main_process():
+            # Map optimizer names to classes
+            optimizer_classes = {
+                'AdamWBF16': optimizers.AdamWBF16,
+                'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
+                'SOAP': optimizers.SOAP,
+                # Add other optimizers here as needed
+            }
+
+            # Get optimizer name from config
+            optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
+
+            if optimizer_name not in optimizer_classes:
+                raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
+
+            optimizer_class = optimizer_classes[optimizer_name]
+
+            # Include parameters from model.unet and training_method
+            optimizer = optimizer_class(
+                list(model.unet.parameters()) + list(training_method.parameters()),
+                **optimizer_kwargs
+            )
+
+            logger.info(f"Using optimizer: {optimizer_name}")
+
+            # Add timeout handling
+            timeout = 300  # 5 minutes timeout
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                if not torch.cuda.is_available() or torch.cuda.current_stream().query():
+                    break
+                time.sleep(0.1)
+                
+            if time.time() - start_time >= timeout:
+                raise TimeoutError("CUDA operations timed out")
+
+            # Force CUDA synchronization
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                logger.info("CUDA synchronized successfully")
+
             try:
-                wandb_logger = WandbLogger(
-                    project="sdxl-training",
-                    name=Path(config.global_config.output_dir).name,
-                    config=config.__dict__,
-                    dir=config.global_config.output_dir,
-                    tags=["sdxl", "fine-tuning"]
-                )
-                # Explicitly log model parameters
-                wandb_logger.log_model(model.unet)
+                if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
+                    model.unet = torch.nn.parallel.DistributedDataParallel(
+                        model.unet, device_ids=[device] if device.type == "cuda" else None
+                    )
             except Exception as e:
-                logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
-                wandb_logger = None
+                logger.error(f"Failed to setup distributed training: {str(e)}", exc_info=True)
+                raise
 
-        return train_dataloader, optimizer, wandb_logger, training_method
+            wandb_logger = None
+            if config.training.use_wandb and is_main_process():
+                try:
+                    wandb_logger = WandbLogger(
+                        project="sdxl-training",
+                        name=Path(config.global_config.output_dir).name,
+                        config=config.__dict__,
+                        dir=config.global_config.output_dir,
+                        tags=["sdxl", "fine-tuning"]
+                    )
+                    # Explicitly log model parameters
+                    wandb_logger.log_model(model.unet)
+                except Exception as e:
+                    logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
+                    wandb_logger = None
 
-    except TimeoutError:
-        logger.error("Setup timed out after 5 minutes", exc_info=True)
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
-        raise
+            return train_dataloader, optimizer, wandb_logger, training_method
+
+        except TimeoutError:
+            logger.error("Setup timed out after 5 minutes", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
+            raise
 
 def check_system_limits():
     """Check and attempt to increase system file limits."""
