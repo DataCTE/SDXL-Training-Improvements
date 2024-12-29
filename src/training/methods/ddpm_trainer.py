@@ -199,22 +199,23 @@ class DDPMTrainer(TrainingMethod):
                 original_sizes=batch["original_sizes"],
                 crop_top_lefts=batch["crop_top_lefts"],
                 target_sizes=batch["target_sizes"],
-                dtype=target_dtype,  # Use target_dtype consistently
+                dtype=target_dtype,
                 device=self.unet.device
             )
-            
-            # Log initial shapes
-            self.tensor_logger.log_checkpoint("Initial Time IDs", {
-                "add_time_ids": add_time_ids,
-                "pooled_prompt_embeds": pooled_prompt_embeds
-            })
 
+            # Reshape add_time_ids to match expected dimensions
+            # From (batch_size, 6) to (batch_size, 6, 1, 1)
+            add_time_ids = add_time_ids.unsqueeze(-1).unsqueeze(-1)
+            
             # Take first embedding from pooled_prompt_embeds
             # From (batch_size, 2, 768) to (batch_size, 768)
             pooled_prompt_embeds = pooled_prompt_embeds[:, 0]
 
-            # Verify shapes after reshaping
-            self.tensor_logger.log_checkpoint("Reshaped Embeddings", {
+            # Log shapes for debugging
+            self.tensor_logger.log_checkpoint("Final Input Shapes", {
+                "noisy_latents": noisy_latents,
+                "timesteps": timesteps,
+                "prompt_embeds": prompt_embeds,
                 "add_time_ids": add_time_ids,
                 "pooled_prompt_embeds": pooled_prompt_embeds
             })
@@ -225,8 +226,8 @@ class DDPMTrainer(TrainingMethod):
                 timesteps,
                 prompt_embeds,
                 added_cond_kwargs={
-                    "time_ids": add_time_ids,  # Now has shape (batch_size, 6, 1, 1)
-                    "text_embeds": pooled_prompt_embeds[:, 0]  # Take first embedding
+                    "time_ids": add_time_ids,
+                    "text_embeds": pooled_prompt_embeds
                 }
             ).sample
             self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
