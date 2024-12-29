@@ -248,22 +248,56 @@ class AspectBucketDataset(Dataset):
         """Precompute and cache latents for all images."""
         total_images = len(self)
         skipped_images = 0
-        total_images = len(self)
-        skipped_images = 0
-
-        for idx in tqdm(range(total_images), desc="Precomputing latents"):
+        batch_size = 32  # Increased batch size for faster processing
+        
+        # Create batches of indices
+        for start_idx in tqdm(range(0, total_images, batch_size), desc="Precomputing latents"):
             try:
-                item = self.__getitem__(idx)
-                if item is None:
-                    # Item was skipped due to processing failure
+                end_idx = min(start_idx + batch_size, total_images)
+                batch_indices = range(start_idx, end_idx)
+                
+                # Process batch
+                batch_paths = [self.image_paths[i] for i in batch_indices]
+                batch_captions = [self.captions[i] for i in batch_indices]
+                
+                # Process images in batch
+                processed_batch = self.preprocessing_pipeline.process_image_batch(
+                    image_paths=batch_paths,
+                    captions=batch_captions,
+                    config=self.config
+                )
+                
+                if processed_batch is None:
+                    skipped_images += len(batch_indices)
                     continue
+                    
+                # Cache results
+                if self.config.global_config.cache.use_cache:
+                    for idx, (path, processed) in enumerate(zip(batch_paths, processed_batch)):
+                        if processed is not None:
+                            self.cache_manager.save_latents(
+                                tensors={
+                                    "model_input": processed["model_input"],
+                                    "prompt_embeds": processed["prompt_embeds"],
+                                    "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
+                                },
+                                original_path=path,
+                                metadata={
+                                    "original_size": processed["original_size"],
+                                    "crop_coords": processed["crop_coords"],
+                                    "target_size": processed["target_size"],
+                                    "text": batch_captions[idx]
+                                }
+                            )
+                        else:
+                            skipped_images += 1
+                            
             except Exception as e:
-                logger.error(f"Failed to precompute latents for index {idx}", exc_info=True)
-                skipped_images += 1
-                logger.debug(f"Skipped item at index {idx}")
+                logger.error(f"Failed to precompute batch starting at index {start_idx}", exc_info=True)
+                skipped_images += len(batch_indices)
                 continue
-            else:
-                logger.debug(f"Successfully processed item at index {idx}")
+                
+        logger.info(f"Precomputing complete. Processed {total_images - skipped_images}/{total_images} images")
 
     def __len__(self) -> int:
         return len(self.image_paths)

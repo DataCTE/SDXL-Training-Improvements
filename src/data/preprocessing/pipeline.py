@@ -316,3 +316,96 @@ class PreprocessingPipeline:
                 bucket_indices.append(0)
                 
         return bucket_indices
+
+    def process_image_batch(
+        self,
+        image_paths: List[Union[str, Path]],
+        captions: List[str],
+        config: Config
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Process a batch of images in parallel.
+        
+        Args:
+            image_paths: List of paths to images
+            captions: List of captions for the images
+            config: Configuration object
+            
+        Returns:
+            List of processed image data or None if batch processing fails
+        """
+        try:
+            # Process images in parallel
+            processed_images = []
+            
+            for path in image_paths:
+                processed = self._process_single_image(path, config)
+                processed_images.append(processed)
+                
+            # Filter out failed images
+            valid_images = [img for img in processed_images if img is not None]
+            valid_captions = [cap for img, cap in zip(processed_images, captions) if img is not None]
+            
+            if not valid_images:
+                return None
+                
+            # Batch encode prompts
+            with torch.cuda.amp.autocast():
+                encoded_text = self.encode_prompt_batch(
+                    batch={"text": valid_captions},
+                    proportion_empty_prompts=0.0
+                )
+                
+            # Combine results
+            results = []
+            for idx, (img_data, caption) in enumerate(zip(valid_images, valid_captions)):
+                if img_data is not None:
+                    results.append({
+                        **img_data,
+                        "prompt_embeds": encoded_text["prompt_embeds"][idx],
+                        "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][idx],
+                        "text": caption
+                    })
+                
+            return results
+            
+        except Exception as e:
+            logger.error("Batch processing failed", exc_info=True)
+            return None
+
+    def encode_prompt_batch(
+        self,
+        batch: Dict[str, List[str]],
+        proportion_empty_prompts: float = 0.0
+    ) -> Dict[str, torch.Tensor]:
+        """Encode a batch of prompts using text encoders."""
+        try:
+            with torch.no_grad():
+                prompt_embeds, pooled_prompt_embeds = [], []
+                
+                # Process in smaller sub-batches if needed
+                sub_batch_size = 32
+                texts = batch["text"]
+                
+                for i in range(0, len(texts), sub_batch_size):
+                    sub_texts = texts[i:i + sub_batch_size]
+                    
+                    # Add empty prompts if requested
+                    if proportion_empty_prompts > 0:
+                        num_empty = int(len(sub_texts) * proportion_empty_prompts)
+                        if num_empty > 0:
+                            sub_texts[:num_empty] = [""] * num_empty
+                    
+                    # Encode sub-batch
+                    sub_embeds = self.text_encoders(sub_texts)
+                    prompt_embeds.append(sub_embeds["prompt_embeds"])
+                    pooled_prompt_embeds.append(sub_embeds["pooled_prompt_embeds"])
+                
+                # Concatenate results
+                return {
+                    "prompt_embeds": torch.cat(prompt_embeds, dim=0),
+                    "pooled_prompt_embeds": torch.cat(pooled_prompt_embeds, dim=0)
+                }
+                
+        except Exception as e:
+            logger.error("Failed to encode prompt batch", exc_info=True)
+            raise
