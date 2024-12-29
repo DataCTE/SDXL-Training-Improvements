@@ -294,8 +294,8 @@ class AspectBucketDataset(Dataset):
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents for all images."""
-        logger.info(f"Precomputing completed. Total images: {total_images}, Skipped images: {skipped_images}")
-        
+        total_images = len(self)
+        skipped_images = 0
         total_images = len(self)
         skipped_images = 0
 
