@@ -1,11 +1,18 @@
 """StableDiffusionXL model implementation with optimized encoders."""
 from typing import Dict, List, Optional, Tuple, Union, Any
 import torch
+from enum import Enum
 from diffusers import StableDiffusionXLPipeline
 from src.core.logging import get_logger
 from src.models.encoders import CLIPEncoder, VAEEncoder
 
 logger = get_logger(__name__)
+
+class ModelType(str, Enum):
+    """Valid model types."""
+    SDXL = "sdxl"
+    SDXL_REFINER = "sdxl_refiner"
+    SDXL_BASE = "sdxl_base"
 
 class StableDiffusionXL:
     """SDXL model wrapper with memory optimizations."""
@@ -15,9 +22,12 @@ class StableDiffusionXL:
         cls,
         pretrained_model_name: str,
         device: Optional[torch.device] = None,
+        model_type: ModelType = ModelType.SDXL,
         **kwargs: Any
     ) -> "StableDiffusionXL":
         """Load pretrained SDXL model."""
+        logger.info(f"Loading {model_type.value} model from {pretrained_model_name}")
+        
         pipeline = StableDiffusionXLPipeline.from_pretrained(
             pretrained_model_name,
             torch_dtype=torch.float16,
@@ -34,6 +44,7 @@ class StableDiffusionXL:
         instance = cls()
         instance.pipeline = pipeline
         instance.unet = pipeline.unet
+        instance.model_type = model_type
         
         # Initialize optimized encoders
         instance.vae_encoder = VAEEncoder(
@@ -47,7 +58,7 @@ class StableDiffusionXL:
         
         instance.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        logger.info(f"Initialized SDXL model on {device}")
+        logger.info(f"Initialized {model_type.value} model on {device}")
         return instance
 
     def to(self, device: torch.device) -> "StableDiffusionXL":
