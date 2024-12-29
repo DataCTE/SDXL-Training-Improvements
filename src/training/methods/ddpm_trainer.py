@@ -202,14 +202,8 @@ class DDPMTrainer(TrainingMethod):
             seq_length = prompt_embeds.shape[2]
             embed_dim = prompt_embeds.shape[3]
 
-            # Concatenate the embeddings from both text encoders
-            prompt_embeds = torch.cat([prompt_embeds[:, 0, :, :], prompt_embeds[:, 1, :, :]], dim=-1)  # New shape: (batch_size, seq_length, 1536)
-
-            # Reshape and concatenate pooled_prompt_embeds
-            pooled_prompt_embeds = torch.cat([pooled_prompt_embeds[:, 0, :], pooled_prompt_embeds[:, 1, :]], dim=-1)  # New shape: (batch_size, 1536)
 
             # Ensure embeddings have correct dimensions
-            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
             # Add this line to remove the extra singleton dimension
@@ -278,7 +272,6 @@ class DDPMTrainer(TrainingMethod):
             # ----------------------------------------------------------
             assert latents.dim() == 4, f"Expected latents to be 4D, got shape {latents.shape}"
             assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
-            assert pooled_prompt_embeds.dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got shape {pooled_prompt_embeds.shape}"
 
             noise_pred = self.unet(
                 sample=noisy_latents,
