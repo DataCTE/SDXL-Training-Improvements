@@ -28,25 +28,21 @@ class VAEEncoder:
         self,
         pixel_values: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
-        """Encode images using VAE.
-        
-        Args:
-            pixel_values: Input image tensor
-            
-        Returns:
-            Dict containing model_input
-        """
+        """Encode images using VAE."""
         try:
-            # Input validation
+            # Ensure input is on correct device and dtype
+            if pixel_values.device != self.device:
+                pixel_values = pixel_values.to(self.device)
+            
             pixel_values = pixel_values.to(dtype=torch.float32)
 
-            # Process image
+            # Process image and keep on GPU
             with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
                 model_input = self.vae.encode(pixel_values).latent_dist.sample()
                 model_input = model_input * self.vae.config.scaling_factor
 
                 return {
-                    "model_input": model_input.cpu()
+                    "model_input": model_input  # Keep on GPU
                 }
 
         except Exception as e:
