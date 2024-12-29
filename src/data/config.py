@@ -91,6 +91,13 @@ class CacheConfig:
     cache_latents: bool = True
     cache_text_embeddings: bool = True
 
+    def __post_init__(self):
+        """Handle legacy enable_cache parameter."""
+        # Convert enable_cache to use_cache if present in initialization dict
+        if hasattr(self, 'enable_cache'):
+            self.use_cache = getattr(self, 'enable_cache')
+            delattr(self, 'enable_cache')
+
 @dataclass
 class LoggingConfig:
     use_wandb: bool = False
@@ -179,7 +186,11 @@ class Config:
             # Update global config
             if 'global_config' in raw_config:
                 global_data = raw_config['global_config']
-                cache_config = CacheConfig(**global_data.get('cache', {}))
+                cache_data = global_data.get('cache', {})
+                # Convert enable_cache to use_cache if present
+                if 'enable_cache' in cache_data:
+                    cache_data['use_cache'] = cache_data.pop('enable_cache')
+                cache_config = CacheConfig(**cache_data)
                 logging_config = LoggingConfig(**global_data.get('logging', {}))
                 image_config = ImageConfig(**global_data.get('image', {}))
                 config.global_config = GlobalConfig(
