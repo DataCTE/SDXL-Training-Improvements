@@ -103,7 +103,10 @@ class SDXLTrainer:
         self.config = config
         self.model = model
         self.unet = model.unet
-        self.optimizer = optimizer
+        self.optimizer = torch.optim.AdamW(
+            list(model.unet.parameters()) + list(training_method.up_proj.parameters()),
+            lr=config.training.learning_rate
+        )
         # Ensure DataLoader uses a single worker
         self.train_dataloader = DataLoader(
             train_dataloader.dataset,
@@ -119,8 +122,6 @@ class SDXLTrainer:
         self.device = device
         self.wandb_logger = wandb_logger
 
-        # Up-projection for embeddings (768 → 1280)
-        # We keep it in the unet’s device & dtype, so weights are bfloat16
         base_dtype = DataType.from_str(config.model.dtype)
         fallback_dtype = DataType.from_str(config.model.fallback_dtype)
         self.model_dtypes = ModelWeightDtypes(
