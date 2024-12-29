@@ -143,7 +143,6 @@ class DDPMTrainer(TrainingMethod):
                 "pooled_prompt_embeds": batch.get("pooled_prompt_embeds")
             })
             latent_dict = batch.get("latent", None)
-            latent_dict = batch.get("latent", None)
 
             if isinstance(latent_dict, dict):
                 # Log initial batch state
