@@ -14,11 +14,20 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
-class ModelType(Enum):
-    BASE = auto()
-    INPAINTING = auto()
-    REFINER = auto()
-    SDXL = auto()
+class ModelType(str, Enum):
+    """Valid model types."""
+    @classmethod
+    def _missing_(cls, value: str) -> Optional["ModelType"]:
+        """Handle case-insensitive lookup."""
+        for member in cls:
+            if member.value.lower() == value.lower():
+                return member
+        return None
+
+    BASE = "base"
+    INPAINTING = "inpainting"
+    REFINER = "refiner"
+    SDXL = "sdxl"
 
 
 class TimestepBiasStrategy(Enum):

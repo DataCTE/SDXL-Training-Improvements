@@ -1,18 +1,12 @@
 """StableDiffusionXL model implementation with optimized encoders."""
 from typing import Dict, List, Optional, Tuple, Union, Any
 import torch
-from enum import Enum
 from diffusers import StableDiffusionXLPipeline
 from src.core.logging import get_logger
 from src.models.encoders import CLIPEncoder, VAEEncoder
+from src.models.base import ModelType
 
 logger = get_logger(__name__)
-
-class ModelType(str, Enum):
-    """Valid model types."""
-    SDXL = "sdxl"
-    SDXL_REFINER = "sdxl_refiner"
-    SDXL_BASE = "sdxl_base"
 
 class StableDiffusionXL:
     """SDXL model wrapper with memory optimizations."""
