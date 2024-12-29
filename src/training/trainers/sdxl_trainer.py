@@ -121,8 +121,6 @@ class SDXLTrainer:
 
         # Up-projection for embeddings (768 → 1280)
         # We keep it in the unet’s device & dtype, so weights are bfloat16
-        self.up_proj = nn.Linear(768, 1280).to(self.unet.device, self.unet.dtype)
-
         base_dtype = DataType.from_str(config.model.dtype)
         fallback_dtype = DataType.from_str(config.model.fallback_dtype)
         self.model_dtypes = ModelWeightDtypes(
@@ -194,70 +192,6 @@ class SDXLTrainer:
             # Validate tensors
             self._validate_batch_sizes(batch)
             
-            # Conditionally apply up-projection if text encoder yields 768 dims
-            if "prompt_embeds" in batch and isinstance(batch["prompt_embeds"], torch.Tensor):
-                emb = batch["prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
-    
-                if emb.dim() == 4:
-                    batch_size, num_images, seq_len, embed_dim = emb.shape
-                    emb = emb.view(batch_size * num_images, seq_len, embed_dim)
-                elif emb.dim() == 3:
-                    batch_size, seq_len, embed_dim = emb.shape
-                    num_images = 1  # Add this line to define num_images
-                else:
-                    raise ValueError(f"Unexpected prompt_embeds shape: {emb.shape}")
-
-                if embed_dim == 768:
-                    emb = emb.view(-1, embed_dim)
-                    emb = self.up_proj(emb)
-                    new_embed_dim = emb.shape[-1]
-                    emb = emb.view(-1, seq_len, new_embed_dim)
-
-                if num_images != 1:
-                    emb = emb.view(batch_size, num_images, seq_len, new_embed_dim)
-                else:
-                    emb = emb.view(batch_size, seq_len, new_embed_dim)
-
-                batch["prompt_embeds"] = emb
-            
-            if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
-                p_emb = batch["pooled_prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
-    
-                if p_emb.dim() == 3:
-                    batch_size, num_images, embed_dim = p_emb.shape
-                    p_emb = p_emb.view(batch_size * num_images, embed_dim)
-                elif p_emb.dim() == 2:
-                    batch_size, embed_dim = p_emb.shape
-                    num_images = 1  # Add this line to define num_images
-                else:
-                    raise ValueError(f"Unexpected pooled_prompt_embeds shape: {p_emb.shape}")
-
-                if embed_dim == 768:
-                    p_emb = self.up_proj(p_emb)
-
-                new_embed_dim = p_emb.shape[-1]
-                if num_images != 1:
-                    p_emb = p_emb.view(batch_size, num_images, new_embed_dim)
-                else:
-                    p_emb = p_emb.view(batch_size, new_embed_dim)
-
-                batch["pooled_prompt_embeds"] = p_emb
-
-            # Reshape 4D embeddings to 3D if needed
-            if batch["prompt_embeds"].dim() == 4:
-                # Reshape from [batch_size, num_images, seq_len, embed_dim] to [batch_size * num_images, seq_len, embed_dim]
-                batch_size, num_images, seq_len, embed_dim = batch["prompt_embeds"].shape
-                batch["prompt_embeds"] = batch["prompt_embeds"].reshape(-1, seq_len, embed_dim)
-
-            # Similarly for pooled_prompt_embeds
-            if batch["pooled_prompt_embeds"].dim() == 3:
-                # Reshape from [batch_size, num_images, embed_dim] to [batch_size * num_images, embed_dim]
-                batch_size, num_images, embed_dim = batch["pooled_prompt_embeds"].shape
-                batch["pooled_prompt_embeds"] = batch["pooled_prompt_embeds"].reshape(-1, embed_dim)
-
-            # Verify shapes of embeddings after processing
-            assert batch["prompt_embeds"].dim() == 3, f"Expected prompt_embeds to be 3D, got {batch['prompt_embeds'].shape}"
-            assert batch["pooled_prompt_embeds"].dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got {batch['pooled_prompt_embeds'].shape}"
 
             # Compute loss
             loss_dict = self.training_method.compute_loss(batch, generator=generator)

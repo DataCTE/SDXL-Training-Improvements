@@ -33,6 +33,7 @@ class DDPMTrainer(TrainingMethod):
 
     def __init__(self, unet: torch.nn.Module, config: Config):
         super().__init__(unet, config)
+        self.up_proj = nn.Linear(768, 1280).to(self.unet.device, self.unet.dtype)
         self.logger.debug("Initializing DDPMTrainer")
 
         # Validate noise scheduler initialization
@@ -82,7 +83,18 @@ class DDPMTrainer(TrainingMethod):
             }
             self._shape_logs.append(shape_info)
 
-    def compute_loss(
+    def _handle_sdxl_shapes(
+        self,
+        prompt_embeds: torch.Tensor,
+        pooled_prompt_embeds: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Up-project prompt_embeds if the last dimension is 768
+        if prompt_embeds.shape[-1] == 768:
+            prompt_embeds = self.up_proj(prompt_embeds)
+        # Up-project pooled_prompt_embeds if the last dimension is 768
+        if pooled_prompt_embeds.shape[-1] == 768:
+            pooled_prompt_embeds = self.up_proj(pooled_prompt_embeds)
+        return prompt_embeds, pooled_prompt_embeds
         self,
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
@@ -174,7 +186,22 @@ class DDPMTrainer(TrainingMethod):
             if self.noise_scheduler.alphas_cumprod is None:
                 raise ValueError("noise_scheduler.alphas_cumprod is None")
 
-            # Move latents to device
+            # Retrieve embeddings
+            prompt_embeds = batch.get("prompt_embeds", None)
+            pooled_prompt_embeds = batch.get("pooled_prompt_embeds", None)
+            if prompt_embeds is None or pooled_prompt_embeds is None:
+                raise ValueError("Missing prompt_embeds or pooled_prompt_embeds in batch")
+
+            # Move embeddings to the correct device and dtype
+            prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
+            pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
+
+            # Up-project and adjust shapes
+            prompt_embeds, pooled_prompt_embeds = self._handle_sdxl_shapes(prompt_embeds, pooled_prompt_embeds)
+
+            # Ensure embeddings have correct dimensions
+            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got {prompt_embeds.dim()}"
+            assert pooled_prompt_embeds.dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got {pooled_prompt_embeds.dim()}"
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
             # Add this line to remove the extra singleton dimension
@@ -220,10 +247,6 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
 
             # Extract additional conditioning inputs
-            text_embeds = batch.get("pooled_prompt_embeds")
-            if text_embeds is None:
-                raise ValueError("Missing pooled_prompt_embeds in batch")
-            text_embeds = text_embeds.to(self.unet.device, self.unet.dtype)
             
             # Get time embedding inputs
             original_sizes = batch.get("original_sizes")
@@ -254,7 +277,7 @@ class DDPMTrainer(TrainingMethod):
                 timestep=timesteps,
                 encoder_hidden_states=prompt_embeds,
                 added_cond_kwargs={
-                    "text_embeds": text_embeds,
+                    "text_embeds": pooled_prompt_embeds,
                     "time_ids": add_time_ids
                 }
             ).sample
