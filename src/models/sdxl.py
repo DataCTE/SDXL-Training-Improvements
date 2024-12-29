@@ -1,52 +1,79 @@
 """StableDiffusionXL model implementation with optimized encoders."""
 from typing import Dict, List, Optional, Tuple, Union, Any
 import torch
-from diffusers import (
-    AutoencoderKL,
-    DDPMScheduler,
-    StableDiffusionXLPipeline as BasePipeline,
-    UNet2DConditionModel
-)
-from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
+from diffusers import StableDiffusionXLPipeline
 from src.core.logging import get_logger
 from src.models.encoders import CLIPEncoder, VAEEncoder
 
 logger = get_logger(__name__)
 
 class StableDiffusionXL:
-    """Optimized SDXL implementation with improved encoders."""
+    """SDXL model wrapper with memory optimizations."""
     
-    def __init__(
-        self,
-        vae: AutoencoderKL,
-        text_encoder_1: CLIPTextModel,
-        text_encoder_2: CLIPTextModelWithProjection,
-        tokenizer_1: CLIPTokenizer,
-        tokenizer_2: CLIPTokenizer,
-        unet: UNet2DConditionModel,
-        scheduler: DDPMScheduler,
-        device: Union[str, torch.device] = "cuda",
-        dtype: Optional[torch.dtype] = torch.float16,
-    ):
-        """Initialize SDXL model with optimized encoders."""
-        self.device = torch.device(device)
-        self.dtype = dtype
-        
-        # Initialize optimized encoders
-        self.vae_encoder = VAEEncoder(
-            vae=vae,
-            device=device,
-            dtype=dtype
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name: str,
+        device: Optional[torch.device] = None,
+        **kwargs: Any
+    ) -> "StableDiffusionXL":
+        """Load pretrained SDXL model."""
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            pretrained_model_name,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+            variant="fp16",
+            **kwargs
         )
         
-        self.text_encoders = [text_encoder_1, text_encoder_2]
-        self.tokenizers = [tokenizer_1, tokenizer_2]
+        # Move to device if specified
+        if device is not None:
+            pipeline = pipeline.to(device)
+            
+        # Create instance
+        instance = cls()
+        instance.pipeline = pipeline
+        instance.unet = pipeline.unet
         
-        # Store other components
-        self.unet = unet.to(device=device, dtype=dtype)
-        self.scheduler = scheduler
+        # Initialize optimized encoders
+        instance.vae_encoder = VAEEncoder(
+            vae=pipeline.vae,
+            device=device,
+            dtype=torch.float16
+        )
+        
+        instance.text_encoders = [pipeline.text_encoder, pipeline.text_encoder_2]
+        instance.tokenizers = [pipeline.tokenizer, pipeline.tokenizer_2]
+        
+        instance.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         logger.info(f"Initialized SDXL model on {device}")
+        return instance
+
+    def to(self, device: torch.device) -> "StableDiffusionXL":
+        """Move model to device."""
+        self.pipeline = self.pipeline.to(device)
+        self.unet = self.unet.to(device)
+        self.vae_encoder = self.vae_encoder.to(device)
+        self.text_encoders = [encoder.to(device) for encoder in self.text_encoders]
+        self.device = device
+        return self
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Get model state dict."""
+        return {
+            "unet": self.unet.state_dict(),
+            "vae": self.vae_encoder.vae.state_dict(),
+            "text_encoder": self.text_encoders[0].state_dict(),
+            "text_encoder_2": self.text_encoders[1].state_dict()
+        }
+
+    def load_state_dict(self, state_dict: Dict[str, Any]):
+        """Load model state dict."""
+        self.unet.load_state_dict(state_dict["unet"])
+        self.vae_encoder.vae.load_state_dict(state_dict["vae"])
+        self.text_encoders[0].load_state_dict(state_dict["text_encoder"])
+        self.text_encoders[1].load_state_dict(state_dict["text_encoder_2"])
 
     def generate_timestep_weights(
         self,
@@ -134,9 +161,9 @@ class StableDiffusionXL:
             pixel_values=pixel_values
         )
 
-    def create_pipeline(self) -> BasePipeline:
+    def create_pipeline(self) -> StableDiffusionXLPipeline:
         """Create a StableDiffusionXLPipeline for inference."""
-        return BasePipeline(
+        return StableDiffusionXLPipeline(
             vae=self.vae_encoder.vae,
             text_encoder=self.text_encoders[0],
             text_encoder_2=self.text_encoders[1], 
