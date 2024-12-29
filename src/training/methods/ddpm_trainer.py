@@ -1,7 +1,6 @@
 """DDPM trainer implementation for SDXL with config-based v-prediction option."""
 import traceback
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Optional, Union
 from torch import Tensor
@@ -82,7 +81,7 @@ class DDPMTrainer(TrainingMethod):
             # Log input batch shapes for debugging
             self._log_tensor_shapes(batch, step="input")
 
-            # Update metrics logger
+            # Update metrics logger (just storing scalar metrics for UI/tracking)
             self.metrics_logger.update({
                 k: (v.item() if isinstance(v, torch.Tensor) else v)
                 for k, v in metrics.items()
@@ -90,6 +89,7 @@ class DDPMTrainer(TrainingMethod):
             return metrics
 
         except Exception as e:
+            # Error handling + shape history
             self.tensor_logger.handle_error(e, {
                 'error': str(e),
                 'error_type': type(e).__name__,
@@ -109,27 +109,36 @@ class DDPMTrainer(TrainingMethod):
         """
         try:
             # ----------------------------------------------------------
-            # 1. Extract latents from the batch
+            # 1. Safely extract latents from the batch
             # ----------------------------------------------------------
-            if "latent" in batch:
+            latent_dict = batch.get("latent", None)
+
+            if isinstance(latent_dict, dict):
+                # Log initial batch state
                 self.tensor_logger.log_checkpoint("Initial Batch", {
-                    "latent": batch["latent"],
+                    "latent": latent_dict,
                     "prompt_embeds": batch.get("prompt_embeds"),
                     "pooled_prompt_embeds": batch.get("pooled_prompt_embeds")
                 })
 
-                if "model_input" in batch["latent"]:
-                    latents = batch["latent"]["model_input"]
-                elif "latent" in batch["latent"] and "model_input" in batch["latent"]["latent"]:
-                    latents = batch["latent"]["latent"]["model_input"]
+                # Check "model_input" directly in latent_dict
+                if "model_input" in latent_dict:
+                    latents = latent_dict["model_input"]
+                # Or check if there's a nested "latent" dict
+                elif "latent" in latent_dict and latent_dict["latent"] is not None and isinstance(latent_dict["latent"], dict):
+                    if "model_input" in latent_dict["latent"]:
+                        latents = latent_dict["latent"]["model_input"]
+                    else:
+                        raise ValueError("Could not find 'model_input' in 'latent' dictionary")
                 else:
                     raise ValueError("Could not find model_input in latent data")
 
                 self.tensor_logger.log_checkpoint("Initial Latent Data", {
                     "latent.model_input": latents,
-                    "latent.latent": batch["latent"].get("latent")
+                    "latent.latent": latent_dict.get("latent")
                 })
             else:
+                # If 'latent' is not a dict, fallback to top-level "model_input"
                 latents = batch.get("model_input")
                 if latents is None:
                     raise KeyError("No latent data found in batch")
@@ -166,18 +175,16 @@ class DDPMTrainer(TrainingMethod):
             self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
             # ----------------------------------------------------------
-            # 4. Retrieve text embeddings for SDXL
+            # 4. Retrieve text embeddings if needed
+            #    For SDXL, pass them as encoder_hidden_states
             # ----------------------------------------------------------
-            # For an SDXL UNet, we need to pass prompt_embeds as `encoder_hidden_states`.
-            # Otherwise, it will complain about missing the argument.
-            if "prompt_embeds" not in batch or not isinstance(batch["prompt_embeds"], torch.Tensor):
-                raise ValueError(
-                    "SDXL UNet requires `prompt_embeds` in the batch to feed as `encoder_hidden_states`."
-                )
-            prompt_embeds = batch["prompt_embeds"].to(device=self.unet.device, dtype=target_dtype)
+            prompt_embeds = batch.get("prompt_embeds", None)
+            if prompt_embeds is None:
+                raise ValueError("Missing prompt_embeds for UNet2DConditionModel")
+            prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
 
             # ----------------------------------------------------------
-            # 5. UNet forward pass with conditioning
+            # 5. Forward pass with required encoder_hidden_states
             # ----------------------------------------------------------
             noise_pred = self.unet(
                 sample=noisy_latents,
@@ -193,6 +200,7 @@ class DDPMTrainer(TrainingMethod):
             if self.prediction_type == "v_prediction":
                 alpha_t = self.noise_scheduler.alphas_cumprod[timesteps].sqrt().view(-1, 1, 1, 1)
                 sigma_t = (1.0 - self.noise_scheduler.alphas_cumprod[timesteps]).sqrt().view(-1, 1, 1, 1)
+                # latents is x_0
                 v_target = alpha_t * noise - sigma_t * latents
                 loss = F.mse_loss(noise_pred.float(), v_target.float(), reduction="mean")
             else:
