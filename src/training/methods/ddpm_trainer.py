@@ -162,6 +162,8 @@ class DDPMTrainer(TrainingMethod):
             # Move latents to device
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
+            # Add this line to remove the extra singleton dimension
+            latents = latents.squeeze(1)
             self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
             # ----------------------------------------------------------
