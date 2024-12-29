@@ -1,9 +1,11 @@
 """Configuration management for SDXL training."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Union, Dict
 from pathlib import Path
 import yaml
-from omegaconf import OmegaConf
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ModelConfig:
@@ -129,26 +131,69 @@ class Config:
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
             
-        # Load YAML with OmegaConf for better interpolation support
-        yaml_config = OmegaConf.load(path)
-        
-        # Convert to dict and create config
-        config_dict = OmegaConf.to_container(yaml_config, resolve=True)
-        return cls.from_dict(config_dict)
-
-    @classmethod
-    def from_dict(cls, config_dict: Dict) -> "Config":
-        """Create Config instance from dictionary."""
-        return OmegaConf.structured(cls(**config_dict))
+        try:
+            # Load raw YAML first
+            with open(path) as f:
+                raw_config = yaml.safe_load(f)
+            
+            # Create default config
+            config = cls()
+            
+            # Update model config
+            if 'model' in raw_config:
+                config.model = ModelConfig(**raw_config['model'])
+            
+            # Update optimizer config
+            if 'optimizer' in raw_config:
+                config.optimizer = OptimizerConfig(**raw_config['optimizer'])
+            
+            # Update training config
+            if 'training' in raw_config:
+                training_data = raw_config['training'].copy()
+                if 'method_config' in training_data:
+                    scheduler_data = training_data['method_config'].get('scheduler', {})
+                    scheduler = SchedulerConfig()
+                    scheduler.rescale_betas_zero_snr = scheduler_data.get('rescale_betas_zero_snr', True)
+                    training_data['method_config'] = MethodConfig(scheduler=scheduler)
+                config.training = TrainingConfig(**training_data)
+            
+            # Update data config
+            if 'data' in raw_config:
+                config.data = DataConfig(**raw_config['data'])
+            
+            # Update global config
+            if 'global_config' in raw_config:
+                global_data = raw_config['global_config']
+                cache_config = CacheConfig(**global_data.get('cache', {}))
+                logging_config = LoggingConfig(**global_data.get('logging', {}))
+                image_config = ImageConfig(**global_data.get('image', {}))
+                config.global_config = GlobalConfig(
+                    cache=cache_config,
+                    logging=logging_config,
+                    image=image_config
+                )
+            
+            return config
+            
+        except Exception as e:
+            logger.error(f"Failed to load config from {path}: {str(e)}", exc_info=True)
+            raise
 
     def to_dict(self) -> Dict:
         """Convert Config to dictionary."""
-        return OmegaConf.to_container(self, resolve=True)
-
-    def save(self, path: Union[str, Path]):
-        """Save configuration to YAML file."""
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(path, 'w') as f:
-            yaml.safe_dump(self.to_dict(), f, default_flow_style=False)
+        return {
+            'model': asdict(self.model),
+            'optimizer': asdict(self.optimizer),
+            'training': {
+                **asdict(self.training),
+                'method_config': {
+                    'scheduler': self.training.method_config.scheduler.to_dict()
+                }
+            },
+            'data': asdict(self.data),
+            'global_config': {
+                'cache': asdict(self.global_config.cache),
+                'logging': asdict(self.global_config.logging),
+                'image': asdict(self.global_config.image)
+            }
+        }
