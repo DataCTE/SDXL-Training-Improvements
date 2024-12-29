@@ -2,7 +2,7 @@
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
   model_type: "sdxl"
-  prediction_type: "epsilon"
+  prediction_type: "v_prediction"
   num_timesteps: 1000
   sigma_min: 0.002
   sigma_max: 2000.0
@@ -12,7 +12,7 @@ model:
 
 # Optimizer settings
 optimizer:
-  learning_rate: 1.0e-6
+  learning_rate: 4.0e-7
   weight_decay: 0.01
   beta1: 0.9
   beta2: 0.999
@@ -32,6 +32,9 @@ training:
   enable_xformers: true
   clip_grad_norm: 1.0
   num_inference_steps: 50
+  method_config:
+    scheduler:
+      rescale_betas_zero_snr: true  # Only expose this setting
 
 # Dataset configuration
 data:

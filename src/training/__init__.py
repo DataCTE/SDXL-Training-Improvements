@@ -6,7 +6,6 @@ from .trainers.ddpm_trainer import DDPMTrainer
 from .trainers.flow_matching_trainer import FlowMatchingTrainer
 from .optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 from .schedulers import (
-    NoiseSchedulerConfig,
     configure_noise_scheduler,
     get_karras_sigmas,
     get_sigmas,
@@ -32,7 +31,6 @@ __all__ = [
     "SOAP",
     
     # Scheduler utilities
-    "NoiseSchedulerConfig",
     "configure_noise_scheduler",
     "get_karras_sigmas",
     "get_sigmas", 

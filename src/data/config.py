@@ -27,6 +27,32 @@ class OptimizerConfig:
     optimizer_type: str = "adamw"  # or "adamw_bf16", "adamw_8bit", "lion", "prodigy"
 
 @dataclass
+class SchedulerConfig:
+    """Noise scheduler configuration."""
+    num_train_timesteps: int = 1000
+    beta_start: float = 0.00085
+    beta_end: float = 0.012
+    beta_schedule: str = "scaled_linear"
+    clip_sample: bool = False
+    steps_offset: int = 0
+    timestep_spacing: str = "leading"
+    thresholding: bool = False
+    dynamic_thresholding_ratio: float = 0.995
+    sample_max_value: float = 1.0
+    rescale_betas_zero_snr: bool = True
+
+    def to_dict(self) -> dict:
+        """Convert config to dictionary, only exposing rescale_betas_zero_snr."""
+        return {
+            "rescale_betas_zero_snr": self.rescale_betas_zero_snr
+        }
+
+@dataclass
+class MethodConfig:
+    """Training method configuration."""
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+
+@dataclass
 class TrainingConfig:
     batch_size: int = 4
     num_epochs: int = 100
@@ -39,6 +65,7 @@ class TrainingConfig:
     enable_xformers: bool = True
     clip_grad_norm: float = 1.0
     num_inference_steps: int = 50
+    method_config: MethodConfig = field(default_factory=MethodConfig)
 
 @dataclass
 class CacheConfig:
