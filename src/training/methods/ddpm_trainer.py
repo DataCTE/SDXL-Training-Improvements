@@ -14,14 +14,21 @@ logger = get_logger(__name__)
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"
 
-    def _prepare_time_ids(self, add_time_ids: torch.Tensor) -> torch.Tensor:
-        """Reshape time IDs to match expected dimensions: (batch_size, 6, 1, 1)."""
-        if add_time_ids.ndim == 2:
-            add_time_ids = add_time_ids.unsqueeze(-1).unsqueeze(-1)
-
-        if hasattr(self.unet, 'dtype'):
-            add_time_ids = add_time_ids.to(dtype=self.unet.dtype)
-
+    def _prepare_time_ids(
+        self,
+        original_sizes,
+        crop_top_lefts, 
+        target_sizes,
+        dtype,
+        device
+    ) -> torch.Tensor:
+        """Prepare time embeddings for SDXL conditioning."""
+        add_time_ids = [
+            list(original_size) + list(crop_top_left) + list(target_size)
+            for original_size, crop_top_left, target_size 
+            in zip(original_sizes, crop_top_lefts, target_sizes)
+        ]
+        add_time_ids = torch.tensor(add_time_ids, dtype=dtype, device=device)
         return add_time_ids
 
     def __init__(self, unet: torch.nn.Module, config: Config):
@@ -200,21 +207,47 @@ class DDPMTrainer(TrainingMethod):
             self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
             # ----------------------------------------------------------
-            # 4. Retrieve text embeddings if needed
-            #    For SDXL, pass them as encoder_hidden_states
+            # 4. Retrieve embeddings and conditioning inputs
             # ----------------------------------------------------------
             prompt_embeds = batch.get("prompt_embeds", None)
             if prompt_embeds is None:
                 raise ValueError("Missing prompt_embeds for UNet2DConditionModel")
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
 
+            # Extract additional conditioning inputs
+            text_embeds = batch.get("pooled_prompt_embeds")
+            if text_embeds is None:
+                raise ValueError("Missing pooled_prompt_embeds in batch")
+            text_embeds = text_embeds.to(self.unet.device, self.unet.dtype)
+            
+            # Get time embedding inputs
+            original_sizes = batch.get("original_sizes")
+            crop_top_lefts = batch.get("crop_top_lefts") 
+            target_sizes = batch.get("target_sizes")
+            
+            if any(x is None for x in [original_sizes, crop_top_lefts, target_sizes]):
+                raise ValueError("Missing required time embedding inputs")
+                
+            # Prepare time embeddings
+            add_time_ids = self._prepare_time_ids(
+                original_sizes=original_sizes,
+                crop_top_lefts=crop_top_lefts,
+                target_sizes=target_sizes,
+                dtype=self.unet.dtype,
+                device=self.unet.device
+            )
+
             # ----------------------------------------------------------
-            # 5. Forward pass with required encoder_hidden_states
+            # 5. Forward pass with all conditioning
             # ----------------------------------------------------------
             noise_pred = self.unet(
                 sample=noisy_latents,
                 timestep=timesteps,
-                encoder_hidden_states=prompt_embeds
+                encoder_hidden_states=prompt_embeds,
+                added_cond_kwargs={
+                    "text_embeds": text_embeds,
+                    "time_ids": add_time_ids
+                }
             ).sample
 
             self.tensor_logger.log_checkpoint("Model Output", {"noise_pred": noise_pred})
