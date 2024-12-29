@@ -38,59 +38,60 @@ from src.training.methods.base import TrainingMethod
 
 class SDXLTrainer:
     @classmethod
-    def create(cls, config: Config, model: StableDiffusionXLModel, 
-               optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
-               device: Union[str, torch.device], training_method: TrainingMethod,
-               wandb_logger: Optional[WandbLogger] = None,
-               validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
-        logger = get_logger("training.sdxl")
-        logger.debug("Creating SDXLTrainer instance")
-        
-        return cls(
-            config=config,
-            model=model,
-            optimizer=optimizer,
-            train_dataloader=train_dataloader,
-            training_method=training_method,
-            device=device,
-            wandb_logger=wandb_logger,
-            validation_prompts=validation_prompts
-        )
+@classmethod
+def create(cls, config: Config, model: StableDiffusionXLModel, 
+           optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
+           device: Union[str, torch.device], training_method: TrainingMethod,
+           wandb_logger: Optional[WandbLogger] = None,
+           validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
+    logger = get_logger("training.sdxl")
+    logger.debug("Creating SDXLTrainer instance")
     
-    def __init__(
-        self,
-        config: Config,
-        model: StableDiffusionXLModel,
-        optimizer: torch.optim.Optimizer,
-        train_dataloader: DataLoader,
-        training_method: TrainingMethod,
-        device: Union[str, torch.device],
-        wandb_logger: Optional[WandbLogger] = None,
-        validation_prompts: Optional[List[str]] = None
-    ):
-        # Get logger first
-        self.logger = get_logger(__name__)
-        # Initialize TensorLogger
-        self.tensor_logger = TensorLogger(self.logger)
-        
-        self.config = config
-        self.model = model
-        self.unet = model.unet
-        self.optimizer = optimizer
-        # Ensure DataLoader uses a single worker
-        self.train_dataloader = DataLoader(
-            train_dataloader.dataset,
-            batch_size=train_dataloader.batch_size,
-            shuffle=True,
-            num_workers=0,  # Use single worker
-            pin_memory=False,
-            persistent_workers=False,
-            drop_last=True,
-            collate_fn=train_dataloader.dataset.collate_fn if hasattr(train_dataloader.dataset, 'collate_fn') else None
-        )
-        self.training_method = training_method
-        self.device = device
-        self.wandb_logger = wandb_logger
+    return cls(
+        config=config,
+        model=model,
+        optimizer=optimizer,
+        train_dataloader=train_dataloader,
+        training_method=training_method,
+        device=device,
+        wandb_logger=wandb_logger,
+        validation_prompts=validation_prompts
+    )
+    
+def __init__(
+    self,
+    config: Config,
+    model: StableDiffusionXLModel,
+    optimizer: torch.optim.Optimizer,
+    train_dataloader: DataLoader,
+    training_method: TrainingMethod,
+    device: Union[str, torch.device],
+    wandb_logger: Optional[WandbLogger] = None,
+    validation_prompts: Optional[List[str]] = None
+):
+    # Get logger first
+    self.logger = get_logger(__name__)
+    # Initialize TensorLogger
+    self.tensor_logger = TensorLogger(self.logger)
+    
+    self.config = config
+    self.model = model
+    self.unet = model.unet
+    self.optimizer = optimizer
+    # Ensure DataLoader uses a single worker
+    self.train_dataloader = DataLoader(
+        train_dataloader.dataset,
+        batch_size=train_dataloader.batch_size,
+        shuffle=True,
+        num_workers=0,  # Use single worker
+        pin_memory=False,
+        persistent_workers=False,
+        drop_last=True,
+        collate_fn=train_dataloader.dataset.collate_fn if hasattr(train_dataloader.dataset, 'collate_fn') else None
+    )
+    self.training_method = training_method
+    self.device = device
+    self.wandb_logger = wandb_logger
 
         base_dtype = DataType.from_str(config.model.dtype)
         fallback_dtype = DataType.from_str(config.model.fallback_dtype)

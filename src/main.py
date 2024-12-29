@@ -24,10 +24,7 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
 from torch.distributed import init_process_group
-from src.training.optimizers import AdamWScheduleFreeKahan
-from src.training.optimizers.adamw_bfloat16 import AdamWBF16
-from src.training.optimizers import AdamWBF16
-from src.training.optimizers import SOAP
+from src.training import optimizers
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
 from src.core.logging import get_logger, LogConfig, WandbLogger, create_enhanced_logger
 from src.core.types import DataType, ModelWeightDtypes
@@ -360,24 +357,37 @@ def setup_training(
         training_method_cls = TrainingMethod.get_method(config.training.method)
         training_method = training_method_cls(model.unet, config)
         
-        logger.info("Setting up optimizer...")
-        try:
-            optimizer_kwargs = {
-                "lr": config.training.learning_rate,
-                "betas": config.training.optimizer_betas,
-                "weight_decay": config.training.weight_decay,
-                "eps": config.training.optimizer_eps
-            }
+    logger.info("Setting up optimizer...")
+    optimizer_kwargs = {
+        "lr": config.training.learning_rate,
+        "betas": config.training.optimizer_betas,
+        "weight_decay": config.training.weight_decay,
+        "eps": config.training.optimizer_eps
+    }
 
-            # Select optimizer based on config and hardware capabilities
-            optimizer = AdamWBF16(
-                list(model.unet.parameters()) + list(training_method.parameters()),
-                **optimizer_kwargs
-            )
-            logger.info("Using custom AdamWBF16 optimizer")
-        except Exception as e:
-            logger.error(f"Failed to setup optimizer: {str(e)}", exc_info=True)
-            raise
+    # Map optimizer names to classes
+    optimizer_classes = {
+        'AdamWBF16': optimizers.AdamWBF16,
+        'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
+        'SOAP': optimizers.SOAP,
+        # Add other optimizers here as needed
+    }
+
+    # Get optimizer name from config
+    optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
+
+    if optimizer_name not in optimizer_classes:
+        raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
+
+    optimizer_class = optimizer_classes[optimizer_name]
+
+    # Include parameters from model.unet and training_method
+    optimizer = optimizer_class(
+        list(model.unet.parameters()) + list(training_method.parameters()),
+        **optimizer_kwargs
+    )
+
+    logger.info(f"Using optimizer: {optimizer_name}")
 
         # Add timeout handling
         timeout = 300  # 5 minutes timeout
@@ -519,23 +529,23 @@ def main():
             image_paths, captions = load_training_data(config)
             
             logger.info("Setting up training...")
-            train_dataloader, optimizer, wandb_logger, training_method = setup_training(
-                config=config,
-                model=model,  # Fixed: was using undefined 'models'
-                device=device,
-                image_paths=image_paths,
-                captions=captions
-            )
-            
-            trainer = create_trainer(
-                config=config,
-                model=model,  # Fixed: was using undefined 'models'
-                optimizer=optimizer,
-                train_dataloader=train_dataloader,
-                device=device,
-                training_method=training_method,
-                wandb_logger=wandb_logger
-            )
+        train_dataloader, optimizer, wandb_logger, training_method = setup_training(
+            config=config,
+            model=model,
+            device=device,
+            image_paths=image_paths,
+            captions=captions
+        )
+
+        trainer = create_trainer(
+            config=config,
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            device=device,
+            training_method=training_method,
+            wandb_logger=wandb_logger
+        )
             
             logger.info("Starting training...")
             trainer.train()

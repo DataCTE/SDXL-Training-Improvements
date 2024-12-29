@@ -15,8 +15,8 @@ logger = get_logger(__name__)
 class DDPMTrainer(TrainingMethod):
     name = "ddpm"
 
-    def parameters(self):
-        return self.up_proj.parameters()
+def parameters(self):
+    return self.up_proj.parameters()
 
     def _prepare_time_ids(
         self,
