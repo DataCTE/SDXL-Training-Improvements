@@ -205,15 +205,17 @@ class SDXLTrainer:
                     batch_size, num_images, seq_len, embed_dim = emb.shape
                     emb = emb.view(batch_size * num_images, seq_len, embed_dim)
                 elif emb.dim() == 3:
-                    emb = emb.view(-1, emb.shape[1], emb.shape[2])
+                    batch_size, seq_len, embed_dim = emb.shape
                 else:
                     raise ValueError(f"Unexpected prompt_embeds shape: {emb.shape}")
                 
                 # Apply up-projection
-                emb = self.up_proj(emb.reshape(-1, emb.shape[-1]))
+                emb = self.up_proj(emb.view(-1, embed_dim))
                 
                 # Reshape back to [batch_size * num_images, seq_len, new_embed_dim]
-                batch["prompt_embeds"] = emb.view(-1, emb.shape[1], emb.shape[2])
+                new_embed_dim = emb.shape[-1]
+                emb = emb.view(-1, seq_len, new_embed_dim)
+                batch["prompt_embeds"] = emb
             
             if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
                 p_emb = batch["pooled_prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
@@ -223,12 +225,15 @@ class SDXLTrainer:
                     batch_size, num_images, embed_dim = p_emb.shape
                     p_emb = p_emb.view(batch_size * num_images, embed_dim)
                 elif p_emb.dim() == 2:
-                    p_emb = p_emb.view(-1, p_emb.shape[-1])
+                    batch_size, embed_dim = p_emb.shape
                 else:
                     raise ValueError(f"Unexpected pooled_prompt_embeds shape: {p_emb.shape}")
                 
                 # Apply up-projection
-                batch["pooled_prompt_embeds"] = self.up_proj(p_emb)
+                p_emb = self.up_proj(p_emb)
+                
+                # Update Batch
+                batch["pooled_prompt_embeds"] = p_emb
 
             # Verify shapes of embeddings after processing
             assert batch["prompt_embeds"].dim() == 3, f"Expected prompt_embeds to be 3D, got {batch['prompt_embeds'].shape}"
