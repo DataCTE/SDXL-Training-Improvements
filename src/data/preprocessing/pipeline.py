@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import create_stream_context
 import numpy as np
+import torch.nn.functional as F
 from src.data.config import Config
 
 class ProcessingError(Exception):
@@ -423,64 +424,76 @@ class PreprocessingPipeline:
             img = Image.open(image_path).convert('RGB')
             w, h = img.size
             
-            # Calculate aspect ratio
-            aspect_ratio = w / h
-            
-            # Check if aspect ratio is within bounds
-            if aspect_ratio > config.global_config.image.max_aspect_ratio or \
-               aspect_ratio < (1 / config.global_config.image.max_aspect_ratio):
-                logger.warning(f"Skipping image {image_path} - aspect ratio {aspect_ratio:.2f} exceeds bounds")
-                return None
-            
-            # Find best matching bucket dimensions
-            target_w, target_h = self.get_aspect_buckets(config)[0]
-            min_diff = float('inf')
-            bucket_idx = 0
-            
-            for idx, (bucket_w, bucket_h) in enumerate(self.get_aspect_buckets(config)):
-                bucket_ratio = bucket_w / bucket_h
-                diff = abs(aspect_ratio - bucket_ratio)
-                if diff < min_diff:
-                    min_diff = diff
-                    target_w, target_h = bucket_w, bucket_h
-                    bucket_idx = idx
-            
-            # Calculate resize dimensions while preserving aspect ratio
-            scale = min(target_w / w, target_h / h)
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            
-            # Resize image
-            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            
-            # Center crop if needed
-            if new_w != target_w or new_h != target_h:
-                left = (new_w - target_w) // 2
-                top = (new_h - target_h) // 2
-                right = left + target_w
-                bottom = top + target_h
-                img = img.crop((left, top, right, bottom))
-            
-            # Convert to tensor and normalize
-            img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
+            # Early conversion to tensor and move to GPU
+            img_tensor = torch.from_numpy(np.array(img)).float().to(self.device) / 255.0
             img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
             
-            # Ensure tensor is contiguous
-            img_tensor = img_tensor.contiguous()
-            if not img_tensor.is_floating_point():
-                img_tensor = img_tensor.float()
-            
-            # Return with standardized field names
-            return {
-                "pixel_values": img_tensor,
-                "original_size": (w, h),
-                "target_size": (target_w, target_h),
-                "bucket_index": bucket_idx,
-                "path": str(image_path),
-                "timestamp": time.time(),
-                "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
-            }
-            
+            # Process on GPU
+            return self._process_on_gpu(
+                self._process_image_tensor,
+                img_tensor=img_tensor,
+                original_size=(w, h),
+                config=config,
+                image_path=image_path
+            )
+        
         except Exception as e:
             logger.error(f"Failed to process image {image_path}: {e}")
             return None
+
+    def _process_image_tensor(
+        self, 
+        img_tensor: torch.Tensor,
+        original_size: Tuple[int, int],
+        config: Config,
+        image_path: Union[str, Path]
+    ) -> Dict[str, Any]:
+        """Process image tensor on GPU."""
+        w, h = original_size
+        aspect_ratio = w / h
+        
+        # Check aspect ratio
+        if aspect_ratio > config.global_config.image.max_aspect_ratio or \
+           aspect_ratio < (1 / config.global_config.image.max_aspect_ratio):
+            return None
+        
+        # Find best bucket (this is CPU operation but lightweight)
+        target_w, target_h = self.get_aspect_buckets(config)[0]
+        min_diff = float('inf')
+        bucket_idx = 0
+        
+        for idx, (bucket_w, bucket_h) in enumerate(self.get_aspect_buckets(config)):
+            bucket_ratio = bucket_w / bucket_h
+            diff = abs(aspect_ratio - bucket_ratio)
+            if diff < min_diff:
+                min_diff = diff
+                target_w, target_h = bucket_w, bucket_h
+                bucket_idx = idx
+        
+        # Resize on GPU
+        scale = min(target_w / w, target_h / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        
+        img_tensor = F.interpolate(
+            img_tensor.unsqueeze(0),
+            size=(new_h, new_w),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(0)
+        
+        # Center crop on GPU
+        if new_w != target_w or new_h != target_h:
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
+            img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
+        
+        return {
+            "pixel_values": img_tensor,  # Stays on GPU
+            "original_size": original_size,
+            "target_size": (target_w, target_h),
+            "bucket_index": bucket_idx,
+            "path": str(image_path),
+            "timestamp": time.time(),
+            "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
+        }

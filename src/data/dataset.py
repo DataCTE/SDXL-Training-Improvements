@@ -123,11 +123,14 @@ class AspectBucketDataset(Dataset):
 
             # Try cache first if enabled
             if self.config.global_config.cache.use_cache:
-                cached_data = self.cache_manager.load_latents(image_path)
+                cached_data = self.cache_manager.load_latents(
+                    image_path,
+                    device=self.preprocessing_pipeline.device  # Load directly to correct device
+                )
                 if cached_data is not None:
                     return cached_data
 
-            # Process single image using pipeline
+            # Process on GPU via pipeline
             processed = self.preprocessing_pipeline._process_single_image(
                 image_path=image_path,
                 config=self.config
@@ -135,15 +138,15 @@ class AspectBucketDataset(Dataset):
             if processed is None:
                 return None
 
-            # Get text embeddings
+            # Get text embeddings (already on GPU from pipeline)
             encoded_text = self.preprocessing_pipeline.encode_prompt(
                 batch={"text": [caption]},
                 proportion_empty_prompts=0.0
             )
 
-            # Combine results
+            # Everything stays on GPU until collation
             result = {
-                "pixel_values": processed["pixel_values"],
+                "pixel_values": processed["pixel_values"],  # Already on GPU
                 "original_size": processed["original_size"],
                 "crop_coords": processed["crop_coords"],
                 "target_size": processed["target_size"],
@@ -152,7 +155,7 @@ class AspectBucketDataset(Dataset):
                 "text": caption
             }
 
-            # Cache if enabled
+            # Cache if enabled (cache manager handles CPU conversion)
             if self.config.global_config.cache.use_cache:
                 self.cache_manager.save_latents(
                     tensors={

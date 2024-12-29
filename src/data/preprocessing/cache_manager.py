@@ -110,11 +110,11 @@ class CacheManager:
         try:
             cache_key = self.get_cache_key(original_path)
             
-            # Ensure tensors are on CPU before saving
+            # Move tensors to CPU only when saving
             tensors_to_save = {
-                "pixel_values": tensors["pixel_values"],
-                "prompt_embeds": tensors["prompt_embeds"],
-                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"]
+                "pixel_values": tensors["pixel_values"].cpu(),
+                "prompt_embeds": tensors["prompt_embeds"].cpu(),
+                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
             }
             
             # Save tensors
@@ -186,19 +186,20 @@ class CacheManager:
                     self._save_index()
                 return None
                 
-            # Load tensors
+            # Load directly to target device
+            device = device or self.device
             tensors = torch.load(
                 tensors_path,
-                map_location=device or self.device
+                map_location=device
             )
             
             # Load metadata
             with open(metadata_path) as f:
                 metadata = json.load(f)
                 
-            # Format return dict with consistent field names
+            # Return with tensors already on correct device
             return {
-                "pixel_values": tensors["pixel_values"],
+                "pixel_values": tensors["pixel_values"],  # Already on device
                 "prompt_embeds": tensors["prompt_embeds"],
                 "pooled_prompt_embeds": tensors["pooled_prompt_embeds"],
                 "original_size": metadata["original_size"],
