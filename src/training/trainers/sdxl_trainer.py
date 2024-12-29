@@ -200,32 +200,37 @@ class SDXLTrainer:
             if "prompt_embeds" in batch and isinstance(batch["prompt_embeds"], torch.Tensor):
                 emb = batch["prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
                 
-                # Handle possible singleton dimensions in emb
-                if emb.dim() == 4 and emb.shape[1] == 1:
-                    emb = emb.view(emb.shape[0], emb.shape[2], emb.shape[3])
-                elif emb.dim() == 4:
-                    emb = emb.view(emb.shape[0], -1, emb.shape[3])
+                # Handle possible singleton dimensions and reshape
+                if emb.dim() == 4:
+                    batch_size, num_images, seq_len, embed_dim = emb.shape
+                    emb = emb.view(batch_size * num_images, seq_len, embed_dim)
+                elif emb.dim() == 3:
+                    emb = emb.view(-1, emb.shape[1], emb.shape[2])
+                else:
+                    raise ValueError(f"Unexpected prompt_embeds shape: {emb.shape}")
                 
-                batch_size = emb.shape[0]
-                seq_len = emb.shape[1]
+                # Apply up-projection
+                emb = self.up_proj(emb.reshape(-1, emb.shape[-1]))
                 
-                # Apply up-projection and reshape back
-                batch["prompt_embeds"] = self.up_proj(
-                    emb.reshape(-1, emb.shape[-1])
-                ).reshape(batch_size, seq_len, -1)
+                # Reshape back to [batch_size * num_images, seq_len, new_embed_dim]
+                batch["prompt_embeds"] = emb.view(-1, emb.shape[1], emb.shape[2])
             
             if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
                 p_emb = batch["pooled_prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
                 
-                # Handle possible singleton dimensions
-                if p_emb.dim() == 3 and p_emb.shape[1] == 1:
-                    p_emb = p_emb.view(p_emb.shape[0], p_emb.shape[2])
-                elif p_emb.dim() == 3:
-                    p_emb = p_emb.view(p_emb.shape[0], -1)
+                # Handle possible singleton dimensions and reshape
+                if p_emb.dim() == 3:
+                    batch_size, num_images, embed_dim = p_emb.shape
+                    p_emb = p_emb.view(batch_size * num_images, embed_dim)
+                elif p_emb.dim() == 2:
+                    p_emb = p_emb.view(-1, p_emb.shape[-1])
+                else:
+                    raise ValueError(f"Unexpected pooled_prompt_embeds shape: {p_emb.shape}")
                 
+                # Apply up-projection
                 batch["pooled_prompt_embeds"] = self.up_proj(p_emb)
 
-            # Verify shapes
+            # Verify shapes of embeddings after processing
             assert batch["prompt_embeds"].dim() == 3, f"Expected prompt_embeds to be 3D, got {batch['prompt_embeds'].shape}"
             assert batch["pooled_prompt_embeds"].dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got {batch['pooled_prompt_embeds'].shape}"
 
@@ -251,7 +256,7 @@ class SDXLTrainer:
                 if "model_input" in batch["latent"]:
                     latents = batch["latent"]["model_input"]
                     
-                    # Reshape latents to remove singleton dimensions
+                    # Remove singleton dimensions if necessary
                     if latents.dim() == 5 and latents.shape[1] == 1:
                         latents = latents.view(latents.shape[0], latents.shape[2], latents.shape[3], latents.shape[4])
                         batch["latent"]["model_input"] = latents

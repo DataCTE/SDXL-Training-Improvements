@@ -162,10 +162,6 @@ class DDPMTrainer(TrainingMethod):
             # Move latents to device
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
-            # latents.shape is [batch_size, 1, channels, height, width]
-            # Reshape it to [batch_size, channels, height, width]
-            if latents.dim() == 5 and latents.shape[1] == 1:
-                latents = latents.view(latents.shape[0], latents.shape[2], latents.shape[3], latents.shape[4])
             self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
             # ----------------------------------------------------------
@@ -218,20 +214,12 @@ class DDPMTrainer(TrainingMethod):
             if prompt_embeds is None:
                 raise ValueError("Missing prompt_embeds for UNet2DConditionModel")
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
-            # prompt_embeds.shape is [batch_size, 1, seq_len, embed_dim]
-            # Reshape it to [batch_size, seq_len, embed_dim]
-            if prompt_embeds.dim() == 4 and prompt_embeds.shape[1] == 1:
-                prompt_embeds = prompt_embeds.view(prompt_embeds.shape[0], prompt_embeds.shape[2], prompt_embeds.shape[3])
 
             # Extract additional conditioning inputs
             text_embeds = batch.get("pooled_prompt_embeds")
             if text_embeds is None:
                 raise ValueError("Missing pooled_prompt_embeds in batch")
             text_embeds = text_embeds.to(self.unet.device, self.unet.dtype)
-            # text_embeds.shape is [batch_size, 1, embed_dim]
-            # Reshape it to [batch_size, embed_dim]
-            if text_embeds.dim() == 3 and text_embeds.shape[1] == 1:
-                text_embeds = text_embeds.view(text_embeds.shape[0], text_embeds.shape[2])
             
             # Get time embedding inputs
             original_sizes = batch.get("original_sizes")
