@@ -248,198 +248,197 @@ def setup_training(
     image_paths: List[str],
     captions: List[str]
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger], TrainingMethod]:
+    if torch.cuda.is_available():
+        logger.info(f"Initial CUDA memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
+        
+    logger.info("Initializing latent preprocessor...")
     try:
+        latent_preprocessor = LatentPreprocessor(config=config, sdxl_model=model, device=device)
+        logger.info("Latent preprocessor initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize latent preprocessor: {str(e)}", exc_info=True)
+        raise
+    
+    logger.info("Setting up cache manager...")
+    try:
+        model_dtypes = ModelWeightDtypes(
+            train_dtype=DataType.from_str(config.model.dtype),
+            fallback_train_dtype=DataType.from_str(config.model.fallback_dtype),
+            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
+            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
+            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
+            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
+            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
+            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
+            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
+            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
+            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
+            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
+            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
+        )
+        cache_manager = CacheManager(
+            model_dtypes=model_dtypes,
+            cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
+            num_proc=config.global_config.cache.num_proc,
+            chunk_size=config.global_config.cache.chunk_size,
+            compression=getattr(config.global_config.cache, 'compression', 'zstd'),
+            verify_hashes=config.global_config.cache.verify_hashes,
+            max_memory_usage=0.8,
+            enable_memory_tracking=True
+        )
+        cache_manager.validate_cache_index()
+        logger.info("Cache manager setup complete")
+    except Exception as e:
+        logger.error(f"Failed to setup cache manager: {str(e)}", exc_info=True)
+        raise
+    
+    logger.info("Creating preprocessing pipeline...")
+    try:
+        preprocessing_pipeline = PreprocessingPipeline(
+            config=config,
+            latent_preprocessor=latent_preprocessor,
+            cache_manager=cache_manager,
+            is_train=True,
+            num_gpu_workers=config.preprocessing.num_gpu_workers,
+            num_cpu_workers=config.preprocessing.num_cpu_workers,
+            num_io_workers=config.preprocessing.num_io_workers,
+            prefetch_factor=config.preprocessing.prefetch_factor,
+            use_pinned_memory=False  # Disable pinned memory to prevent CUDA tensor pinning issues
+        )
+    except Exception as e:
+        logger.error(f"Failed to create preprocessing pipeline: {str(e)}", exc_info=True)
+        raise
+    
+    # Create tag weighter with proper configuration
+    if config.tag_weighting.enable_tag_weighting:
+        logger.info("Initializing tag weighter...")
+        tag_weighter = create_tag_weighter_with_index(
+            config=config,
+            image_captions={path: caption for path, caption in zip(image_paths, captions)},
+            index_output_path=Path(config.global_config.output_dir) / "tag_weights.json",
+            cache_path=Path(config.global_config.cache.cache_dir) / "tag_weights_cache.json"
+        )
+    else:
+        tag_weighter = None
+
+    logger.info("Creating dataset...")
+    try:
+        train_dataset = create_dataset(
+            config=config,
+            image_paths=image_paths,
+            captions=captions,
+            preprocessing_pipeline=preprocessing_pipeline,
+            tag_weighter=tag_weighter,
+            enable_memory_tracking=True,
+            max_memory_usage=0.8
+        )
+    except Exception as e:
+        logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
+        raise
+    
+    logger.info("Creating dataloader...")
+    try:
+        train_dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
+            shuffle=True,
+            num_workers=0,  # Use single worker to avoid pickling issues
+            pin_memory=False,  # Disable pinned memory to prevent CUDA tensor pinning issues
+            persistent_workers=False,  # Disable persistent workers
+            collate_fn=train_dataset.collate_fn
+        )
+    except Exception as e:
+        logger.error(f"Failed to create dataloader: {str(e)}", exc_info=True)
+        raise
+    
+    logger.info("Initializing training method...")
+    # Instantiate the training method
+    training_method_cls = TrainingMethod.get_method(config.training.method)
+    training_method = training_method_cls(model.unet, config)
+    
+    try:
+        logger.info("Setting up optimizer...")
+        optimizer_kwargs = {
+            "lr": config.training.learning_rate,
+            "betas": config.training.optimizer_betas,
+            "weight_decay": config.training.weight_decay,
+            "eps": config.training.optimizer_eps
+        }
+
+        # Map optimizer names to classes
+        optimizer_classes = {
+            'AdamWBF16': optimizers.AdamWBF16,
+            'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
+            'SOAP': optimizers.SOAP,
+            # Add other optimizers here as needed
+        }
+
+        # Get optimizer name from config
+        optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
+
+        if optimizer_name not in optimizer_classes:
+            raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
+
+        optimizer_class = optimizer_classes[optimizer_name]
+
+        # Include parameters from model.unet and training_method
+        optimizer = optimizer_class(
+            list(model.unet.parameters()) + list(training_method.parameters()),
+            **optimizer_kwargs
+        )
+
+        logger.info(f"Using optimizer: {optimizer_name}")
+
+        # Add timeout handling
+        timeout = 300  # 5 minutes timeout
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            if not torch.cuda.is_available() or torch.cuda.current_stream().query():
+                break
+            time.sleep(0.1)
+            
+        if time.time() - start_time >= timeout:
+            raise TimeoutError("CUDA operations timed out")
+
+        # Force CUDA synchronization
         if torch.cuda.is_available():
-            logger.info(f"Initial CUDA memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
-            
-        logger.info("Initializing latent preprocessor...")
+            torch.cuda.synchronize()
+            logger.info("CUDA synchronized successfully")
+
         try:
-            latent_preprocessor = LatentPreprocessor(config=config, sdxl_model=model, device=device)
-            logger.info("Latent preprocessor initialized successfully")
+            if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
+                model.unet = torch.nn.parallel.DistributedDataParallel(
+                    model.unet, device_ids=[device] if device.type == "cuda" else None
+                )
         except Exception as e:
-            logger.error(f"Failed to initialize latent preprocessor: {str(e)}", exc_info=True)
+            logger.error(f"Failed to setup distributed training: {str(e)}", exc_info=True)
             raise
-        
-        logger.info("Setting up cache manager...")
-        try:
-            model_dtypes = ModelWeightDtypes(
-                train_dtype=DataType.from_str(config.model.dtype),
-                fallback_train_dtype=DataType.from_str(config.model.fallback_dtype),
-                unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
-                prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
-                text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
-                text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
-                vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
-                effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
-                decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
-                decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
-                decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
-                lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
-                embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
-            )
-            cache_manager = CacheManager(
-                model_dtypes=model_dtypes,
-                cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
-                num_proc=config.global_config.cache.num_proc,
-                chunk_size=config.global_config.cache.chunk_size,
-                compression=getattr(config.global_config.cache, 'compression', 'zstd'),
-                verify_hashes=config.global_config.cache.verify_hashes,
-                max_memory_usage=0.8,
-                enable_memory_tracking=True
-            )
-            cache_manager.validate_cache_index()
-            logger.info("Cache manager setup complete")
-        except Exception as e:
-            logger.error(f"Failed to setup cache manager: {str(e)}", exc_info=True)
-            raise
-        
-        logger.info("Creating preprocessing pipeline...")
-        try:
-            preprocessing_pipeline = PreprocessingPipeline(
-                config=config,
-                latent_preprocessor=latent_preprocessor,
-                cache_manager=cache_manager,
-                is_train=True,
-                num_gpu_workers=config.preprocessing.num_gpu_workers,
-                num_cpu_workers=config.preprocessing.num_cpu_workers,
-                num_io_workers=config.preprocessing.num_io_workers,
-                prefetch_factor=config.preprocessing.prefetch_factor,
-                use_pinned_memory=False  # Disable pinned memory to prevent CUDA tensor pinning issues
-            )
-        except Exception as e:
-            logger.error(f"Failed to create preprocessing pipeline: {str(e)}", exc_info=True)
-            raise
-        
-        # Create tag weighter with proper configuration
-        if config.tag_weighting.enable_tag_weighting:
-            logger.info("Initializing tag weighter...")
-            tag_weighter = create_tag_weighter_with_index(
-                config=config,
-                image_captions={path: caption for path, caption in zip(image_paths, captions)},
-                index_output_path=Path(config.global_config.output_dir) / "tag_weights.json",
-                cache_path=Path(config.global_config.cache.cache_dir) / "tag_weights_cache.json"
-            )
-        else:
-            tag_weighter = None
 
-        logger.info("Creating dataset...")
-        try:
-            train_dataset = create_dataset(
-                config=config,
-                image_paths=image_paths,
-                captions=captions,
-                preprocessing_pipeline=preprocessing_pipeline,
-                tag_weighter=tag_weighter,
-                enable_memory_tracking=True,
-                max_memory_usage=0.8
-            )
-        except Exception as e:
-            logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
-            raise
-        
-        logger.info("Creating dataloader...")
-        try:
-            train_dataloader = torch.utils.data.DataLoader(
-                train_dataset,
-                batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
-                shuffle=True,
-                num_workers=0,  # Use single worker to avoid pickling issues
-                pin_memory=False,  # Disable pinned memory to prevent CUDA tensor pinning issues
-                persistent_workers=False,  # Disable persistent workers
-                collate_fn=train_dataset.collate_fn
-            )
-        except Exception as e:
-            logger.error(f"Failed to create dataloader: {str(e)}", exc_info=True)
-            raise
-        
-        logger.info("Initializing training method...")
-        # Instantiate the training method
-        training_method_cls = TrainingMethod.get_method(config.training.method)
-        training_method = training_method_cls(model.unet, config)
-        
-        try:
-            logger.info("Setting up optimizer...")
-            optimizer_kwargs = {
-                "lr": config.training.learning_rate,
-                "betas": config.training.optimizer_betas,
-                "weight_decay": config.training.weight_decay,
-                "eps": config.training.optimizer_eps
-            }
-
-            # Map optimizer names to classes
-            optimizer_classes = {
-                'AdamWBF16': optimizers.AdamWBF16,
-                'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
-                'SOAP': optimizers.SOAP,
-                # Add other optimizers here as needed
-            }
-
-            # Get optimizer name from config
-            optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
-
-            if optimizer_name not in optimizer_classes:
-                raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
-
-            optimizer_class = optimizer_classes[optimizer_name]
-
-            # Include parameters from model.unet and training_method
-            optimizer = optimizer_class(
-                list(model.unet.parameters()) + list(training_method.parameters()),
-                **optimizer_kwargs
-            )
-
-            logger.info(f"Using optimizer: {optimizer_name}")
-
-            # Add timeout handling
-            timeout = 300  # 5 minutes timeout
-            start_time = time.time()
-            
-            while time.time() - start_time < timeout:
-                if not torch.cuda.is_available() or torch.cuda.current_stream().query():
-                    break
-                time.sleep(0.1)
-                
-            if time.time() - start_time >= timeout:
-                raise TimeoutError("CUDA operations timed out")
-
-            # Force CUDA synchronization
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                logger.info("CUDA synchronized successfully")
-
+        wandb_logger = None
+        if config.training.use_wandb and is_main_process():
             try:
-                if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-                    model.unet = torch.nn.parallel.DistributedDataParallel(
-                        model.unet, device_ids=[device] if device.type == "cuda" else None
-                    )
+                wandb_logger = WandbLogger(
+                    project="sdxl-training",
+                    name=Path(config.global_config.output_dir).name,
+                    config=config.__dict__,
+                    dir=config.global_config.output_dir,
+                    tags=["sdxl", "fine-tuning"]
+                )
+                # Explicitly log model parameters
+                wandb_logger.log_model(model.unet)
             except Exception as e:
-                logger.error(f"Failed to setup distributed training: {str(e)}", exc_info=True)
-                raise
+                logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
+                wandb_logger = None
 
-            wandb_logger = None
-            if config.training.use_wandb and is_main_process():
-                try:
-                    wandb_logger = WandbLogger(
-                        project="sdxl-training",
-                        name=Path(config.global_config.output_dir).name,
-                        config=config.__dict__,
-                        dir=config.global_config.output_dir,
-                        tags=["sdxl", "fine-tuning"]
-                    )
-                    # Explicitly log model parameters
-                    wandb_logger.log_model(model.unet)
-                except Exception as e:
-                    logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
-                    wandb_logger = None
+        return train_dataloader, optimizer, wandb_logger, training_method
 
-            return train_dataloader, optimizer, wandb_logger, training_method
-
-        except TimeoutError:
-            logger.error("Setup timed out after 5 minutes", exc_info=True)
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
-            raise
+    except TimeoutError:
+        logger.error("Setup timed out after 5 minutes", exc_info=True)
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
+        raise
 
 def check_system_limits():
     """Check and attempt to increase system file limits."""
