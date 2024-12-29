@@ -93,16 +93,16 @@ class CacheManager:
 
     def save_latents(
         self,
-        latents: torch.Tensor,
+        tensors: Dict[str, torch.Tensor],
         original_path: Union[str, Path],
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Dict[str, Any]
     ) -> bool:
-        """Save latents and metadata to cache.
+        """Save tensors and metadata to cache.
         
         Args:
-            latents: Tensor to cache
+            tensors: Dictionary of tensors to cache
             original_path: Original file path (used for cache key)
-            metadata: Optional metadata to store
+            metadata: Additional metadata to store
             
         Returns:
             bool: Success status
@@ -110,30 +110,25 @@ class CacheManager:
         try:
             cache_key = self.get_cache_key(original_path)
             
-            # Save latents
-            latents_path = self.latents_dir / f"{cache_key}.pt"
-            metadata_path = self.metadata_dir / f"{cache_key}.json"
-            
-            # Save tensor
-            torch.save(latents.cpu(), latents_path)
+            # Save tensors
+            tensors_path = self.latents_dir / f"{cache_key}.pt"
+            torch.save(tensors, tensors_path)
             
             # Save metadata
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
             full_metadata = {
                 "original_path": str(original_path),
                 "created_at": time.time(),
-                "tensor_shape": list(latents.shape),
-                "tensor_dtype": str(latents.dtype)
+                **metadata
             }
-            if metadata:
-                full_metadata.update(metadata)
-                
+            
             with open(metadata_path, 'w') as f:
                 json.dump(full_metadata, f, indent=2)
             
             # Update index
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
-                    "latents_path": str(latents_path),
+                    "tensors_path": str(tensors_path),
                     "metadata_path": str(metadata_path),
                     "created_at": time.time()
                 }
@@ -151,14 +146,14 @@ class CacheManager:
         path: Union[str, Path],
         device: Optional[torch.device] = None
     ) -> Optional[Dict[str, Any]]:
-        """Load latents and metadata from cache.
+        """Load tensors and metadata from cache.
         
         Args:
             path: Original file path to load cache for
             device: Optional device to load tensors to
             
         Returns:
-            Dict containing latents and metadata if found, None if not in cache
+            Dict containing tensors and metadata if found, None if not in cache
         """
         try:
             cache_key = self.get_cache_key(path)
@@ -167,19 +162,19 @@ class CacheManager:
                 return None
                 
             entry = self.cache_index["entries"][cache_key]
-            latents_path = Path(entry["latents_path"])
+            tensors_path = Path(entry["tensors_path"])
             metadata_path = Path(entry["metadata_path"])
             
-            if not latents_path.exists() or not metadata_path.exists():
+            if not tensors_path.exists() or not metadata_path.exists():
                 # Clean up invalid entry
                 with self._lock:
                     del self.cache_index["entries"][cache_key]
                     self._save_index()
                 return None
                 
-            # Load latents
-            latents = torch.load(
-                latents_path,
+            # Load tensors
+            tensors = torch.load(
+                tensors_path,
                 map_location=device or self.device
             )
             
@@ -187,10 +182,8 @@ class CacheManager:
             with open(metadata_path) as f:
                 metadata = json.load(f)
                 
-            return {
-                "latents": latents,
-                "metadata": metadata
-            }
+            # Combine tensors and metadata
+            return {**tensors, **metadata}
             
         except Exception as e:
             logger.error(f"Failed to load from cache: {e}")

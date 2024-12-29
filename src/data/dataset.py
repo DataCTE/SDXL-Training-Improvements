@@ -221,18 +221,24 @@ class AspectBucketDataset(Dataset):
 
             # Cache if enabled
             if self.config.global_config.cache.use_cache:
+                # Save tensors and metadata separately
+                metadata = {
+                    "original_size": processed["original_size"],
+                    "crop_coords": processed["crop_coords"],
+                    "target_size": processed["target_size"],
+                    "text": caption
+                }
+                
+                tensors = {
+                    "pixel_values": result["pixel_values"].cpu(),
+                    "prompt_embeds": encoded_text["prompt_embeds"].cpu(),
+                    "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"].cpu()
+                }
+                
                 self.cache_manager.save_latents(
-                    latents=result["pixel_values"],
+                    tensors=tensors,
                     original_path=image_path,
-                    metadata={
-                        "original_size": result["original_size"],
-                        "crop_coords": result["crop_coords"],
-                        "target_size": result["target_size"],
-                        "text_embeddings": {
-                            "prompt_embeds": encoded_text["prompt_embeds"],
-                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
-                        }
-                    }
+                    metadata=metadata
                 )
 
             return result
