@@ -38,7 +38,6 @@ from src.training.methods.base import TrainingMethod
 
 class SDXLTrainer:
     @classmethod
-    @classmethod
     def create(cls, config: Config, model: StableDiffusionXLModel, 
                optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
                device: Union[str, torch.device], training_method: TrainingMethod,
