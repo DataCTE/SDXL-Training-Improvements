@@ -1,8 +1,9 @@
 """DDPM trainer implementation for SDXL with config-based v-prediction option."""
 import traceback
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Tuple
 from torch import Tensor
 
 from src.core.logging import get_logger, TensorLogger
@@ -272,7 +273,7 @@ class DDPMTrainer(TrainingMethod):
             # ----------------------------------------------------------
             assert latents.dim() == 4, f"Expected latents to be 4D, got shape {latents.shape}"
             assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
-            assert text_embeds.dim() == 2, f"Expected text_embeds to be 2D, got shape {text_embeds.shape}"
+            assert pooled_prompt_embeds.dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got shape {pooled_prompt_embeds.shape}"
 
             noise_pred = self.unet(
                 sample=noisy_latents,
