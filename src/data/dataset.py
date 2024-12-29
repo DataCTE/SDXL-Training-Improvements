@@ -248,9 +248,8 @@ class AspectBucketDataset(Dataset):
         """Precompute and cache latents for all images."""
         total_images = len(self)
         skipped_images = 0
-        batch_size = 32  # Increased batch size for faster processing
+        batch_size = 32  # Batch size for preprocessing only
         
-        # Create batches of indices
         for start_idx in tqdm(range(0, total_images, batch_size), desc="Precomputing latents"):
             try:
                 end_idx = min(start_idx + batch_size, total_images)
@@ -260,20 +259,16 @@ class AspectBucketDataset(Dataset):
                 batch_paths = [self.image_paths[i] for i in batch_indices]
                 batch_captions = [self.captions[i] for i in batch_indices]
                 
-                # Process images in batch
-                processed_batch = self.preprocessing_pipeline.process_image_batch(
+                # Get individual results
+                processed_items = self.preprocessing_pipeline.process_image_batch(
                     image_paths=batch_paths,
                     captions=batch_captions,
                     config=self.config
                 )
                 
-                if processed_batch is None:
-                    skipped_images += len(batch_indices)
-                    continue
-                    
-                # Cache results
+                # Cache individual results
                 if self.config.global_config.cache.use_cache:
-                    for idx, (path, processed) in enumerate(zip(batch_paths, processed_batch)):
+                    for path, processed, caption in zip(batch_paths, processed_items, batch_captions):
                         if processed is not None:
                             self.cache_manager.save_latents(
                                 tensors={
@@ -286,7 +281,7 @@ class AspectBucketDataset(Dataset):
                                     "original_size": processed["original_size"],
                                     "crop_coords": processed["crop_coords"],
                                     "target_size": processed["target_size"],
-                                    "text": batch_captions[idx]
+                                    "text": caption
                                 }
                             )
                         else:

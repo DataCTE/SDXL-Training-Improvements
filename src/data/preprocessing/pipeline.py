@@ -322,8 +322,8 @@ class PreprocessingPipeline:
         image_paths: List[Union[str, Path]],
         captions: List[str],
         config: Config
-    ) -> Optional[List[Dict[str, Any]]]:
-        """Process a batch of images in parallel.
+    ) -> List[Optional[Dict[str, Any]]]:
+        """Process a batch of images in parallel but return individual results.
         
         Args:
             image_paths: List of paths to images
@@ -331,7 +331,7 @@ class PreprocessingPipeline:
             config: Configuration object
             
         Returns:
-            List of processed image data or None if batch processing fails
+            List of individual processed items, each can be None if processing failed
         """
         try:
             # Process images in parallel
@@ -341,36 +341,34 @@ class PreprocessingPipeline:
                 processed = self._process_single_image(path, config)
                 processed_images.append(processed)
                 
-            # Filter out failed images
-            valid_images = [img for img in processed_images if img is not None]
-            valid_captions = [cap for img, cap in zip(processed_images, captions) if img is not None]
-            
-            if not valid_images:
-                return None
-                
-            # Batch encode prompts
-            with torch.cuda.amp.autocast():
-                encoded_text = self.encode_prompt_batch(
-                    batch={"text": valid_captions},
-                    proportion_empty_prompts=0.0
-                )
-                
-            # Combine results
+            # Process each caption individually to match training format
             results = []
-            for idx, (img_data, caption) in enumerate(zip(valid_images, valid_captions)):
+            for img_data, caption in zip(processed_images, captions):
                 if img_data is not None:
-                    results.append({
-                        **img_data,
-                        "prompt_embeds": encoded_text["prompt_embeds"][idx],
-                        "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][idx],
-                        "text": caption
-                    })
+                    try:
+                        # Encode single prompt
+                        encoded_text = self.encode_prompt(
+                            batch={"text": [caption]},
+                            proportion_empty_prompts=0.0
+                        )
+                        
+                        results.append({
+                            **img_data,
+                            "prompt_embeds": encoded_text["prompt_embeds"][0],  # Take first item
+                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][0],
+                            "text": caption
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to process caption: {caption}", exc_info=True)
+                        results.append(None)
+                else:
+                    results.append(None)
                 
             return results
             
         except Exception as e:
             logger.error("Batch processing failed", exc_info=True)
-            return None
+            return [None] * len(image_paths)
 
     def encode_prompt_batch(
         self,
