@@ -25,6 +25,7 @@ torch.set_float32_matmul_precision('medium')
 
 from torch.distributed import init_process_group
 from src.training.optimizers import AdamWScheduleFreeKahan
+from src.training.optimizers.adamw_bfloat16 import AdamWBF16
 from src.training.optimizers import AdamWBF16
 from src.training.optimizers import SOAP
 from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
@@ -369,34 +370,11 @@ def setup_training(
             }
 
             # Select optimizer based on config and hardware capabilities
-            if config.model.enable_bf16_training and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                optimizer = AdamWBF16(
-                    list(model.unet.parameters()) + list(training_method.parameters()),
-                    **optimizer_kwargs
-                )
-                logger.info("Using BF16-optimized AdamW optimizer")
-            elif config.training.method == "flow_matching":
-                optimizer = SOAP(
-                    model.unet.parameters(),
-                    **optimizer_kwargs,
-                    precondition_frequency=10,
-                    max_precond_dim=10000
-                )
-                logger.info("Using SOAP optimizer for flow matching")
-            elif config.training.zero_terminal_snr:
-                optimizer = AdamWScheduleFreeKahan(
-                    model.unet.parameters(),
-                    **optimizer_kwargs,
-                    warmup_steps=config.training.warmup_steps,
-                    kahan_sum=True
-                )
-                logger.info("Using Schedule-free AdamW with Kahan summation")
-            else:
-                optimizer = torch.optim.AdamW(
-                    list(model.unet.parameters()) + list(training_method.parameters()),
-                    **optimizer_kwargs
-                )
-                logger.info("Using standard AdamW optimizer")
+            optimizer = AdamWBF16(
+                list(model.unet.parameters()) + list(training_method.parameters()),
+                **optimizer_kwargs
+            )
+            logger.info("Using custom AdamWBF16 optimizer")
         except Exception as e:
             logger.error(f"Failed to setup optimizer: {str(e)}", exc_info=True)
             raise
