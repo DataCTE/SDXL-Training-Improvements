@@ -59,6 +59,11 @@ class StableDiffusionXL:
         instance.tokenizer_1 = instance.tokenizers[0]
         instance.tokenizer_2 = instance.tokenizers[1]
         instance.scheduler = pipeline.scheduler
+        instance.noise_scheduler = pipeline.scheduler  # Add alias for noise_scheduler
+        
+        # Initialize CLIP encoders
+        instance.clip_encoder_1 = CLIPEncoder(instance.text_encoder_1)
+        instance.clip_encoder_2 = CLIPEncoder(instance.text_encoder_2)
         
         logger.info(f"Initialized {model_type.value} model on {device}")
         return instance
@@ -87,7 +92,7 @@ class StableDiffusionXL:
         self.vae_encoder.vae.load_state_dict(state_dict["vae"])
         self.text_encoders[0].load_state_dict(state_dict["text_encoder"])
         self.text_encoders[1].load_state_dict(state_dict["text_encoder_2"])
-
+    
     def generate_timestep_weights(
         self,
         num_timesteps: int,
@@ -185,3 +190,4 @@ class StableDiffusionXL:
             unet=self.unet,
             scheduler=self.scheduler
         )
+

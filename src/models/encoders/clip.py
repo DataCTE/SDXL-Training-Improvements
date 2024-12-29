@@ -4,13 +4,23 @@ import logging
 import random
 import numpy as np
 import torch
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 class CLIPEncoder:
     """Optimized CLIP encoder wrapper."""
+    
+    def __init__(self, text_encoder: Union[CLIPTextModel, CLIPTextModelWithProjection]):
+        """Initialize CLIP encoder.
+        
+        Args:
+            text_encoder: CLIP text encoder model (either CLIPTextModel or CLIPTextModelWithProjection)
+        """
+        if not isinstance(text_encoder, (CLIPTextModel, CLIPTextModelWithProjection)):
+            raise TypeError(f"text_encoder must be CLIPTextModel or CLIPTextModelWithProjection, got {type(text_encoder)}")
+        self.text_encoder = text_encoder
 
     @staticmethod
     def encode_prompt(
