@@ -192,7 +192,7 @@ class AspectBucketDataset(Dataset):
 
         # Get buckets from pipeline
         self.buckets = self.preprocessing_pipeline.get_aspect_buckets(self.config)
-        self.bucket_indices = self.preprocessing_pipeline._assign_single_bucket(self.image_paths)
+        self.bucket_indices = self.preprocessing_pipeline._assign_bucket_indices(self.image_paths)
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents for all images."""

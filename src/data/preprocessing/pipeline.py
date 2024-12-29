@@ -295,3 +295,19 @@ class PreprocessingPipeline:
         if operation not in self.performance_stats['operation_times']:
             self.performance_stats['operation_times'][operation] = []
         self.performance_stats['operation_times'][operation].append(stats)
+
+    def _assign_bucket_indices(self, image_paths: List[str]) -> List[int]:
+        """Assign bucket indices for a list of image paths."""
+        bucket_indices = []
+        
+        for img_path in image_paths:
+            try:
+                # Use existing single bucket assignment
+                bucket_idx, _ = self._assign_single_bucket(img_path)
+                bucket_indices.append(bucket_idx)
+            except Exception as e:
+                logger.error(f"Failed to assign bucket for {img_path}: {str(e)}")
+                # Assign to default bucket (square) in case of error
+                bucket_indices.append(0)
+                
+        return bucket_indices
