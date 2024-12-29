@@ -52,7 +52,7 @@ global_config:
   cache:
     cache_dir: "cache"
     max_cache_size: 10000
-    enable_cache: true
+    use_cache: true
     cache_latents: true
     cache_text_embeddings: true
 
