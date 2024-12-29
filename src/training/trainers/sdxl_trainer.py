@@ -93,23 +93,23 @@ def __init__(
     self.device = device
     self.wandb_logger = wandb_logger
 
-        base_dtype = DataType.from_str(config.model.dtype)
-        fallback_dtype = DataType.from_str(config.model.fallback_dtype)
-        self.model_dtypes = ModelWeightDtypes(
-            train_dtype=base_dtype,
-            fallback_train_dtype=fallback_dtype,
-            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
-            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
-            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
-            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
-            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
-            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
-            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
-            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
-            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
-            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
-            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
-        )
+    base_dtype = DataType.from_str(config.model.dtype)
+    fallback_dtype = DataType.from_str(config.model.fallback_dtype)
+    self.model_dtypes = ModelWeightDtypes(
+        train_dtype=base_dtype,
+        fallback_train_dtype=fallback_dtype,
+        unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
+        prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
+        text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
+        text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
+        vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
+        effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
+        decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
+        decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
+        decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
+        lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
+        embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
+    )
 
         self._setup_memory_management(
             batch_size=train_dataloader.batch_size,
