@@ -174,7 +174,32 @@ class DDPMTrainer(TrainingMethod):
             if self.noise_scheduler.alphas_cumprod is None:
                 raise ValueError("noise_scheduler.alphas_cumprod is None")
 
-            # Log noise scheduler state for debugging
+            # Move latents to device
+            target_dtype = self.unet.dtype
+            latents = latents.to(device=self.unet.device, dtype=target_dtype)
+            # Add this line to remove the extra singleton dimension
+            latents = latents.squeeze(1)
+            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
+
+            # ----------------------------------------------------------
+            # 2. Generate noise & timesteps
+            # ----------------------------------------------------------
+            if generator is not None:
+                with torch.random.fork_rng(devices=[latents.device]):
+                    torch.random.manual_seed(generator.initial_seed())
+                    noise = torch.randn_like(latents, dtype=target_dtype)
+            else:
+                noise = torch.randn_like(latents, dtype=target_dtype)
+
+            self.tensor_logger.log_checkpoint("Generated Noise", {"noise": noise})
+
+            timesteps = torch.randint(
+                0,
+                self.noise_scheduler.config.num_train_timesteps,
+                (latents.shape[0],),
+                device=latents.device
+            )
+            self.tensor_logger.log_checkpoint("Timesteps", {"timesteps": timesteps})
             self.tensor_logger.log_checkpoint("Noise Scheduler State", {
                 "alphas_cumprod": self.noise_scheduler.alphas_cumprod,
                 "timesteps": timesteps,
