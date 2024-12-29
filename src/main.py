@@ -18,7 +18,6 @@ import torch
 from torch.distributed import init_process_group
 from torch.cuda.amp import autocast
 
-from src.data.utils.paths import convert_windows_path
 
 from src.core.logging import (
     setup_logging,
@@ -47,7 +46,7 @@ from src.training import (
     BaseTrainer,
     create_trainer,
 )
-from src.data.utils.paths import convert_path_list
+from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.models import ModelType, StableDiffusionXL
 from src.core.distributed import (
     setup_distributed,
