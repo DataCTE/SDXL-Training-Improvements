@@ -194,13 +194,10 @@ class SDXLTrainer:
             # Validate tensors
             self._validate_batch_sizes(batch)
             
-            # Apply up-projection if text encoder yields 768 dims
-            # For SDXL: usually prompt_embeds is [batch, 2, 77, 768], pooled_prompt_embeds is [batch, 2, 768]
-            # Convert them to the up_proj layer’s dtype & device before calling up_proj
+            # Conditionally apply up-projection if text encoder yields 768 dims
             if "prompt_embeds" in batch and isinstance(batch["prompt_embeds"], torch.Tensor):
                 emb = batch["prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
                 
-                # Handle possible singleton dimensions and reshape
                 if emb.dim() == 4:
                     batch_size, num_images, seq_len, embed_dim = emb.shape
                     emb = emb.view(batch_size * num_images, seq_len, embed_dim)
@@ -209,18 +206,16 @@ class SDXLTrainer:
                 else:
                     raise ValueError(f"Unexpected prompt_embeds shape: {emb.shape}")
                 
-                # Apply up-projection
-                emb = self.up_proj(emb.view(-1, embed_dim))
+                if embed_dim == 768:
+                    emb = self.up_proj(emb.view(-1, embed_dim))
+                    new_embed_dim = emb.shape[-1]
+                    emb = emb.view(-1, seq_len, new_embed_dim)
                 
-                # Reshape back to [batch_size * num_images, seq_len, new_embed_dim]
-                new_embed_dim = emb.shape[-1]
-                emb = emb.view(-1, seq_len, new_embed_dim)
                 batch["prompt_embeds"] = emb
             
             if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
                 p_emb = batch["pooled_prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
                 
-                # Handle possible singleton dimensions and reshape
                 if p_emb.dim() == 3:
                     batch_size, num_images, embed_dim = p_emb.shape
                     p_emb = p_emb.view(batch_size * num_images, embed_dim)
@@ -229,10 +224,9 @@ class SDXLTrainer:
                 else:
                     raise ValueError(f"Unexpected pooled_prompt_embeds shape: {p_emb.shape}")
                 
-                # Apply up-projection
-                p_emb = self.up_proj(p_emb)
+                if embed_dim == 768:
+                    p_emb = self.up_proj(p_emb)
                 
-                # Update Batch
                 batch["pooled_prompt_embeds"] = p_emb
 
             # Verify shapes of embeddings after processing
