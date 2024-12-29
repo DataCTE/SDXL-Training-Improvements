@@ -3,14 +3,14 @@ from typing import Optional, List, Union
 import torch
 from src.core.logging import get_logger, WandbLogger
 from src.data.config import Config
-from src.models.sdxl import StableDiffusionXLModel
+from src.models.sdxl import StableDiffusionXL
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 
 logger = get_logger(__name__)
 
 def create_trainer(
     config: Config,
-    model: StableDiffusionXLModel,
+    model: StableDiffusionXL,
     optimizer: torch.optim.Optimizer,
     train_dataloader: torch.utils.data.DataLoader,
     device: Union[str, torch.device],
