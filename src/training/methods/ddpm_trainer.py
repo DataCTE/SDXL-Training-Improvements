@@ -163,6 +163,87 @@ class DDPMTrainer(TrainingMethod):
                 if latents is None:
                     raise KeyError("No latent data found in batch")
 
+            # Move latents to device
+            target_dtype = self.unet.dtype
+            latents = latents.to(device=self.unet.device, dtype=target_dtype)
+            # Add this line to remove the extra singleton dimension
+            latents = latents.squeeze(1)
+            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
+
+            # ----------------------------------------------------------
+            # 2. Generate noise & timesteps
+            # ----------------------------------------------------------
+            if generator is not None:
+                with torch.random.fork_rng(devices=[latents.device]):
+                    torch.random.manual_seed(generator.initial_seed())
+                    noise = torch.randn_like(latents, dtype=target_dtype)
+            else:
+                noise = torch.randn_like(latents, dtype=target_dtype)
+
+            noise = torch.randn_like(latents, dtype=target_dtype)
+            self.tensor_logger.log_checkpoint("Generated Noise", {"noise": noise})
+
+            timesteps = torch.randint(
+                0,
+                self.noise_scheduler.config.num_train_timesteps,
+                (latents.shape[0],),
+                device=latents.device
+            )
+            self.tensor_logger.log_checkpoint("Timesteps", {"timesteps": timesteps})
+
+            # Validate noise scheduler state
+            if self.noise_scheduler is None:
+                raise ValueError("noise_scheduler is not initialized")
+
+            if not hasattr(self.noise_scheduler, 'alphas_cumprod'):
+                raise ValueError("noise_scheduler missing required attribute 'alphas_cumprod'")
+
+            if self.noise_scheduler.alphas_cumprod is None:
+                raise ValueError("noise_scheduler.alphas_cumprod is None")
+
+            # Log noise scheduler state for debugging
+            self.tensor_logger.log_checkpoint("Noise Scheduler State", {
+                "alphas_cumprod": self.noise_scheduler.alphas_cumprod,
+                "timesteps": timesteps,
+            })
+
+            # ----------------------------------------------------------
+            # 3. Add noise to latents (DDPM forward noising)
+            # ----------------------------------------------------------
+            noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+            self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
+
+            # ----------------------------------------------------------
+            # 4. Retrieve embeddings and conditioning inputs
+            # ----------------------------------------------------------
+            prompt_embeds = batch.get("prompt_embeds", None)
+            if prompt_embeds is None:
+                raise ValueError("Missing prompt_embeds for UNet2DConditionModel")
+            prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
+
+            # Extract additional conditioning inputs
+            text_embeds = batch.get("pooled_prompt_embeds")
+            if text_embeds is None:
+                raise ValueError("Missing pooled_prompt_embeds in batch")
+            text_embeds = text_embeds.to(self.unet.device, self.unet.dtype)
+            
+            # Get time embedding inputs
+            original_sizes = batch.get("original_sizes")
+            crop_top_lefts = batch.get("crop_top_lefts") 
+            target_sizes = batch.get("target_sizes")
+            
+            if any(x is None for x in [original_sizes, crop_top_lefts, target_sizes]):
+                raise ValueError("Missing required time embedding inputs")
+                
+            # Prepare time embeddings
+            add_time_ids = self._prepare_time_ids(
+                original_sizes=original_sizes,
+                crop_top_lefts=crop_top_lefts,
+                target_sizes=target_sizes,
+                dtype=self.unet.dtype,
+                device=self.unet.device
+            )
+
             # Log shapes before model forward pass
             self.tensor_logger.log_checkpoint("Before Model Forward Pass", {
                 "noisy_latents.shape": noisy_latents.shape,
