@@ -203,6 +203,7 @@ class SDXLTrainer:
                     emb = emb.view(batch_size * num_images, seq_len, embed_dim)
                 elif emb.dim() == 3:
                     batch_size, seq_len, embed_dim = emb.shape
+                    num_images = 1  # Add this line to define num_images
                 else:
                     raise ValueError(f"Unexpected prompt_embeds shape: {emb.shape}")
 
@@ -227,6 +228,7 @@ class SDXLTrainer:
                     p_emb = p_emb.view(batch_size * num_images, embed_dim)
                 elif p_emb.dim() == 2:
                     batch_size, embed_dim = p_emb.shape
+                    num_images = 1  # Add this line to define num_images
                 else:
                     raise ValueError(f"Unexpected pooled_prompt_embeds shape: {p_emb.shape}")
 
@@ -267,10 +269,6 @@ class SDXLTrainer:
                 if "model_input" in batch["latent"]:
                     latents = batch["latent"]["model_input"]
                     
-                    # Remove singleton dimensions if necessary
-                    if latents.dim() == 5 and latents.shape[1] == 1:
-                        latents = latents.view(latents.shape[0], latents.shape[2], latents.shape[3], latents.shape[4])
-                        batch["latent"]["model_input"] = latents
 
                 metrics["batch_size"] = batch["latent"]["model_input"].shape[0]
             else:
