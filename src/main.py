@@ -44,6 +44,7 @@ from src.core.memory.optimizations import (
 )
 from src.data.config import Config
 from src.data.dataset import create_dataset
+from src.training.methods.base import TrainingMethod
 from src.data.preprocessing import LatentPreprocessor
 from src.training.trainer import create_trainer
 from src.data.utils.paths import convert_path_list
