@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
-from src.data.utils.paths import convert_windows_path, is_windows_path, convert_path_list
+from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 
 logger = get_logger(__name__)
 import torch.backends.cudnn
