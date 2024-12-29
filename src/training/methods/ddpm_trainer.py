@@ -202,9 +202,8 @@ class DDPMTrainer(TrainingMethod):
             seq_length = prompt_embeds.shape[2]
             embed_dim = prompt_embeds.shape[3]
 
-            # Reshape and concatenate prompt_embeds
-            prompt_embeds = prompt_embeds.view(batch_size, n_embeddings, seq_length, embed_dim)
-            prompt_embeds = torch.cat([prompt_embeds[:, 0, :, :], prompt_embeds[:, 1, :, :]], dim=-1)  # Shape: (batch_size, seq_length, 1536)
+            # Concatenate the embeddings from both text encoders
+            prompt_embeds = torch.cat([prompt_embeds[:, 0, :, :], prompt_embeds[:, 1, :, :]], dim=-1)  # New shape: (batch_size, seq_length, 1536)
 
             # Reshape and concatenate pooled_prompt_embeds
             pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size, n_embeddings, embed_dim)
