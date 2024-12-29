@@ -18,13 +18,16 @@ import torch
 from torch.distributed import init_process_group
 from torch.cuda.amp import autocast
 
+from src.data.utils.paths import convert_windows_path
+
 from src.core.logging import (
     setup_logging,
     get_logger,
     WandbLogger,
-    TensorLogger
+    TensorLogger,
+    create_enhanced_logger
 )
-from src.core.utils import (
+from src.core.memory import (
     create_stream_context,
     tensors_to_device_,
     tensors_match_device,
@@ -43,7 +46,6 @@ from src.data.preprocessing import (
 from src.training import (
     BaseTrainer,
     create_trainer,
-    TrainingMethod
 )
 from src.data.utils.paths import convert_path_list
 from src.models import ModelType, StableDiffusionXL
@@ -82,8 +84,7 @@ def setup_environment(args: argparse.Namespace):
 
 def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
     """Setup device and logging configuration."""
-    # First validate the logging config
-    log_config = config.validate_logging_config()
+  
     
     # Then create main logger with enhanced formatting
     logger = create_enhanced_logger(
@@ -211,7 +212,7 @@ def setup_training(
     device: torch.device,
     image_paths: List[str],
     captions: List[str]
-) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger], TrainingMethod]:
+) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
         # Initialize cache manager
@@ -262,15 +263,7 @@ def setup_training(
         if config.logging.use_wandb and is_main_process():
             wandb_logger = WandbLogger(config)
 
-        # Create training method based on config
-        training_method = BaseTrainer.create(
-            method_type=config.training.method,
-            model=model,
-            config=config,
-            device=device
-        )
-
-        return train_dataloader, optimizer, wandb_logger, training_method
+        return train_dataloader, optimizer, wandb_logger
 
     except Exception as e:
         logger.error("Failed to setup training", exc_info=True)
@@ -320,7 +313,7 @@ def main():
             image_paths, captions = load_training_data(config)
             
             logger.info("Setting up training...")
-            train_dataloader, optimizer, wandb_logger, training_method = setup_training(
+            train_dataloader, optimizer, wandb_logger = setup_training(
                 config=config,
                 model=model,
                 device=device,
@@ -334,7 +327,6 @@ def main():
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,
                 device=device,
-                training_method=training_method,
                 wandb_logger=wandb_logger
             )
             
@@ -351,7 +343,6 @@ def main():
             'cuda_available': torch.cuda.is_available(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
             'error': str(e),
-            'error_type': type(e).__name__,
             'stack_trace': traceback.format_exc()
         }
         

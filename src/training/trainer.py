@@ -5,7 +5,6 @@ from src.core.logging import get_logger, WandbLogger
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXLModel
 from src.training.trainers.sdxl_trainer import SDXLTrainer
-from src.training.trainers.base import BaseTrainer
 
 logger = get_logger(__name__)
 
@@ -15,11 +14,10 @@ def create_trainer(
     optimizer: torch.optim.Optimizer,
     train_dataloader: torch.utils.data.DataLoader,
     device: Union[str, torch.device],
-    training_method: BaseTrainer,
     wandb_logger: Optional[WandbLogger] = None,
     validation_prompts: Optional[List[str]] = None
 ) -> SDXLTrainer:
-    """Wrapper around SDXLTrainer.create for backward compatibility."""
+    """Create SDXL trainer instance."""
     logger.debug("Creating trainer with configuration:")
     logger.debug(f"Device: {device}")
     logger.debug(f"Model type: {type(model).__name__}")
@@ -30,16 +28,14 @@ def create_trainer(
         device = torch.device(device)
 
     try:
-        # Create trainer with explicit device
-        trainer = SDXLTrainer.create(
-            config=config,
+        trainer = SDXLTrainer(
             model=model,
             optimizer=optimizer,
             train_dataloader=train_dataloader,
             device=device,
-            training_method=training_method,
             wandb_logger=wandb_logger,
-            validation_prompts=validation_prompts
+            validation_prompts=validation_prompts,
+            config=config
         )
 
         logger.info("Trainer created successfully")
