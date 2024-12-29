@@ -34,7 +34,8 @@ class DDPMTrainer(TrainingMethod):
 
     def __init__(self, unet: torch.nn.Module, config: Config):
         super().__init__(unet, config)
-        self.up_proj = nn.Linear(768, 1280).to(self.unet.device, self.unet.dtype)
+        # Update input dimension to match concatenated embeddings
+        self.up_proj = nn.Linear(1792, 1280).to(self.unet.device, self.unet.dtype)
         self.logger.debug("Initializing DDPMTrainer")
 
         # Validate noise scheduler initialization
@@ -84,18 +85,11 @@ class DDPMTrainer(TrainingMethod):
             }
             self._shape_logs.append(shape_info)
 
-    def _handle_sdxl_shapes(
-        self,
-        prompt_embeds: torch.Tensor,
-        pooled_prompt_embeds: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Up-project prompt_embeds if the last dimension is 768
-        if prompt_embeds.shape[-1] == 768:
-            prompt_embeds = self.up_proj(prompt_embeds)
-        # Up-project pooled_prompt_embeds if the last dimension is 768
-        if pooled_prompt_embeds.shape[-1] == 768:
-            pooled_prompt_embeds = self.up_proj(pooled_prompt_embeds)
-        return prompt_embeds, pooled_prompt_embeds
+    def _up_project_if_needed(self, embeds: torch.Tensor) -> torch.Tensor:
+        # Check if embeddings need up-projection based on their last dimension
+        if embeds.shape[-1] != 1280:
+            embeds = self.up_proj(embeds)
+        return embeds
 
     def compute_loss(
         self,
@@ -199,8 +193,9 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
             pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
 
-            # Up-project and adjust shapes
-            prompt_embeds, pooled_prompt_embeds = self._handle_sdxl_shapes(prompt_embeds, pooled_prompt_embeds)
+            # Apply up-projection if needed
+            prompt_embeds = self._up_project_if_needed(prompt_embeds)
+            pooled_prompt_embeds = self._up_project_if_needed(pooled_prompt_embeds)
 
             # Ensure embeddings have correct dimensions
             assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got {prompt_embeds.dim()}"
