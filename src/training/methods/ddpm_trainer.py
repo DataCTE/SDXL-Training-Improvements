@@ -130,14 +130,7 @@ class DDPMTrainer(TrainingMethod):
                 "prompt_embeds": batch.get("prompt_embeds"),
                 "pooled_prompt_embeds": batch.get("pooled_prompt_embeds")
             })
-            # Log shapes before model forward pass
-            self.tensor_logger.log_checkpoint("Before Model Forward Pass", {
-                "noisy_latents.shape": noisy_latents.shape,
-                "timesteps.shape": timesteps.shape,
-                "prompt_embeds.shape": prompt_embeds.shape,
-                "text_embeds.shape": text_embeds.shape,
-                "add_time_ids.shape": add_time_ids.shape
-            })
+            latent_dict = batch.get("latent", None)
             latent_dict = batch.get("latent", None)
 
             if isinstance(latent_dict, dict):
@@ -169,6 +162,15 @@ class DDPMTrainer(TrainingMethod):
                 latents = batch.get("model_input")
                 if latents is None:
                     raise KeyError("No latent data found in batch")
+
+            # Log shapes before model forward pass
+            self.tensor_logger.log_checkpoint("Before Model Forward Pass", {
+                "noisy_latents.shape": noisy_latents.shape,
+                "timesteps.shape": timesteps.shape,
+                "prompt_embeds.shape": prompt_embeds.shape,
+                "text_embeds.shape": text_embeds.shape,
+                "add_time_ids.shape": add_time_ids.shape
+            })
 
             # Move latents to device
             target_dtype = self.unet.dtype
