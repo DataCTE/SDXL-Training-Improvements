@@ -21,6 +21,14 @@ class ModelType(Enum):
     SDXL = auto()
 
 
+class TimestepBiasStrategy(Enum):
+    """Strategies for biasing timestep sampling during training."""
+    NONE = "none"
+    EARLIER = "earlier"
+    LATER = "later" 
+    RANGE = "range"
+
+
 class BaseModelEmbedding:
     def __init__(
         self,
@@ -55,6 +63,31 @@ class BaseModel(ABC):
     @property
     def device(self) -> torch.device:
         return self._device
+
+    @abstractmethod
+    def generate_timestep_weights(
+        self,
+        num_timesteps: int,
+        bias_strategy: TimestepBiasStrategy = TimestepBiasStrategy.NONE,
+        bias_portion: float = 0.25,
+        bias_multiplier: float = 2.0,
+        bias_begin: Optional[int] = None,
+        bias_end: Optional[int] = None
+    ) -> torch.Tensor:
+        """Generate weighted timestep sampling distribution.
+        
+        Args:
+            num_timesteps: Total number of timesteps
+            bias_strategy: Strategy for biasing timesteps
+            bias_portion: Portion of timesteps to bias when using earlier/later strategies
+            bias_multiplier: Weight multiplier for biased timesteps
+            bias_begin: Starting timestep for range strategy
+            bias_end: Ending timestep for range strategy
+            
+        Returns:
+            Tensor of timestep weights normalized to sum to 1
+        """
+        pass
 
     @abstractmethod
     def to(self, device: torch.device) -> None:

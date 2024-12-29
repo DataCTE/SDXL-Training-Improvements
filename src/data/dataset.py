@@ -1,23 +1,12 @@
-import os
-import threading
-import traceback
+"""High-performance dataset implementation for SDXL training."""
 import time
-import psutil
 from dataclasses import dataclass
-from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
-from contextlib import contextmanager, nullcontext
+from typing import Dict, List, Optional, Any
 
 import torch
-import torch.nn.functional as F
 import torch.backends.cudnn
-import torch.nn.functional as F
-from PIL import Image
 from torch.utils.data import Dataset
-from torchvision import transforms
-from torchvision.transforms.functional import crop
-import torch.nn.functional as F
 from tqdm.auto import tqdm
 
 # Force speed optimizations
@@ -26,24 +15,16 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
-import logging
-from src.core.memory.tensor import (
-    create_stream_context,
-    tensors_record_stream,
-    pin_tensor_,
-    unpin_tensor_,
-    torch_sync,
-    tensors_to_device_,
-    device_equals
-)
-from .utils.paths import convert_windows_path
-from .config import Config
+from src.core.logging import get_logger
+from src.data.utils.paths import convert_windows_path, is_windows_path
+from src.data.config import Config
 from src.data.preprocessing import (
-    LatentPreprocessor, TagWeighter, create_tag_weighter,
-    create_tag_weighter_with_index, CacheManager, PreprocessingPipeline
+    PreprocessingPipeline,
+    CacheManager,
+    create_tag_weighter_with_index
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 @dataclass
 class DatasetStats:
@@ -55,20 +36,6 @@ class DatasetStats:
     memory_allocated: int = 0
     peak_memory: int = 0
 
-class DatasetError(Exception):
-    def __init__(self, message: str, context: dict = None):
-        super().__init__(message)
-        self.context = context or {}
-
-class ImageLoadError(DatasetError):
-    pass
-
-class BucketingError(DatasetError):
-    pass
-
-class ProcessingError(DatasetError):
-    pass
-
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""
     
@@ -77,8 +44,7 @@ class AspectBucketDataset(Dataset):
         config: Config,
         image_paths: List[str],
         captions: List[str],
-        preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
-        tag_weighter: Optional[TagWeighter] = None,
+        preprocessing_pipeline: Optional[PreprocessingPipeline] = None,
         is_train: bool = True,
         enable_memory_tracking: bool = True,
         max_memory_usage: float = 0.8
@@ -90,63 +56,62 @@ class AspectBucketDataset(Dataset):
             # Basic initialization
             self.stats = DatasetStats()
             self.config = config
-            self.image_paths = image_paths
-            self.captions = captions
             self.is_train = is_train
             self.enable_memory_tracking = enable_memory_tracking
             self.max_memory_usage = max_memory_usage
 
-            # Initialize preprocessing components
-            if preprocessing_pipeline is None:
-                # Create cache manager first
-                self.cache_manager = CacheManager(
-                    cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
-                    num_proc=config.global_config.cache.num_proc,
-                    chunk_size=config.global_config.cache.chunk_size,
-                    compression=getattr(config.global_config.cache, 'compression', 'zstd'),
-                    verify_hashes=config.global_config.cache.verify_hashes,
-                    max_memory_usage=max_memory_usage,
-                    enable_memory_tracking=enable_memory_tracking
-                )
-                
-                # Create preprocessing pipeline
-                self.preprocessing_pipeline = PreprocessingPipeline(
+            # Convert paths if needed
+            self.image_paths = [
+                str(convert_windows_path(p) if is_windows_path(p) else Path(p))
+                for p in image_paths
+            ]
+            self.captions = captions
+
+            # Initialize cache manager
+            cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
+            self.cache_manager = CacheManager(
+                cache_dir=cache_dir,
+                max_cache_size=config.global_config.cache.max_cache_size,
+                device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            )
+
+            # Initialize preprocessing pipeline
+            self.preprocessing_pipeline = preprocessing_pipeline or PreprocessingPipeline(
+                config=config,
+                model=config.model,
+                cache_manager=self.cache_manager,
+                is_train=is_train,
+                enable_memory_tracking=enable_memory_tracking
+            )
+
+            # Initialize tag weighter with index
+            if config.tag_weighting.enable_tag_weighting:
+                image_captions = dict(zip(self.image_paths, self.captions))
+                index_path = Path(cache_dir) / "tag_weights_index.json"
+                self.tag_weighter = create_tag_weighter_with_index(
                     config=config,
-                    cache_manager=self.cache_manager,
-                    is_train=self.is_train,
-                    enable_memory_tracking=enable_memory_tracking
+                    image_captions=image_captions,
+                    index_output_path=index_path
                 )
             else:
-                self.preprocessing_pipeline = preprocessing_pipeline
-                self.cache_manager = preprocessing_pipeline.cache_manager
-
-            # Get references to processors
-            self.latent_preprocessor = self.preprocessing_pipeline.latent_preprocessor
-            self.embedding_processor = self.preprocessing_pipeline.embedding_processor
-            
-            # Initialize tag weighter if needed
-            self.tag_weighter = tag_weighter or self._create_tag_weighter(config, image_paths)
+                self.tag_weighter = None
 
             # Setup image configuration
             self._setup_image_config()
 
-            # Precompute latents if caching is enabled
+            # Precompute latents if caching enabled
             if config.global_config.cache.use_cache:
-                self._precompute_latents(image_paths, config)
+                self._precompute_latents()
 
-            # Log initialization stats
             logger.info(f"Dataset initialized in {time.time() - start_time:.2f}s", extra={
                 'num_images': len(image_paths),
                 'num_captions': len(captions),
-                'bucket_info': self.preprocessing_pipeline.get_bucket_info(),
-                'cache_enabled': config.global_config.cache.use_cache
+                'cache_enabled': config.global_config.cache.use_cache,
+                'tag_weighting_enabled': self.tag_weighter is not None
             })
 
         except Exception as e:
-            logger.error("Failed to initialize dataset", extra={
-                'error': str(e),
-                'stack_trace': True
-            })
+            logger.error("Failed to initialize dataset", exc_info=True)
             raise
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
@@ -154,117 +119,68 @@ class AspectBucketDataset(Dataset):
         try:
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
-            bucket_idx = self.bucket_indices[idx]
 
-            # Get cached data
-            if self.cache_manager and self.config.global_config.cache.use_cache:
-                cached_data = self.cache_manager.get_cached_item(image_path)
-                if cached_data:
-                    self.stats.cache_hits += 1
-                    return self._process_cached_item(cached_data, image_path, caption, bucket_idx)
-            
-            self.stats.cache_misses += 1
-            
-            # Process item if not cached
-            with torch.cuda.amp.autocast():
-                # Process image
-                processed_image = self.preprocessing_pipeline._process_image(image_path)
-                if processed_image is None:
-                    raise ProcessingError(f"Failed to process image {image_path}")
-
-                # Process text
-                processed_text = self.latent_preprocessor.encode_prompt([caption])
-                if processed_text is None:
-                    raise ProcessingError(f"Failed to process caption for {image_path}")
-
-                # Combine results
+            # Try to load from cache first
+            cached_data = self.cache_manager.load_latents(image_path)
+            if cached_data is not None:
+                self.stats.cache_hits += 1
                 result = {
-                    "model_input": processed_image["image_latent"],
-                    "text": caption,
-                    "bucket_idx": bucket_idx,
-                    "image_path": image_path,
-                    "original_sizes": [processed_image["metadata"]["original_size"]],
-                    "crop_top_lefts": [(0, 0)],  # Default if not specified
-                    "target_sizes": [processed_image["metadata"].get("bucket_size", (1024, 1024))]
+                    "latents": cached_data["latents"],
+                    "metadata": cached_data["metadata"],
+                    "text": caption
                 }
-
-                # Add text embeddings
-                if "embeddings" in processed_text:
-                    embeddings = processed_text["embeddings"]
-                    result.update({
-                        "prompt_embeds": embeddings.get("prompt_embeds"),
-                        "pooled_prompt_embeds": embeddings.get("pooled_prompt_embeds"),
-                        "prompt_embeds_2": embeddings.get("prompt_embeds_2"),
-                        "pooled_prompt_embeds_2": embeddings.get("pooled_prompt_embeds_2")
-                    })
-
-                # Cache results if enabled
-                if self.cache_manager and self.config.global_config.cache.use_cache:
-                    self.cache_manager.save_preprocessed_data(
-                        image_latent=processed_image["image_latent"],
-                        text_latent=processed_text,
-                        metadata={
-                            **processed_image["metadata"],
-                            **processed_text.get("metadata", {})
-                        },
-                        file_path=image_path
-                    )
-
+                
+                # Add tag weight if enabled
+                if self.tag_weighter:
+                    result["tag_weight"] = self.tag_weighter.get_caption_weight(caption)
+                    
                 return result
 
+            self.stats.cache_misses += 1
+
+            # Process image if not in cache
+            processed = self.preprocessing_pipeline._process_image(image_path)
+            if processed is None:
+                raise ValueError(f"Failed to process image {image_path}")
+
+            # Get text embeddings
+            encoded_text = self.preprocessing_pipeline.encode_prompt(
+                batch={"text": [caption]},
+                proportion_empty_prompts=self.config.data.proportion_empty_prompts
+            )
+
+            result = {
+                "latents": processed["model_input"],
+                "metadata": processed["metadata"],
+                "text": caption,
+                "prompt_embeds": encoded_text["prompt_embeds"],
+                "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
+            }
+
+            # Add tag weight if enabled
+            if self.tag_weighter:
+                result["tag_weight"] = self.tag_weighter.get_caption_weight(caption)
+
+            # Cache the processed data
+            if self.config.global_config.cache.use_cache:
+                self.cache_manager.save_latents(
+                    latents=processed["model_input"],
+                    original_path=image_path,
+                    metadata={
+                        **processed["metadata"],
+                        "text_embeddings": {
+                            "prompt_embeds": encoded_text["prompt_embeds"],
+                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
+                        }
+                    }
+                )
+
+            return result
+
         except Exception as e:
-            logger.error(f"Error processing dataset item {idx}", extra={
-                'error': str(e),
-                'image_path': image_path,
-                'stack_trace': True
-            })
+            logger.error(f"Error processing dataset item {idx}", exc_info=True)
             # Try next item
             return self.__getitem__((idx + 1) % len(self))
-
-    def _process_cached_item(
-         self,
-         cached_data: Dict[str, Any],
-         image_path: str,
-         caption: str,
-         bucket_idx: int
-     ) -> Dict[str, Any]:
-         """Process a cached item with zero validation."""
-         # Handle case where cached_data is directly a tensor
-         if isinstance(cached_data, torch.Tensor):
-             return {
-                 "model_input": cached_data,
-                 "text": caption,
-                 "bucket_idx": bucket_idx,
-                 "image_path": image_path,
-                 "original_sizes": [(1024, 1024)],
-                 "crop_top_lefts": [(0, 0)],
-                 "target_sizes": [(1024, 1024)]
-             }
-
-         # Handle dictionary case
-         latent_data = cached_data["latent"]
-         metadata = cached_data.get("metadata", {})
-         text_latent = cached_data.get("text_latent", {})
-
-         result = {
-             "model_input": latent_data,
-             "text": caption,
-             "bucket_idx": bucket_idx,
-             "image_path": image_path,
-             "original_sizes": [metadata.get("original_size", (1024, 1024))],
-             "crop_top_lefts": [metadata.get("crop_top_left", (0, 0))],
-             "target_sizes": [metadata.get("target_size", (1024, 1024))]
-         }
-
-         if "embeddings" in text_latent:
-             embeddings = text_latent["embeddings"]
-             for key in ["prompt_embeds", "pooled_prompt_embeds",
-                        "prompt_embeds_2", "pooled_prompt_embeds_2"]:
-                 if key in embeddings:
-                     result[key] = embeddings[key]
-
-         return result
-
 
     def _setup_image_config(self):
         """Set up image configuration parameters."""
@@ -274,244 +190,72 @@ class AspectBucketDataset(Dataset):
         self.bucket_step = int(self.config.global_config.image.bucket_step)
         self.max_aspect_ratio = float(self.config.global_config.image.max_aspect_ratio)
 
-        # Get buckets and indices
+        # Get buckets from pipeline
         self.buckets = self.preprocessing_pipeline.get_aspect_buckets(self.config)
-        self.bucket_indices = self.preprocessing_pipeline.assign_aspect_buckets(
-            image_paths=self.image_paths
-        )
+        self.bucket_indices = self.preprocessing_pipeline._assign_single_bucket(self.image_paths)
 
-    def _create_tag_weighter(self, config: Config, image_paths: List[str]) -> Optional[TagWeighter]:
-        """Create tag weighter if enabled in config."""
-        if hasattr(config, 'tag_weighting') and config.tag_weighting.enable_tag_weighting:
-            return create_tag_weighter(config, image_paths)
-        return None
-
-    def _precompute_latents(self, image_paths: List[str], config: Config) -> None:
-        """Precompute latents using preprocessing pipeline."""
-        if not self.preprocessing_pipeline:
-            raise ValueError("Preprocessing pipeline not initialized")
-            
+    def _precompute_latents(self) -> None:
+        """Precompute and cache latents for all images."""
         logger.info("Starting latent precomputation...")
         
-        try:
-            self.preprocessing_pipeline.precompute_latents(
-                image_paths=image_paths,
-                batch_size=config.training.batch_size,
-                proportion_empty_prompts=config.data.proportion_empty_prompts,
-                process_latents=True,
-                process_text_embeddings=True,
-                separate_passes=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Error during latent precomputation: {str(e)}", exc_info=True)
-            raise
+        for idx in tqdm(range(len(self)), desc="Precomputing latents"):
+            try:
+                self.__getitem__(idx)
+            except Exception as e:
+                logger.error(f"Failed to precompute latents for index {idx}", exc_info=True)
+                continue
 
     def __len__(self) -> int:
-        """Return the total number of items in the dataset."""
-        try:
-            return len(self.image_paths)
-        except Exception as e:
-            logger.error("Failed to get dataset length", extra={
-                'error': str(e),
-                'image_paths_type': type(self.image_paths).__name__,
-                'has_image_paths': hasattr(self, 'image_paths')
-            })
-            # Return 0 to indicate empty dataset on error
-            return 0
+        return len(self.image_paths)
 
-    def _create_collate_buffers(self, batch_size: int, example_shape: tuple) -> Dict[str, torch.Tensor]:
-        """Create reusable buffers for batch collation.
-        
-        Args:
-            batch_size: Size of batch
-            example_shape: Shape of example tensor
-            
-        Returns:
-            Dictionary of preallocated buffers
-        """
-        if not hasattr(self, '_collate_buffers'):
-            self._collate_buffers = {}
-            
-        if torch.cuda.is_available() and self.config.data.pin_memory:
-            if 'latent' not in self._collate_buffers:
-                self._collate_buffers['latent'] = {
-                    'model_input': torch.empty(
-                        (batch_size, *example_shape),
-                        dtype=torch.float32,
-                        pin_memory=True
-                    ),
-                    'latent': torch.empty(
-                        (batch_size, *example_shape),
-                        dtype=torch.float32,
-                        pin_memory=True
-                    )
-                }
-                
-        return self._collate_buffers
-
-    def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-        """Collate batch of samples into training format using cached data."""
+    def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        """Collate batch of samples into training format."""
         try:
-            logger.debug(f"Starting collate with batch size: {len(batch)}")
-            
-            # Group samples by latent shape
-            shape_groups = {}
-            for item in batch:
-                # Get latent shape
-                if "latent" in item:
-                    latent = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
-                else:
-                    latent = item.get("model_input")
-                    
-                if latent is None:
-                    continue
-                    
-                shape = tuple(latent.shape)
-                if shape not in shape_groups:
-                    shape_groups[shape] = []
-                shape_groups[shape].append(item)
-            
-            # Use largest group
-            if not shape_groups:
-                raise ValueError("No valid latents found in batch")
-                
-            largest_shape = max(shape_groups.items(), key=lambda x: len(x[1]))[0]
-            batch = shape_groups[largest_shape]
-            
-            logger.debug(f"Selected shape {largest_shape} with {len(batch)} items")
-            
             result = {
-                "original_sizes": [],
-                "crop_top_lefts": [],
-                "target_sizes": []
+                "latents": [],
+                "prompt_embeds": [],
+                "pooled_prompt_embeds": [],
+                "tag_weights": [] if self.tag_weighter else None
             }
 
-            # Process latents from consistent shape group
-            latents = []
-            prompt_embeds = []
-            pooled_prompt_embeds = []
-
             for item in batch:
-                # Handle latents
-                if "latent" in item:
-                    latent_data = item["latent"].get("model_input", item["latent"].get("latent", {}).get("model_input"))
-                    if latent_data is not None:
-                        if latent_data.is_cuda:
-                            latent_data = latent_data.cpu()
-                        latents.append(latent_data)
-                elif "model_input" in item:
-                    model_input = item["model_input"]
-                    if model_input is not None:
-                        if model_input.is_cuda:
-                            model_input = model_input.cpu()
-                        latents.append(model_input)
-
-                # Handle embeddings
+                result["latents"].append(item["latents"])
                 if "prompt_embeds" in item:
-                    prompt_emb = item["prompt_embeds"]
-                    if prompt_emb.is_cuda:
-                        prompt_emb = prompt_emb.cpu()
-                    prompt_embeds.append(prompt_emb)
-                elif "embeddings" in item and "prompt_embeds" in item["embeddings"]:
-                    prompt_emb = item["embeddings"]["prompt_embeds"]
-                    if prompt_emb.is_cuda:
-                        prompt_emb = prompt_emb.cpu()
-                    prompt_embeds.append(prompt_emb)
-
+                    result["prompt_embeds"].append(item["prompt_embeds"])
                 if "pooled_prompt_embeds" in item:
-                    pooled_emb = item["pooled_prompt_embeds"]
-                    if pooled_emb.is_cuda:
-                        pooled_emb = pooled_emb.cpu()
-                    pooled_prompt_embeds.append(pooled_emb)
-                elif "embeddings" in item and "pooled_prompt_embeds" in item["embeddings"]:
-                    pooled_emb = item["embeddings"]["pooled_prompt_embeds"]
-                    if pooled_emb.is_cuda:
-                        pooled_emb = pooled_emb.cpu()
-                    pooled_prompt_embeds.append(pooled_emb)
-
-                # Collect metadata
-                result["original_sizes"].append(item.get("original_sizes", [(1024, 1024)])[0])
-                result["crop_top_lefts"].append(item.get("crop_top_lefts", [(0, 0)])[0])
-                result["target_sizes"].append(item.get("target_sizes", [(1024, 1024)])[0])
+                    result["pooled_prompt_embeds"].append(item["pooled_prompt_embeds"])
+                if self.tag_weighter:
+                    result["tag_weights"].append(item.get("tag_weight", 1.0))
 
             # Stack tensors
-            if latents:
-                stacked_latents = torch.stack(latents)
-                if self.config.data.pin_memory and not stacked_latents.is_cuda:
-                    stacked_latents = stacked_latents.pin_memory()
-                result["latent"] = {
-                    "model_input": stacked_latents,
-                    "latent": stacked_latents
-                }
-
-            if prompt_embeds and pooled_prompt_embeds:
-                stacked_prompt_embeds = torch.stack(prompt_embeds)
-                stacked_pooled_embeds = torch.stack(pooled_prompt_embeds)
-                
-                if self.config.data.pin_memory:
-                    if not stacked_prompt_embeds.is_cuda:
-                        stacked_prompt_embeds = stacked_prompt_embeds.pin_memory()
-                    if not stacked_pooled_embeds.is_cuda:
-                        stacked_pooled_embeds = stacked_pooled_embeds.pin_memory()
-                
-                result["prompt_embeds"] = stacked_prompt_embeds
-                result["pooled_prompt_embeds"] = stacked_pooled_embeds
-
-            if not ("prompt_embeds" in result and "pooled_prompt_embeds" in result):
-                raise ValueError("Missing required embeddings in batch data")
+            result["latents"] = torch.stack(result["latents"])
+            if result["prompt_embeds"]:
+                result["prompt_embeds"] = torch.stack(result["prompt_embeds"])
+            if result["pooled_prompt_embeds"]:
+                result["pooled_prompt_embeds"] = torch.stack(result["pooled_prompt_embeds"])
+            if result["tag_weights"]:
+                result["tag_weights"] = torch.tensor(result["tag_weights"], dtype=torch.float32)
 
             return result
 
         except Exception as e:
-            logger.error(
-                "Failed to collate batch", 
-                exc_info=True,
-                extra={
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'batch_size': len(batch) if batch else 0,
-                    'batch_keys': [list(item.keys()) for item in batch] if batch else [],
-                    'shapes': [tuple(item.get("model_input").shape) if "model_input" in item else None for item in batch] if batch else [],
-                    'stack_info': True
-                }
-            )
+            logger.error("Failed to collate batch", exc_info=True)
             raise
-    
 
 def create_dataset(
     config: Config,
     image_paths: List[str],
     captions: List[str],
-    preprocessing_pipeline: Optional['PreprocessingPipeline'] = None,
-    tag_weighter: Optional['TagWeighter'] = None,
+    preprocessing_pipeline: Optional[PreprocessingPipeline] = None,
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
 ) -> AspectBucketDataset:
-    """Create and initialize dataset instance.
-    
-    Args:
-        config: Configuration object
-        image_paths: List of image file paths
-        captions: List of corresponding captions
-        preprocessing_pipeline: Optional preprocessing pipeline
-        tag_weighter: Optional tag weighting system
-        enable_memory_tracking: Whether to track memory usage
-        max_memory_usage: Maximum memory usage fraction
-        
-    Returns:
-        Initialized dataset instance
-    """
-    if preprocessing_pipeline and torch.cuda.is_available():
-        torch.cuda.set_device(0)
-        logger.info(f"Using GPU device 0: {torch.cuda.get_device_name(0)}")
-        
+    """Create and initialize dataset instance."""
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
         preprocessing_pipeline=preprocessing_pipeline,
-        tag_weighter=tag_weighter,
         enable_memory_tracking=enable_memory_tracking,
         max_memory_usage=max_memory_usage
     )

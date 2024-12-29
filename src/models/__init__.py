@@ -1,15 +1,19 @@
-from .base import BaseModel, ModelType, BaseModelEmbedding
-from .sdxl import StableDiffusionXLModel, StableDiffusionXLModelEmbedding
-from .adapters.lora import LoRAModuleWrapper, AdditionalEmbeddingWrapper
-from .encoders.clip import CLIPEncoder
+"""Model implementations and utilities."""
+from .base import (
+    BaseModel,
+    BaseModelEmbedding,
+    ModelType,
+    TimestepBiasStrategy
+)
+from .sdxl import StableDiffusionXL
+from .encoders import CLIPEncoder, VAEEncoder
 
 __all__ = [
-    "BaseModel",
-    "BaseModelEmbedding", 
-    "ModelType",
-    "StableDiffusionXLModel",
-    "StableDiffusionXLModelEmbedding",
-    "LoRAModuleWrapper",
-    "AdditionalEmbeddingWrapper",
-    "CLIPEncoder"
+    'BaseModel',
+    'BaseModelEmbedding', 
+    'ModelType',
+    'TimestepBiasStrategy',
+    'StableDiffusionXL',
+    'CLIPEncoder',
+    'VAEEncoder'
 ]

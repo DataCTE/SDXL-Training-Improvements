@@ -10,30 +10,24 @@ import torch.cuda
 import logging
 import sys
 import threading
-from src.core.logging import get_logger, LogConfig, setup_logging, TensorLogger
 import traceback
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-
+from typing import Dict, List, Optional, Tuple, Union
 import torch
-import torch.backends.cudnn
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
-
 from torch.distributed import init_process_group
-from src.training import optimizers
-from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from src.core.logging import get_logger, LogConfig, WandbLogger, create_enhanced_logger
-from src.core.types import DataType, ModelWeightDtypes
-from src.data.preprocessing import CacheManager, PreprocessingPipeline, create_tag_weighter_with_index
-from src.data.utils.paths import convert_windows_path
-from src.core.memory.tensor import (
+from torch.cuda.amp import autocast
+
+from src.core.logging import (
+    setup_logging,
+    get_logger,
+    WandbLogger,
+    TensorLogger
+)
+from src.core.utils import (
+    create_stream_context,
     tensors_to_device_,
     tensors_match_device,
-    create_stream_context,
     torch_sync
 )
 from src.core.memory.optimizations import (
@@ -42,14 +36,24 @@ from src.core.memory.optimizations import (
 )
 from src.data.config import Config
 from src.data.dataset import create_dataset
-from src.training.methods.base import TrainingMethod
-from src.data.preprocessing import LatentPreprocessor
-from src.training.trainer import create_trainer
+from src.data.preprocessing import (
+    PreprocessingPipeline,
+    CacheManager
+)
+from src.training import (
+    BaseTrainer,
+    create_trainer,
+    TrainingMethod
+)
 from src.data.utils.paths import convert_path_list
-from src.data.dataset import create_dataset
-from src.models import ModelType, StableDiffusionXLModel
+from src.models import ModelType, StableDiffusionXL
+from src.core.distributed import (
+    setup_distributed,
+    cleanup_distributed,
+    is_main_process
+)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class TrainingSetupError(Exception):
     def __init__(self, message: str, context: Optional[Dict] = None):
@@ -104,54 +108,18 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
 
     return device
 
-def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusionXLModel]:
-    """Initialize SDXL model components."""
-    logger = get_logger(__name__)
-    # Create TensorLogger instance directly
-    tensor_logger = TensorLogger(logger)
-    
-    logger.info("Loading models...")
-    model = None  # Initialize model variable outside try block
+def setup_model(config: Config, device: torch.device) -> StableDiffusionXL:
+    """Initialize model with proper error handling."""
     try:
-        # Create model instance
-        model = StableDiffusionXLModel(
-            ModelType.BASE,
-            enable_memory_efficient_attention=config.model.enable_memory_efficient_attention,
-            enable_vae_slicing=config.model.enable_vae_slicing,
-            enable_model_cpu_offload=config.model.enable_model_cpu_offload
-        )
-        
-        # Log initial model creation
-        tensor_logger.log_checkpoint("Initial Model Creation", {
-            "unet": model.unet,
-            "vae": model.vae,
-            "text_encoder_1": model.text_encoder_1,
-            "text_encoder_2": model.text_encoder_2
-        })
-
-        # Load pretrained components
-        logger.info(f"Loading pretrained model from {config.model.pretrained_model_name}")
-        model.from_pretrained(
+        logger.info(f"Initializing {config.model.model_type} model")
+        model = StableDiffusionXL.from_pretrained(
             config.model.pretrained_model_name,
-            dtype=config.model.dtype,
-            use_safetensors=True
+            device=device,
+            model_type=ModelType(config.model.model_type)
         )
         
-        # Log post-loading state
-        tensor_logger.log_checkpoint("After Pretrained Loading", {
-            "unet": model.unet,
-            "vae": model.vae,
-            "text_encoder_1": model.text_encoder_1,
-            "text_encoder_2": model.text_encoder_2
-        })
-
-        # Move model to device after loading
-        logger.info(f"Moving model to {device}")
-        model.to(device)
-        
-        # Log post-device-move state
-        tensor_logger.log_checkpoint("After Device Move", {
-            "unet": model.unet,
+        # Create tensor logger
+        tensor_logger = TensorLogger(logger, {
             "vae": model.vae,
             "text_encoder_1": model.text_encoder_1,
             "text_encoder_2": model.text_encoder_2
@@ -189,11 +157,10 @@ def setup_model(config: Config, device: torch.device) -> Optional[StableDiffusio
             'device_index': device.index,
             'error': str(e),
             'memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-            'model_state': 'partially_loaded' if model else 'not_created'
+            'model_state': 'partially_loaded' if 'model' in locals() else 'not_created'
         }
         logger.error("Failed to initialize model", extra=error_context)
         raise RuntimeError(f"Failed to load models: {str(e)}") from e
-
 
 def load_training_data(config: Config) -> tuple[List[str], List[str]]:
     image_paths, captions = [], []
@@ -240,201 +207,73 @@ def process_image_caption_pairs(image_files: List[Path]) -> tuple[List[str], Lis
 
 def setup_training(
     config: Config,
-    model: StableDiffusionXLModel,
+    model: StableDiffusionXL,
     device: torch.device,
     image_paths: List[str],
     captions: List[str]
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger], TrainingMethod]:
-    if torch.cuda.is_available():
-        logger.info(f"Initial CUDA memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
-        
-    logger.info("Initializing latent preprocessor...")
+    """Setup training components."""
     try:
-        latent_preprocessor = LatentPreprocessor(config=config, sdxl_model=model, device=device)
-        logger.info("Latent preprocessor initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize latent preprocessor: {str(e)}", exc_info=True)
-        raise
-    
-    logger.info("Setting up cache manager...")
-    try:
-        model_dtypes = ModelWeightDtypes(
-            train_dtype=DataType.from_str(config.model.dtype),
-            fallback_train_dtype=DataType.from_str(config.model.fallback_dtype),
-            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
-            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
-            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
-            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
-            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
-            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
-            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
-            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
-            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
-            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
-            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
-        )
+        # Initialize cache manager
+        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         cache_manager = CacheManager(
-            model_dtypes=model_dtypes,
-            cache_dir=Path(convert_windows_path(config.global_config.cache.cache_dir)),
-            num_proc=config.global_config.cache.num_proc,
-            chunk_size=config.global_config.cache.chunk_size,
-            compression=getattr(config.global_config.cache, 'compression', 'zstd'),
-            verify_hashes=config.global_config.cache.verify_hashes,
-            max_memory_usage=0.8,
-            enable_memory_tracking=True
+            cache_dir=cache_dir,
+            max_cache_size=config.global_config.cache.max_cache_size,
+            device=device
         )
-        cache_manager.validate_cache_index()
-        logger.info("Cache manager setup complete")
-    except Exception as e:
-        logger.error(f"Failed to setup cache manager: {str(e)}", exc_info=True)
-        raise
-    
-    logger.info("Creating preprocessing pipeline...")
-    try:
+
+        # Create preprocessing pipeline
         preprocessing_pipeline = PreprocessingPipeline(
             config=config,
-            latent_preprocessor=latent_preprocessor,
+            model=model,
             cache_manager=cache_manager,
             is_train=True,
-            num_gpu_workers=config.preprocessing.num_gpu_workers,
-            num_cpu_workers=config.preprocessing.num_cpu_workers,
-            num_io_workers=config.preprocessing.num_io_workers,
-            prefetch_factor=config.preprocessing.prefetch_factor,
-            use_pinned_memory=False  # Disable pinned memory to prevent CUDA tensor pinning issues
+            enable_memory_tracking=True
         )
-    except Exception as e:
-        logger.error(f"Failed to create preprocessing pipeline: {str(e)}", exc_info=True)
-        raise
-    
-    # Create tag weighter with proper configuration
-    if config.tag_weighting.enable_tag_weighting:
-        logger.info("Initializing tag weighter...")
-        tag_weighter = create_tag_weighter_with_index(
-            config=config,
-            image_captions={path: caption for path, caption in zip(image_paths, captions)},
-            index_output_path=Path(config.global_config.output_dir) / "tag_weights.json",
-            cache_path=Path(config.global_config.cache.cache_dir) / "tag_weights_cache.json"
-        )
-    else:
-        tag_weighter = None
 
-    logger.info("Creating dataset...")
-    try:
-        train_dataset = create_dataset(
+        # Create dataset
+        dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
             preprocessing_pipeline=preprocessing_pipeline,
-            tag_weighter=tag_weighter,
-            enable_memory_tracking=True,
-            max_memory_usage=0.8
+            enable_memory_tracking=True
         )
-    except Exception as e:
-        logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
-        raise
-    
-    logger.info("Creating dataloader...")
-    try:
+
+        # Create data loader
         train_dataloader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=config.training.batch_size // config.training.gradient_accumulation_steps,
+            dataset,
+            batch_size=config.training.batch_size,
             shuffle=True,
-            num_workers=0,  # Use single worker to avoid pickling issues
-            pin_memory=False,  # Disable pinned memory to prevent CUDA tensor pinning issues
-            persistent_workers=False,  # Disable persistent workers
-            collate_fn=train_dataset.collate_fn
-        )
-    except Exception as e:
-        logger.error(f"Failed to create dataloader: {str(e)}", exc_info=True)
-        raise
-    
-    logger.info("Initializing training method...")
-    # Instantiate the training method
-    training_method_cls = TrainingMethod.get_method(config.training.method)
-    training_method = training_method_cls(model.unet, config)
-    
-    try:
-        logger.info("Setting up optimizer...")
-        optimizer_kwargs = {
-            "lr": config.training.learning_rate,
-            "betas": config.training.optimizer_betas,
-            "weight_decay": config.training.weight_decay,
-            "eps": config.training.optimizer_eps
-        }
-
-        # Map optimizer names to classes
-        optimizer_classes = {
-            'AdamWBF16': optimizers.AdamWBF16,
-            'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
-            'SOAP': optimizers.SOAP,
-            # Add other optimizers here as needed
-        }
-
-        # Get optimizer name from config
-        optimizer_name = config.training.optimizer.type  # Access the optimizer type correctly
-
-        if optimizer_name not in optimizer_classes:
-            raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
-
-        optimizer_class = optimizer_classes[optimizer_name]
-
-        # Include parameters from model.unet and training_method
-        optimizer = optimizer_class(
-            list(model.unet.parameters()) + list(training_method.parameters()),
-            **optimizer_kwargs
+            num_workers=config.training.num_workers,
+            pin_memory=config.training.pin_memory,
+            collate_fn=dataset.collate_fn
         )
 
-        logger.info(f"Using optimizer: {optimizer_name}")
+        # Initialize optimizer
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config.optimizer.learning_rate,
+            weight_decay=config.optimizer.weight_decay
+        )
 
-        # Add timeout handling
-        timeout = 300  # 5 minutes timeout
-        start_time = time.time()
-        
-        while time.time() - start_time < timeout:
-            if not torch.cuda.is_available() or torch.cuda.current_stream().query():
-                break
-            time.sleep(0.1)
-            
-        if time.time() - start_time >= timeout:
-            raise TimeoutError("CUDA operations timed out")
-
-        # Force CUDA synchronization
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            logger.info("CUDA synchronized successfully")
-
-        try:
-            if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
-                model.unet = torch.nn.parallel.DistributedDataParallel(
-                    model.unet, device_ids=[device] if device.type == "cuda" else None
-                )
-        except Exception as e:
-            logger.error(f"Failed to setup distributed training: {str(e)}", exc_info=True)
-            raise
-
+        # Initialize wandb logger if enabled
         wandb_logger = None
-        if config.training.use_wandb and is_main_process():
-            try:
-                wandb_logger = WandbLogger(
-                    project="sdxl-training",
-                    name=Path(config.global_config.output_dir).name,
-                    config=config.__dict__,
-                    dir=config.global_config.output_dir,
-                    tags=["sdxl", "fine-tuning"]
-                )
-                # Explicitly log model parameters
-                wandb_logger.log_model(model.unet)
-            except Exception as e:
-                logger.warning(f"Failed to initialize WandB logging: {str(e)}", exc_info=True)
-                wandb_logger = None
+        if config.logging.use_wandb and is_main_process():
+            wandb_logger = WandbLogger(config)
+
+        # Create training method based on config
+        training_method = BaseTrainer.create(
+            method_type=config.training.method,
+            model=model,
+            config=config,
+            device=device
+        )
 
         return train_dataloader, optimizer, wandb_logger, training_method
 
-    except TimeoutError:
-        logger.error("Setup timed out after 5 minutes", exc_info=True)
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error in setup_training: {str(e)}", exc_info=True)
+        logger.error("Failed to setup training", exc_info=True)
         raise
 
 def check_system_limits():
@@ -453,6 +292,7 @@ def check_system_limits():
         logger.warning("You may need to increase system file limits (ulimit -n)")
 
 def main():
+    """Main training entry point."""
     print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
     
@@ -461,133 +301,65 @@ def main():
         args = parse_args()
         config = Config.from_yaml(args.config)
         
-        # Then setup logging with the loaded config
-        logger, tensor_logger = setup_logging(
-            config=config.global_config.logging,
-            log_dir=config.global_config.logging.log_dir,
-            level=config.global_config.logging.file_level,
-            filename=config.global_config.logging.filename,
-            module_name="main",
-            capture_warnings=config.global_config.logging.capture_warnings,
-            propagate=False,  # Explicitly disable propagation
-            console_level=config.global_config.logging.console_level
-        )
+        # Setup logging
+        logger, tensor_logger = setup_logging(config.global_config.logging)
         
-        # Check and configure system limits
+        # Check system limits
         check_system_limits()
         
         device = None
         
         with setup_environment(args):
             device = setup_device_and_logging(config)
-            logger = get_logger("main")
             model = setup_model(config, device)
             
             if model is None:
-                raise RuntimeError(f"Failed to initialize model from {config.model.pretrained_model_name}")
+                raise RuntimeError("Failed to initialize model")
             
-            logger.info("Model initialized successfully")
-            
-            # Move model to device if needed
-            if hasattr(model, 'state_dict'):
-                try:
-                    if not tensors_match_device(model.state_dict(), device):
-                        logger.info(f"Moving model to device {device}")
-                        stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-                        pre_transfer_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-                        
-                        with create_stream_context(stream):
-                            tensors_to_device_(model.state_dict(), device)
-                            if stream:
-                                stream.synchronize()
-                            torch_sync()
-                            
-                        if torch.cuda.is_available():
-                            post_transfer_memory = torch.cuda.memory_allocated()
-                            memory_delta = post_transfer_memory - pre_transfer_memory
-                            logger.debug(f"Memory delta: {memory_delta / 1024**2:.1f}MB")
-                except Exception as e:
-                    raise TrainingSetupError(
-                        "Failed to move model to device",
-                        {
-                            "error": str(e),
-                            "device": str(device),
-                            "cuda_available": torch.cuda.is_available(),
-                            "memory_allocated": torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-                        }
-                    )
-
-            # Setup training components
-            setup_memory_optimizations(model.unet, config, device)
-            if is_main_process():
-                verify_memory_optimizations(model.unet, config, device, logger)
-                
             logger.info("Loading training data...")
             image_paths, captions = load_training_data(config)
             
             logger.info("Setting up training...")
-        
-        train_dataloader, optimizer, wandb_logger, training_method = setup_training(
-            config=config,
-            model=model,
-            device=device,
-            image_paths=image_paths,
-            captions=captions
-        )
+            train_dataloader, optimizer, wandb_logger, training_method = setup_training(
+                config=config,
+                model=model,
+                device=device,
+                image_paths=image_paths,
+                captions=captions
+            )
 
-        trainer = create_trainer(
-            config=config,
-            model=model,
-            optimizer=optimizer,
-            train_dataloader=train_dataloader,
-            device=device,
-            training_method=training_method,
-            wandb_logger=wandb_logger
-        )
-        
-        logger.info("Starting training...")
-        trainer.train()
-        
-        if is_main_process():
-            logger.info("Training complete!")
+            trainer = create_trainer(
+                config=config,
+                model=model,
+                optimizer=optimizer,
+                train_dataloader=train_dataloader,
+                device=device,
+                training_method=training_method,
+                wandb_logger=wandb_logger
+            )
+            
+            logger.info("Starting training...")
+            trainer.train()
+            
+            if is_main_process():
+                logger.info("Training complete!")
+
     except Exception as e:
         error_context = {
             'error_type': type(e).__name__,
             'device': str(device) if device is not None else 'unknown',
             'cuda_available': torch.cuda.is_available(),
-            'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0
-        }
-            
-        # Create TensorLogger for error handling
-        logger = get_logger(__name__)
-        tensor_logger = TensorLogger(logger)
-            
-        # Use print since logger might not be initialized yet
-        # Use model's tensor logger if available, otherwise create new one
-        tensor_logger = getattr(model, 'tensor_logger', None) if 'model' in locals() else None
-        if tensor_logger is None:
-            logger = get_logger(__name__)
-            tensor_logger = TensorLogger(logger)
-            
-        error_context = {
-            'error_type': type(e).__name__,
-            'device': str(device) if device is not None else 'unknown',
-            'cuda_available': torch.cuda.is_available(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            'model_name': config.model.pretrained_model_name if 'config' in locals() else None,
-            'cuda_memory_allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
-            'cuda_memory_reserved': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0,
-            'cuda_max_memory': torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
-        }
-            
-        # Dump tensor history with full context
-        tensor_logger.dump_shape_history({
             'error': str(e),
             'error_type': type(e).__name__,
-            'stack_trace': traceback.format_exc(),
-            **error_context
-        })
-                
+            'stack_trace': traceback.format_exc()
+        }
+        
+        logger.error(
+            "Training failed",
+            exc_info=True,
+            extra=error_context
+        )
         sys.exit(1)
 
 if __name__ == "__main__":
