@@ -76,7 +76,7 @@ global_config:
     performance_logging: true
     propagate: true
     # W&B settings
-    use_wandb: false  # Set to true to enable W&B logging
+    use_wandb: true  # Set to true to enable W&B logging
     wandb_project: "sdxl-training"
     wandb_name: null  # Optional run name
     wandb_tags: []    # Optional list of tags

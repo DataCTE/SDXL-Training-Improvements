@@ -11,8 +11,6 @@ from .core import (
     is_main_process,
     get_world_size,
     reduce_dict,
-    setup_logging,
-    cleanup_logging,
     WandbLogger
 )
 
@@ -68,8 +66,6 @@ __all__: List[str] = [
     "is_main_process",
     "get_world_size",
     "reduce_dict",
-    "setup_logging",
-    "cleanup_logging",
     "WandbLogger",
 
     # Data

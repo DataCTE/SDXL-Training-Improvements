@@ -68,28 +68,6 @@ class DDPMTrainer(TrainingMethod):
             }
             self._shape_logs.append(shape_info)
 
-    def _log_tensor_shapes(self, data: Union[torch.Tensor, Dict], path: str = "", step: str = "") -> None:
-        """Store tensor shapes in the shape logging buffer."""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                current_path = f"{path}.{key}" if path else key
-                self._log_tensor_shapes(value, current_path, step)
-        elif isinstance(data, torch.Tensor):
-            shape_info = {
-                'step': step,
-                'path': path,
-                'shape': tuple(data.shape),
-                'dtype': str(data.dtype),
-                'device': str(data.device),
-                'stats': {
-                    'min': float(data.min().cpu().item()),
-                    'max': float(data.max().cpu().item()),
-                    'mean': float(data.mean().cpu().item()),
-                    'std': float(data.std().cpu().item()) if data.numel() > 1 else 0.0
-                }
-            }
-            self._shape_logs.append(shape_info)
-
     def compute_loss(
         self,
         batch: Dict[str, Tensor],
