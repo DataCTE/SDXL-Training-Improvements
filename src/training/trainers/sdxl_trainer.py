@@ -103,10 +103,7 @@ class SDXLTrainer:
         self.config = config
         self.model = model
         self.unet = model.unet
-        self.optimizer = torch.optim.AdamW(
-            list(model.unet.parameters()) + list(training_method.up_proj.parameters()),
-            lr=config.training.learning_rate
-        )
+        self.optimizer = optimizer
         # Ensure DataLoader uses a single worker
         self.train_dataloader = DataLoader(
             train_dataloader.dataset,
