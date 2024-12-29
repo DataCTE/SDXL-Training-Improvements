@@ -196,11 +196,7 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
             pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
 
-            # Concatenate embeddings
-            batch_size = prompt_embeds.shape[0]
-            n_embeddings = prompt_embeds.shape[1]  # Should be 2
-            seq_length = prompt_embeds.shape[2]
-            embed_dim = prompt_embeds.shape[3]
+           
 
 
             # Ensure embeddings have correct dimensions
