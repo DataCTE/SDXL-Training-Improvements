@@ -44,7 +44,7 @@ from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.training.methods.base import TrainingMethod
 from src.data.preprocessing import LatentPreprocessor
-from src.training.trainer import create_trainer
+from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.data.utils.paths import convert_path_list
 from src.data.dataset import create_dataset
 from src.models import ModelType, StableDiffusionXLModel
@@ -537,7 +537,7 @@ def main():
             captions=captions
         )
 
-        trainer = create_trainer(
+        trainer = SDXLTrainer.create(
             config=config,
             model=model,
             optimizer=optimizer,
