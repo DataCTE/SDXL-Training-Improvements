@@ -269,6 +269,7 @@ class TrainingConfig:
     use_wandb: bool = True
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     method_config: TrainingMethodConfig = field(default_factory=TrainingMethodConfig)
 
     @property
@@ -419,9 +420,14 @@ class Config:
                 "scheduler": NoiseSchedulerConfig(**training_dict.pop("scheduler", {}))
             }
             
-            # Create training config with method config
+            # Extract optimizer config
+            optimizer_config_dict = training_dict.pop("optimizer", {})
+            optimizer_config = OptimizerConfig(**optimizer_config_dict)
+
+            # Create training config with method config and optimizer config
             training_config = TrainingConfig(
                 method_config=TrainingMethodConfig(**method_config_dict),
+                optimizer=optimizer_config,
                 **training_dict
             )
 
