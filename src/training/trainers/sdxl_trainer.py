@@ -267,10 +267,7 @@ class SDXLTrainer:
             # For logging batch_size, handle both new & legacy
             if "latent" in batch:
                 if "model_input" in batch["latent"]:
-                    latents = batch["latent"]["model_input"]
-                    
-
-                metrics["batch_size"] = batch["latent"]["model_input"].shape[0]
+                    metrics["batch_size"] = batch["latent"]["model_input"].shape[0]
             else:
                 metrics["batch_size"] = batch["model_input"].shape[0] if "model_input" in batch else 0
             
