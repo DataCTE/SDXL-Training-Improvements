@@ -374,7 +374,7 @@ def setup_training(
         }
 
         # Get optimizer name from config
-        optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
+        optimizer_name = config.training.optimizer.type  # Access the optimizer type correctly
 
         if optimizer_name not in optimizer_classes:
             raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")

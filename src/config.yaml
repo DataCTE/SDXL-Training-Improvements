@@ -113,9 +113,8 @@ training:
     beta_schedule: "scaled_linear"
     timestep_spacing: "uniform" #options are "leading", "trailing", "uniform"
     rescale_betas_zero_snr: true
-  # Flow matching specific settings (used only when method is "flow_matching")
-  sigma: 1.0
-  time_sampling: "uniform"
+  optimizer:
+    type: "AdamWScheduleFreeKahan"  # Choose from "AdamWBF16", "AdamWScheduleFreeKahan", or "SOAP"
 
 data:
   # Supports both Windows and Unix paths
