@@ -87,7 +87,7 @@ class ImageConfig:
 class CacheConfig:
     cache_dir: Union[str, Path] = "cache"
     max_cache_size: int = 10000
-    enable_cache: bool = True
+    use_cache: bool = True
     cache_latents: bool = True
     cache_text_embeddings: bool = True
 
