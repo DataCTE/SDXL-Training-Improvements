@@ -48,8 +48,6 @@ from src.data.preprocessing import LatentPreprocessor
 from src.training.trainer import create_trainer
 from src.data.utils.paths import convert_path_list
 from src.data.dataset import create_dataset
-from diffusers import AutoencoderKL, UNet2DConditionModel
-from transformers import CLIPTextModel, CLIPTokenizer
 from src.models import ModelType, StableDiffusionXLModel
 
 logger = logging.getLogger(__name__)

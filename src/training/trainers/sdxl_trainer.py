@@ -243,6 +243,18 @@ class SDXLTrainer:
 
                 batch["pooled_prompt_embeds"] = p_emb
 
+            # Reshape 4D embeddings to 3D if needed
+            if batch["prompt_embeds"].dim() == 4:
+                # Reshape from [batch_size, num_images, seq_len, embed_dim] to [batch_size * num_images, seq_len, embed_dim]
+                batch_size, num_images, seq_len, embed_dim = batch["prompt_embeds"].shape
+                batch["prompt_embeds"] = batch["prompt_embeds"].reshape(-1, seq_len, embed_dim)
+
+            # Similarly for pooled_prompt_embeds
+            if batch["pooled_prompt_embeds"].dim() == 3:
+                # Reshape from [batch_size, num_images, embed_dim] to [batch_size * num_images, embed_dim]
+                batch_size, num_images, embed_dim = batch["pooled_prompt_embeds"].shape
+                batch["pooled_prompt_embeds"] = batch["pooled_prompt_embeds"].reshape(-1, embed_dim)
+
             # Verify shapes of embeddings after processing
             assert batch["prompt_embeds"].dim() == 3, f"Expected prompt_embeds to be 3D, got {batch['prompt_embeds'].shape}"
             assert batch["pooled_prompt_embeds"].dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got {batch['pooled_prompt_embeds'].shape}"

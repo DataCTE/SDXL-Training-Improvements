@@ -3,8 +3,6 @@ from abc import ABC, ABCMeta, abstractmethod
 from typing import Dict, Optional, Type, Tuple
 import torch
 import torch.backends.cudnn
-from torch import Tensor
-from diffusers import DDPMScheduler
 from src.data.config import Config
 from src.training.schedulers import configure_noise_scheduler
 from src.core.logging import get_logger
