@@ -194,14 +194,27 @@ class AspectBucketDataset(Dataset):
         """Precompute and cache latents for all images."""
         total_images = len(self)
         skipped_images = 0
-        batch_size = 32  # Batch size for preprocessing only
+        processed_images = 0
+        batch_size = 32  # Internal batch size for processing
         
-        for start_idx in tqdm(range(0, total_images, batch_size), desc="Precomputing latents"):
+        # Create progress bar for total images
+        pbar = tqdm(
+            total=total_images,
+            desc="Precomputing latents",
+            unit="img",  # Show progress in images
+            postfix={
+                'processed': 0,
+                'skipped': 0,
+                'success_rate': '0.0%'
+            }
+        )
+        
+        for start_idx in range(0, total_images, batch_size):
             try:
                 end_idx = min(start_idx + batch_size, total_images)
                 batch_indices = range(start_idx, end_idx)
                 
-                # Process batch
+                # Process batch internally
                 batch_paths = [self.image_paths[i] for i in batch_indices]
                 batch_captions = [self.captions[i] for i in batch_indices]
                 
@@ -212,11 +225,11 @@ class AspectBucketDataset(Dataset):
                     config=self.config
                 )
                 
-                # Cache individual results
+                # Cache and track individual results
                 if self.config.global_config.cache.use_cache:
                     for path, processed, caption in zip(batch_paths, processed_items, batch_captions):
                         if processed is not None:
-                            self.cache_manager.save_latents(
+                            cache_success = self.cache_manager.save_latents(
                                 tensors={
                                     "pixel_values": processed["pixel_values"],
                                     "prompt_embeds": processed["prompt_embeds"],
@@ -230,15 +243,48 @@ class AspectBucketDataset(Dataset):
                                     "text": caption
                                 }
                             )
+                            
+                            # Update counters for individual images
+                            if cache_success:
+                                processed_images += 1
+                            else:
+                                skipped_images += 1
                         else:
                             skipped_images += 1
-                            
-            except Exception as e:
-                logger.error(f"Failed to precompute batch starting at index {start_idx}", exc_info=True)
-                skipped_images += len(batch_indices)
-                continue
+                        
+                        # Update progress for each individual image
+                        pbar.update(1)
+                        pbar.set_postfix({
+                            'processed': processed_images,
+                            'skipped': skipped_images,
+                            'success_rate': f"{(processed_images / (processed_images + skipped_images) * 100):.1f}%"
+                        })
                 
-        logger.info(f"Precomputing complete. Processed {total_images - skipped_images}/{total_images} images")
+                # Force CUDA synchronization periodically
+                if torch.cuda.is_available() and (start_idx + batch_size) % (batch_size * 4) == 0:
+                    torch.cuda.synchronize()
+                    
+            except Exception as e:
+                logger.error(f"Failed to process batch at index {start_idx}", exc_info=True)
+                # Mark all images in failed batch as skipped
+                skipped_images += len(batch_indices)
+                # Update progress for skipped images
+                pbar.update(len(batch_indices))
+                pbar.set_postfix({
+                    'processed': processed_images,
+                    'skipped': skipped_images,
+                    'success_rate': f"{(processed_images / (processed_images + skipped_images) * 100):.1f}%"
+                })
+                continue
+        
+        # Close progress bar
+        pbar.close()
+        
+        # Log final statistics
+        logger.info(
+            f"Precomputing complete: {processed_images}/{total_images} images processed successfully "
+            f"({skipped_images} skipped) - Success rate: {(processed_images/total_images)*100:.1f}%"
+        )
 
     def __len__(self) -> int:
         return len(self.image_paths)
