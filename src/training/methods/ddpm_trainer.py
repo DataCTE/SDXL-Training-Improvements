@@ -35,7 +35,7 @@ class DDPMTrainer(TrainingMethod):
     def __init__(self, unet: torch.nn.Module, config: Config):
         super().__init__(unet, config)
         # Update input dimension to match concatenated embeddings
-        self.up_proj = nn.Linear(1792, 1280).to(self.unet.device, self.unet.dtype)
+        self.up_proj = nn.Linear(1536, 1280).to(self.unet.device, self.unet.dtype)
         self.logger.debug("Initializing DDPMTrainer")
 
         # Validate noise scheduler initialization
@@ -192,6 +192,20 @@ class DDPMTrainer(TrainingMethod):
             # Move embeddings to the correct device and dtype
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
             pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
+
+            # Concatenate embeddings
+            batch_size = prompt_embeds.shape[0]
+            n_embeddings = prompt_embeds.shape[1]  # Should be 2
+            seq_length = prompt_embeds.shape[2]
+            embed_dim = prompt_embeds.shape[3]
+
+            # Reshape and concatenate prompt_embeds
+            prompt_embeds = prompt_embeds.view(batch_size, n_embeddings, seq_length, embed_dim)
+            prompt_embeds = torch.cat([prompt_embeds[:, 0, :, :], prompt_embeds[:, 1, :, :]], dim=-1)  # Shape: (batch_size, seq_length, 1536)
+
+            # Reshape and concatenate pooled_prompt_embeds
+            pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size, n_embeddings, embed_dim)
+            pooled_prompt_embeds = torch.cat([pooled_prompt_embeds[:, 0, :], pooled_prompt_embeds[:, 1, :]], dim=-1)  # Shape: (batch_size, 1536)
 
             # Apply up-projection if needed
             prompt_embeds = self._up_project_if_needed(prompt_embeds)
