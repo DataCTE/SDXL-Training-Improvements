@@ -206,16 +206,10 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = torch.cat([prompt_embeds[:, 0, :, :], prompt_embeds[:, 1, :, :]], dim=-1)  # New shape: (batch_size, seq_length, 1536)
 
             # Reshape and concatenate pooled_prompt_embeds
-            pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size, n_embeddings, embed_dim)
-            pooled_prompt_embeds = torch.cat([pooled_prompt_embeds[:, 0, :], pooled_prompt_embeds[:, 1, :]], dim=-1)  # Shape: (batch_size, 1536)
-
-            # Apply up-projection if needed
-            prompt_embeds = self._up_project_if_needed(prompt_embeds)
-            pooled_prompt_embeds = self._up_project_if_needed(pooled_prompt_embeds)
+            pooled_prompt_embeds = torch.cat([pooled_prompt_embeds[:, 0, :], pooled_prompt_embeds[:, 1, :]], dim=-1)  # New shape: (batch_size, 1536)
 
             # Ensure embeddings have correct dimensions
-            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got {prompt_embeds.dim()}"
-            assert pooled_prompt_embeds.dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got {pooled_prompt_embeds.dim()}"
+            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
             # Add this line to remove the extra singleton dimension
