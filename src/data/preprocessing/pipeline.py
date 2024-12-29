@@ -5,21 +5,16 @@ import random
 import logging
 from contextlib import contextmanager
 from src.core.logging import get_logger
-from src.models import StableDiffusionXL, TimestepBiasStrategy
+from src.models import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_path_list
 
 logger = get_logger(__name__)
 import torch.backends.cudnn
 from pathlib import Path
-import multiprocessing as mp
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from queue import Queue
 from typing import Dict, List, Optional, Union, Any, Tuple
 from PIL import Image
 from dataclasses import dataclass
-from tqdm.auto import tqdm
-from contextlib import nullcontext
 from src.data.preprocessing.cache_manager import CacheManager
 from src.core.memory.tensor import create_stream_context
 import numpy as np

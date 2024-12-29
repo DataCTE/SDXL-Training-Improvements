@@ -1,137 +1,78 @@
-global_config:
-  image:
-    target_size: [1024, 1024]
-    supported_dims:
-    # Original dimensions
-    - [1024, 1024]  # 1:1
-    - [1152, 896]   # ~1.29:1
-    - [896, 1152]   # 1:1.29
-    - [1216, 832]   # ~1.46:1
-    - [832, 1216]   # 1:1.46
-    - [1344, 768]   # 1.75:1
-    - [768, 1344]   # 1:1.75
-    - [1536, 640]   # 2.4:1
-    - [640, 1536]   # 1:2.4
-
-    # Medium dimensions
-    - [1280, 832]   # ~1.54:1
-    - [832, 1280]   # 1:1.54
-    - [1408, 704]   # 2:1
-    - [704, 1408]   # 1:2
-    - [1472, 672]   # ~2.19:1
-    - [672, 1472]   # 1:2.19
-    - [1600, 608]   # ~2.63:1
-    - [608, 1600]   # 1:2.63
-    - [1088, 960]   # ~1.13:1
-    - [960, 1088]   # 1:1.13
-    - [1024, 896]   # ~1.14:1
-    - [896, 1024]   # 1:1.14
-    - [1280, 768]   # ~1.67:1
-    - [768, 1280]   # 1:1.67
-
-    # Large dimensions (2048-based)
-    - [2048, 2048]  # 1:1
-    - [2048, 1920]  # ~1.07:1
-    - [1920, 2048]  # 1:1.07
-    - [2048, 1792]  # ~1.14:1
-    - [1792, 2048]  # 1:1.14
-    - [2048, 1664]  # ~1.23:1
-    - [1664, 2048]  # 1:1.23
-    - [2048, 1536]  # 1.33:1
-    - [1536, 2048]  # 1:1.33
-    - [2048, 1408]  # ~1.45:1
-    - [1408, 2048]  # 1:1.45
-    - [2048, 1280]  # 1.6:1
-    - [1280, 2048]  # 1:1.6
-    - [2048, 1152]  # ~1.78:1
-    - [1152, 2048]  # 1:1.78
-    - [2048, 1024]  # 2:1
-    - [1024, 2048]  # 1:2
-    - [2048, 896]   # ~2.28:1
-    - [896, 2048]   # 1:2.28
-    - [2048, 768]   # ~2.67:1
-    - [768, 2048]   # 1:2.67
-    - [2048, 704]   # ~2.91:1
-    - [704, 2048]   # 1:2.91
-    max_size: [2048, 2048]
-    min_size: [256, 256]
-    max_dim: 4194304  # 2048 * 2048
-    max_aspect_ratio: 3.0  # Maximum allowed aspect ratio for images
-  cache:
-    cache_dir: "cache"
-    use_cache: true
-    clear_cache_on_start: false
-  seed: null
-  output_dir: "outputs"
-  logging:
-    console_level: "INFO"
-    file_level: "DEBUG" 
-    log_dir: "outputs/logs"
-    filename: "training.log"
-    capture_warnings: true
-    console_output: true
-    file_output: true
-    log_cuda_memory: true
-    log_system_memory: true
-    performance_logging: true
-    propagate: true
-    # W&B settings
-    use_wandb: true  # Set to true to enable W&B logging
-    wandb_project: "sdxl-training"
-    wandb_name: null  # Optional run name
-    wandb_tags: []    # Optional list of tags
-    wandb_notes: null # Optional run notes
-
+# Model configuration
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
-  enable_memory_efficient_attention: true
-  enable_vae_slicing: false
-  enable_model_cpu_offload: false
-  enable_sequential_cpu_offload: false
-  enable_bf16_training: true
-  dtype: "bfloat16"
-  fallback_dtype: "float32"
-  prediction_type: "v_prediction"
-  resolution: 1024  # Add this line for SDXL's default resolution
-
-training:
-  batch_size: 4
-  micro_batch_size: 4  # Add this line
-  gradient_accumulation_steps: 1
-  mixed_precision: true
-  gradient_checkpointing: true
-  method: "ddpm"  # Valid values: "ddpm" or "flow_matching"
+  model_type: "sdxl"
+  prediction_type: "epsilon"
   num_timesteps: 1000
-  snr_gamma: 5.0
-  zero_terminal_snr: true
   sigma_min: 0.002
   sigma_max: 2000.0
-  rho: 7.0
-  scheduler:
-    num_train_timesteps: 1000
-    beta_start: 0.00085
-    beta_end: 0.012
-    beta_schedule: "scaled_linear"
-    timestep_spacing: "uniform" #options are "leading", "trailing", "uniform"
-    rescale_betas_zero_snr: true
-  optimizer:
-    type: "AdamWBF16"  # Choose from "AdamWBF16", "AdamWScheduleFreeKahan", or "SOAP"
+  timestep_bias_strategy: "none"
+  timestep_bias_min: 0.0
+  timestep_bias_max: 1.0
 
-data:
-  # Supports both Windows and Unix paths
-  # Windows paths (D:\Dataset) will be automatically converted to WSL paths (/mnt/d/Dataset)
-  train_data_dir: 
-    - "D:\\Datasets\\High-quality-photo10k"  # Windows path
+# Optimizer settings
+optimizer:
+  learning_rate: 1.0e-6
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1.0e-8
+  optimizer_type: "adamw_bf16"  # Options: adamw, adamw_bf16, adamw_8bit, lion, prodigy
+
+# Training configuration
+training:
+  batch_size: 4
+  num_epochs: 100
+  save_every: 1
+  method: "ddpm"  # Options: ddpm, flow_matching
   num_workers: 4
   pin_memory: true
-  persistent_workers: true
-  proportion_empty_prompts: 0.05
+  gradient_accumulation_steps: 1
+  mixed_precision: "bf16"  # Options: fp16, bf16, no
+  enable_xformers: true
+  clip_grad_norm: 1.0
+  num_inference_steps: 50
 
-tag_weighting:
-  enable_tag_weighting: true
-  use_cache: true
-  default_weight: 1.0
-  min_weight: 0.1
-  max_weight: 3.0
-  smoothing_factor: 0.1
+# Dataset configuration
+data:
+  train_data_dir: 
+    - "D:\\Datasets\\High-quality-photo10k"  # Can be single path or list of paths
+  validation_data_dir: null  # Optional validation data directory
+  image_size: 1024
+  center_crop: true
+  random_flip: true
+  tokenizer_max_length: 77
 
+# Global configuration settings
+global_config:
+  # Cache settings
+  cache:
+    cache_dir: "cache"
+    max_cache_size: 10000
+    enable_cache: true
+    cache_latents: true
+    cache_text_embeddings: true
+
+  # Logging configuration
+  logging:
+    use_wandb: false
+    wandb_project: "sdxl-training"
+    wandb_entity: null  # Your wandb username or team name
+    log_dir: "logs"
+    filename: "training.log"
+    console_level: "INFO"
+    file_level: "DEBUG"
+    capture_warnings: true
+    log_every: 10
+
+  # Image processing settings (referenced in pipeline.py)
+  image:
+    supported_dims:
+      - [1024, 1024]   # Square
+      - [1024, 1536]   # Portrait
+      - [1536, 1024]   # Landscape
+      - [1024, 1536]   # Portrait
+      - [1536, 1024]   # Landscape
+      - [1024, 1536]   # Portrait
+      - [1536, 1024]   # Landscape
+    max_aspect_ratio: 2.0  # Maximum allowed aspect ratio deviation

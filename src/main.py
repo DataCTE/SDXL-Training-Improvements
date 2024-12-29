@@ -84,9 +84,7 @@ def setup_environment(args: argparse.Namespace):
 
 def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
     """Setup device and logging configuration."""
-  
-    
-    # Then create main logger with enhanced formatting
+    # Create main logger with enhanced formatting
     logger = create_enhanced_logger(
         "main",
         level=config.global_config.logging.console_level,
@@ -97,15 +95,19 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     
     # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if not isinstance(device, torch.device):
-        device = torch.device(device)
     
     if is_main_process():
-        logger.debug("Debug logging test message")  # Add test debug message
         logger.info(f"Using device: {device}")
         if device.type == "cuda":
-            logger.info(f"CUDA Device: {torch.cuda.get_device_name(device.index)}")
-            logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024**3:.1f} GB")
+            logger.info(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+            logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            
+            # Set mixed precision if enabled
+            if config.training.mixed_precision != "no":
+                logger.info(f"Using mixed precision: {config.training.mixed_precision}")
+                
+            if config.training.enable_xformers:
+                logger.info("xFormers optimization enabled")
 
     return device
 
@@ -215,7 +217,7 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Initialize cache manager
+        # Initialize cache manager with config values
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         cache_manager = CacheManager(
             cache_dir=cache_dir,
@@ -232,7 +234,7 @@ def setup_training(
             enable_memory_tracking=True
         )
 
-        # Create dataset
+        # Create dataset with config values
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
@@ -241,7 +243,7 @@ def setup_training(
             enable_memory_tracking=True
         )
 
-        # Create data loader
+        # Create data loader with config values
         train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.training.batch_size,
@@ -251,17 +253,31 @@ def setup_training(
             collate_fn=dataset.collate_fn
         )
 
-        # Initialize optimizer
-        optimizer = torch.optim.AdamW(
+        # Initialize optimizer based on config
+        optimizer_cls = {
+            "adamw": torch.optim.AdamW,
+            "adamw_bf16": AdamWBF16,
+            "adamw_8bit": AdamW8bit,
+            "lion": Lion,
+            "prodigy": Prodigy
+        }[config.optimizer.optimizer_type]
+        
+        optimizer = optimizer_cls(
             model.parameters(),
             lr=config.optimizer.learning_rate,
-            weight_decay=config.optimizer.weight_decay
+            weight_decay=config.optimizer.weight_decay,
+            betas=(config.optimizer.beta1, config.optimizer.beta2),
+            eps=config.optimizer.epsilon
         )
 
         # Initialize wandb logger if enabled
         wandb_logger = None
-        if config.logging.use_wandb and is_main_process():
-            wandb_logger = WandbLogger(config)
+        if config.global_config.logging.use_wandb and is_main_process():
+            wandb_logger = WandbLogger(
+                project=config.global_config.logging.wandb_project,
+                entity=config.global_config.logging.wandb_entity,
+                config=config.to_dict()
+            )
 
         return train_dataloader, optimizer, wandb_logger
 
