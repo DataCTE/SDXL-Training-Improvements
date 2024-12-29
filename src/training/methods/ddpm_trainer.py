@@ -203,9 +203,6 @@ class DDPMTrainer(TrainingMethod):
             # Reshape pooled_prompt_embeds from [batch_size, 2, embed_dim] to [batch_size, 2 * embed_dim]
             pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size, -1)
 
-           
-
-
             # Ensure embeddings have correct dimensions
             target_dtype = self.unet.dtype
             latents = latents.to(device=self.unet.device, dtype=target_dtype)
@@ -273,8 +270,8 @@ class DDPMTrainer(TrainingMethod):
             # ----------------------------------------------------------
             # 5. Forward pass with all conditioning
             # ----------------------------------------------------------
-            assert latents.dim() == 4, f"Expected latents to be 4D, got shape {latents.shape}"
-            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
+            assert latents.dim() == 4, f" Forward pass: Expected latents to be 4D, got shape {latents.shape}"
+            assert prompt_embeds.dim() == 3, f" Forward pass: Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
 
             noise_pred = self.unet(
                 sample=noisy_latents,
