@@ -87,3 +87,4 @@ tag_weighting:
   min_weight: 0.1
   max_weight: 3.0
   default_weight: 1.0
+  smoothing_factor: 0.05       # Add smoothing factor configuration

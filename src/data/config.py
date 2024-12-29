@@ -123,6 +123,7 @@ class TagWeightingConfig:
     min_weight: float = 0.1
     max_weight: float = 3.0
     default_weight: float = 1.0
+    smoothing_factor: float = 0.05
 
 @dataclass
 class Config:
