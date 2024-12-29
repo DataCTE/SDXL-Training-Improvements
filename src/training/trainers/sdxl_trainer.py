@@ -38,25 +38,25 @@ from src.training.methods.base import TrainingMethod
 
 class SDXLTrainer:
     @classmethod
-@classmethod
-def create(cls, config: Config, model: StableDiffusionXLModel, 
-           optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
-           device: Union[str, torch.device], training_method: TrainingMethod,
-           wandb_logger: Optional[WandbLogger] = None,
-           validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
-    logger = get_logger("training.sdxl")
-    logger.debug("Creating SDXLTrainer instance")
-    
-    return cls(
-        config=config,
-        model=model,
-        optimizer=optimizer,
-        train_dataloader=train_dataloader,
-        training_method=training_method,
-        device=device,
-        wandb_logger=wandb_logger,
-        validation_prompts=validation_prompts
-    )
+    @classmethod
+    def create(cls, config: Config, model: StableDiffusionXLModel, 
+               optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
+               device: Union[str, torch.device], training_method: TrainingMethod,
+               wandb_logger: Optional[WandbLogger] = None,
+               validation_prompts: Optional[List[str]] = None) -> 'SDXLTrainer':
+        logger = get_logger("training.sdxl")
+        logger.debug("Creating SDXLTrainer instance")
+        
+        return cls(
+            config=config,
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            training_method=training_method,
+            device=device,
+            wandb_logger=wandb_logger,
+            validation_prompts=validation_prompts
+        )
     
 def __init__(
     self,

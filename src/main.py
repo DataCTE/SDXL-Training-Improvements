@@ -357,37 +357,38 @@ def setup_training(
         training_method_cls = TrainingMethod.get_method(config.training.method)
         training_method = training_method_cls(model.unet, config)
         
-    logger.info("Setting up optimizer...")
-    optimizer_kwargs = {
-        "lr": config.training.learning_rate,
-        "betas": config.training.optimizer_betas,
-        "weight_decay": config.training.weight_decay,
-        "eps": config.training.optimizer_eps
-    }
+    try:
+        logger.info("Setting up optimizer...")
+        optimizer_kwargs = {
+            "lr": config.training.learning_rate,
+            "betas": config.training.optimizer_betas,
+            "weight_decay": config.training.weight_decay,
+            "eps": config.training.optimizer_eps
+        }
 
-    # Map optimizer names to classes
-    optimizer_classes = {
-        'AdamWBF16': optimizers.AdamWBF16,
-        'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
-        'SOAP': optimizers.SOAP,
-        # Add other optimizers here as needed
-    }
+        # Map optimizer names to classes
+        optimizer_classes = {
+            'AdamWBF16': optimizers.AdamWBF16,
+            'AdamWScheduleFreeKahan': optimizers.AdamWScheduleFreeKahan,
+            'SOAP': optimizers.SOAP,
+            # Add other optimizers here as needed
+        }
 
-    # Get optimizer name from config
-    optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
+        # Get optimizer name from config
+        optimizer_name = config.training.optimizer_name  # Ensure this exists in your config
 
-    if optimizer_name not in optimizer_classes:
-        raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
+        if optimizer_name not in optimizer_classes:
+            raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {list(optimizer_classes.keys())}")
 
-    optimizer_class = optimizer_classes[optimizer_name]
+        optimizer_class = optimizer_classes[optimizer_name]
 
-    # Include parameters from model.unet and training_method
-    optimizer = optimizer_class(
-        list(model.unet.parameters()) + list(training_method.parameters()),
-        **optimizer_kwargs
-    )
+        # Include parameters from model.unet and training_method
+        optimizer = optimizer_class(
+            list(model.unet.parameters()) + list(training_method.parameters()),
+            **optimizer_kwargs
+        )
 
-    logger.info(f"Using optimizer: {optimizer_name}")
+        logger.info(f"Using optimizer: {optimizer_name}")
 
         # Add timeout handling
         timeout = 300  # 5 minutes timeout
