@@ -37,7 +37,6 @@ from src.models import StableDiffusionXLModel
 from src.training.methods.base import TrainingMethod
 
 class SDXLTrainer:
-    @classmethod
     def create(cls, config: Config, model: StableDiffusionXLModel, 
                optimizer: torch.optim.Optimizer, train_dataloader: DataLoader,
                device: Union[str, torch.device], training_method: TrainingMethod,
@@ -57,96 +56,96 @@ class SDXLTrainer:
             validation_prompts=validation_prompts
         )
     
-def __init__(
-    self,
-    config: Config,
-    model: StableDiffusionXLModel,
-    optimizer: torch.optim.Optimizer,
-    train_dataloader: DataLoader,
-    training_method: TrainingMethod,
-    device: Union[str, torch.device],
-    wandb_logger: Optional[WandbLogger] = None,
-    validation_prompts: Optional[List[str]] = None
-):
-    # Get logger first
-    self.logger = get_logger(__name__)
-    # Initialize TensorLogger
-    self.tensor_logger = TensorLogger(self.logger)
-    
-    self.config = config
-    self.model = model
-    self.unet = model.unet
-    self.optimizer = optimizer
-    # Ensure DataLoader uses a single worker
-    self.train_dataloader = DataLoader(
-        train_dataloader.dataset,
-        batch_size=train_dataloader.batch_size,
-        shuffle=True,
-        num_workers=0,  # Use single worker
-        pin_memory=False,
-        persistent_workers=False,
-        drop_last=True,
-        collate_fn=train_dataloader.dataset.collate_fn if hasattr(train_dataloader.dataset, 'collate_fn') else None
-    )
-    self.training_method = training_method
-    self.device = device
-    self.wandb_logger = wandb_logger
-
-    base_dtype = DataType.from_str(config.model.dtype)
-    fallback_dtype = DataType.from_str(config.model.fallback_dtype)
-    self.model_dtypes = ModelWeightDtypes(
-        train_dtype=base_dtype,
-        fallback_train_dtype=fallback_dtype,
-        unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
-        prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
-        text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
-        text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
-        vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
-        effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
-        decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
-        decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
-        decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
-        lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
-        embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
-    )
-
-    self._setup_memory_management(
-        batch_size=train_dataloader.batch_size,
-        micro_batch_size=config.training.micro_batch_size
-    )
-    if not tensors_match_device(self.model.state_dict(), device):
-        with create_stream_context(torch.cuda.current_stream()):
-            tensors_to_device_(self.model.state_dict(), device)
-            if hasattr(self.optimizer, 'state'):
-                tensors_to_device_(self.optimizer.state, device)
-        torch.cuda.current_stream().synchronize()
-    torch_sync()
-
-    self.global_step = 0
-    self.epoch = 0
-    self.max_steps = config.training.max_train_steps or (
-        len(train_dataloader) * config.training.num_epochs
-    )
-    self.metrics_logger = MetricsLogger(window_size=100)
-    if validation_prompts:
-        self.validation_logger = ValidationLogger(
-            model=model,
-            prompts=validation_prompts,
-            output_dir=Path(config.global_config.output_dir)
+    def __init__(
+        self,
+        config: Config,
+        model: StableDiffusionXLModel,
+        optimizer: torch.optim.Optimizer,
+        train_dataloader: DataLoader,
+        training_method: TrainingMethod,
+        device: Union[str, torch.device],
+        wandb_logger: Optional[WandbLogger] = None,
+        validation_prompts: Optional[List[str]] = None
+    ):
+        # Get logger first
+        self.logger = get_logger(__name__)
+        # Initialize TensorLogger
+        self.tensor_logger = TensorLogger(self.logger)
+        
+        self.config = config
+        self.model = model
+        self.unet = model.unet
+        self.optimizer = optimizer
+        # Ensure DataLoader uses a single worker
+        self.train_dataloader = DataLoader(
+            train_dataloader.dataset,
+            batch_size=train_dataloader.batch_size,
+            shuffle=True,
+            num_workers=0,  # Use single worker
+            pin_memory=False,
+            persistent_workers=False,
+            drop_last=True,
+            collate_fn=train_dataloader.dataset.collate_fn if hasattr(train_dataloader.dataset, 'collate_fn') else None
         )
-    else:
-        self.validation_logger = None
+        self.training_method = training_method
+        self.device = device
+        self.wandb_logger = wandb_logger
 
-    self.gradient_accumulation_steps = (
-        train_dataloader.batch_size // config.training.micro_batch_size
-        if config.training.micro_batch_size else 1
-    )
+        base_dtype = DataType.from_str(config.model.dtype)
+        fallback_dtype = DataType.from_str(config.model.fallback_dtype)
+        self.model_dtypes = ModelWeightDtypes(
+            train_dtype=base_dtype,
+            fallback_train_dtype=fallback_dtype,
+            unet=DataType.from_str(config.model.unet_dtype or config.model.dtype),
+            prior=DataType.from_str(config.model.prior_dtype or config.model.dtype),
+            text_encoder=DataType.from_str(config.model.text_encoder_dtype or config.model.dtype),
+            text_encoder_2=DataType.from_str(config.model.text_encoder_2_dtype or config.model.dtype),
+            vae=DataType.from_str(config.model.vae_dtype or config.model.dtype),
+            effnet_encoder=DataType.from_str(config.model.effnet_dtype or config.model.dtype),
+            decoder=DataType.from_str(config.model.decoder_dtype or config.model.dtype),
+            decoder_text_encoder=DataType.from_str(config.model.decoder_text_encoder_dtype or config.model.dtype),
+            decoder_vqgan=DataType.from_str(config.model.decoder_vqgan_dtype or config.model.dtype),
+            lora=DataType.from_str(config.model.lora_dtype or config.model.dtype),
+            embedding=DataType.from_str(config.model.embedding_dtype or config.model.dtype)
+        )
 
-    # Compile for speed if available
-    if hasattr(torch, "compile"):
-        self.train_step = torch.compile(self.train_step, mode="reduce-overhead", fullgraph=False)
-        self.train_epoch = torch.compile(self.train_epoch, mode="reduce-overhead", fullgraph=False)
-        self.train = torch.compile(self.train, mode="reduce-overhead", fullgraph=False)
+        self._setup_memory_management(
+            batch_size=train_dataloader.batch_size,
+            micro_batch_size=config.training.micro_batch_size
+        )
+        if not tensors_match_device(self.model.state_dict(), device):
+            with create_stream_context(torch.cuda.current_stream()):
+                tensors_to_device_(self.model.state_dict(), device)
+                if hasattr(self.optimizer, 'state'):
+                    tensors_to_device_(self.optimizer.state, device)
+            torch.cuda.current_stream().synchronize()
+        torch_sync()
+
+        self.global_step = 0
+        self.epoch = 0
+        self.max_steps = config.training.max_train_steps or (
+            len(train_dataloader) * config.training.num_epochs
+        )
+        self.metrics_logger = MetricsLogger(window_size=100)
+        if validation_prompts:
+            self.validation_logger = ValidationLogger(
+                model=model,
+                prompts=validation_prompts,
+                output_dir=Path(config.global_config.output_dir)
+            )
+        else:
+            self.validation_logger = None
+
+        self.gradient_accumulation_steps = (
+            train_dataloader.batch_size // config.training.micro_batch_size
+            if config.training.micro_batch_size else 1
+        )
+
+        # Compile for speed if available
+        if hasattr(torch, "compile"):
+            self.train_step = torch.compile(self.train_step, mode="reduce-overhead", fullgraph=False)
+            self.train_epoch = torch.compile(self.train_epoch, mode="reduce-overhead", fullgraph=False)
+            self.train = torch.compile(self.train, mode="reduce-overhead", fullgraph=False)
 
     def train_step(
         self,
