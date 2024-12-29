@@ -199,16 +199,35 @@ class SDXLTrainer:
             # Convert them to the up_proj layer’s dtype & device before calling up_proj
             if "prompt_embeds" in batch and isinstance(batch["prompt_embeds"], torch.Tensor):
                 emb = batch["prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
-                # shape: [batch, 2, 77, 768], take emb[:, 0]
+                
+                # Handle possible singleton dimensions in emb
+                if emb.dim() == 4 and emb.shape[1] == 1:
+                    emb = emb.view(emb.shape[0], emb.shape[2], emb.shape[3])
+                elif emb.dim() == 4:
+                    emb = emb.view(emb.shape[0], -1, emb.shape[3])
+                
                 batch_size = emb.shape[0]
+                seq_len = emb.shape[1]
+                
+                # Apply up-projection and reshape back
                 batch["prompt_embeds"] = self.up_proj(
-                    emb[:, 0].reshape(-1, 768)
-                ).reshape(batch_size, 77, 1280)
+                    emb.reshape(-1, emb.shape[-1])
+                ).reshape(batch_size, seq_len, -1)
             
             if "pooled_prompt_embeds" in batch and isinstance(batch["pooled_prompt_embeds"], torch.Tensor):
                 p_emb = batch["pooled_prompt_embeds"].to(self.up_proj.weight.device, self.up_proj.weight.dtype)
-                # shape: [batch, 2, 768], take p_emb[:, 0]
-                batch["pooled_prompt_embeds"] = self.up_proj(p_emb[:, 0])
+                
+                # Handle possible singleton dimensions
+                if p_emb.dim() == 3 and p_emb.shape[1] == 1:
+                    p_emb = p_emb.view(p_emb.shape[0], p_emb.shape[2])
+                elif p_emb.dim() == 3:
+                    p_emb = p_emb.view(p_emb.shape[0], -1)
+                
+                batch["pooled_prompt_embeds"] = self.up_proj(p_emb)
+
+            # Verify shapes
+            assert batch["prompt_embeds"].dim() == 3, f"Expected prompt_embeds to be 3D, got {batch['prompt_embeds'].shape}"
+            assert batch["pooled_prompt_embeds"].dim() == 2, f"Expected pooled_prompt_embeds to be 2D, got {batch['pooled_prompt_embeds'].shape}"
 
             # Compute loss
             loss_dict = self.training_method.compute_loss(batch, generator=generator)
@@ -228,7 +247,15 @@ class SDXLTrainer:
                 "learning_rate": self.optimizer.param_groups[0]["lr"]
             }
             # For logging batch_size, handle both new & legacy
-            if "latent" in batch and "model_input" in batch["latent"]:
+            if "latent" in batch:
+                if "model_input" in batch["latent"]:
+                    latents = batch["latent"]["model_input"]
+                    
+                    # Reshape latents to remove singleton dimensions
+                    if latents.dim() == 5 and latents.shape[1] == 1:
+                        latents = latents.view(latents.shape[0], latents.shape[2], latents.shape[3], latents.shape[4])
+                        batch["latent"]["model_input"] = latents
+
                 metrics["batch_size"] = batch["latent"]["model_input"].shape[0]
             else:
                 metrics["batch_size"] = batch["model_input"].shape[0] if "model_input" in batch else 0
