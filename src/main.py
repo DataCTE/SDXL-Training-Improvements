@@ -171,29 +171,43 @@ def setup_model(config: Config, device: torch.device) -> StableDiffusionXL:
         raise RuntimeError(f"Failed to load models: {str(e)}") from e
 
 def load_training_data(config: Config) -> tuple[List[str], List[str]]:
+    """Load and validate training data paths."""
     image_paths, captions = [], []
+    
+    # Convert train directories to proper format
     train_dirs = (config.data.train_data_dir if isinstance(config.data.train_data_dir, list) 
-                  else [config.data.train_data_dir])
-    train_dirs = convert_path_list(train_dirs)
+                 else [config.data.train_data_dir])
+    
+    # Convert each path individually
+    train_dirs = [convert_windows_path(path) for path in train_dirs]
+    
     for data_dir in train_dirs:
         dir_path = Path(data_dir)
         logger.info(f"Processing dataset directory: {dir_path}")
+        
         if not dir_path.exists():
             logger.warning(f"Training directory not found: {data_dir}")
             continue
+            
+        # Find images with supported extensions
         image_extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"]
         dir_images = []
         for ext in image_extensions:
             dir_images.extend(list(dir_path.glob(ext)))
+            
         if not dir_images:
             logger.warning(f"No images found in {data_dir} (supported: {', '.join(image_extensions)})")
             continue
+            
+        # Process valid image-caption pairs
         valid_pairs = process_image_caption_pairs(dir_images)
         image_paths.extend(valid_pairs[0])
         captions.extend(valid_pairs[1])
         logger.info(f"Found {len(valid_pairs[0])} valid pairs in {data_dir}")
+        
     if not image_paths:
         raise TrainingSetupError("No valid training data found")
+        
     logger.info(f"Total training samples: {len(image_paths)} across {len(train_dirs)} directories")
     return image_paths, captions
 
@@ -222,7 +236,7 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Initialize cache manager with config values
+        # Initialize cache manager with proper path conversion
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         cache_manager = CacheManager(
             cache_dir=cache_dir,

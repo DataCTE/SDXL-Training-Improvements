@@ -45,20 +45,11 @@ def convert_windows_path(path: Union[str, Path]) -> Path:
         logger.error(f"Path conversion failed: {str(e)}")
         return Path(str(path))  # Return original if conversion fails
 
-def convert_path_list(paths: Union[str, List[str], Path, List[Path]], make_absolute: bool = True) -> List[Path]:
-    """Convert list of Windows/Unix paths to appropriate format.
-    
-    Args:
-        paths: Single path or list of paths
-        make_absolute: Whether to convert to absolute paths
-        
-    Returns:
-        List of converted Path objects
-    """
-    if isinstance(paths, (str, Path)):
-        paths = [paths]
-        
-    return [convert_windows_path(p, make_absolute) for p in paths]
+def convert_paths(paths: Union[str, List[str], Path, List[Path]]) -> Union[Path, List[Path]]:
+    """Convert single path or list of paths to proper format."""
+    if isinstance(paths, (list, tuple)):
+        return [convert_windows_path(p) for p in paths]
+    return convert_windows_path(paths)
 
 def get_wsl_drive_mount() -> Optional[str]:
     """Get the WSL drive mount point.
