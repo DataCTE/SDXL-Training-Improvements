@@ -205,11 +205,15 @@ class DDPMTrainer(TrainingMethod):
 
             # Reshape add_time_ids to match expected dimensions
             # From (batch_size, 6) to (batch_size, 6, 1, 1)
-            add_time_ids = add_time_ids.unsqueeze(-1).unsqueeze(-1)
+            add_time_ids = add_time_ids.reshape(add_time_ids.shape[0], add_time_ids.shape[1], 1, 1)
             
             # Take first embedding from pooled_prompt_embeds
             # From (batch_size, 2, 768) to (batch_size, 768)
             pooled_prompt_embeds = pooled_prompt_embeds[:, 0]
+            
+            # Take first embedding set from prompt_embeds
+            # From (batch_size, 2, 77, 768) to (batch_size, 77, 768)
+            prompt_embeds = prompt_embeds[:, 0]
 
             # Log shapes for debugging
             self.tensor_logger.log_checkpoint("Final Input Shapes", {
