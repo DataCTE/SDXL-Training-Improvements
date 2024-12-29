@@ -7,6 +7,7 @@ import threading
 from typing import Dict, Optional, Union, Any, List
 from src.core.logging import get_logger
 from src.data.utils.paths import convert_windows_path, is_windows_path
+import os
 
 logger = get_logger(__name__)
 
@@ -23,29 +24,26 @@ class CacheManager:
         
         Args:
             cache_dir: Base directory for cache storage
-            max_cache_size: Maximum number of items to keep in cache
-            device: Torch device for tensor operations
+            max_cache_size: Maximum number of entries to keep
+            device: Default device for loading tensors
         """
-        # Convert cache directory path if needed
-        self.cache_dir = convert_windows_path(cache_dir) if is_windows_path(cache_dir) else Path(cache_dir)
+        # Convert and create cache directory
+        self.cache_dir = convert_windows_path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # Cache subdirectories
+        # Create subdirectories
         self.latents_dir = self.cache_dir / "latents"
+        self.metadata_dir = self.cache_dir / "metadata"
         self.latents_dir.mkdir(exist_ok=True)
-        
-        self.metadata_dir = self.cache_dir / "metadata" 
         self.metadata_dir.mkdir(exist_ok=True)
         
-        # Cache settings
         self.max_cache_size = max_cache_size
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Thread safety
         self._lock = threading.Lock()
         
-        # Initialize cache state
+        # Initialize cache index
         self._initialize_cache()
+        logger.info(f"Cache initialized at {self.cache_dir}")
         
     def _initialize_cache(self):
         """Initialize or load cache state."""
@@ -76,20 +74,45 @@ class CacheManager:
         }
         self._save_index()
         
-    def _save_index(self):
-        """Save cache index to disk with thread safety."""
-        with self._lock:
-            try:
-                self.cache_index["last_updated"] = time.time()
-                with open(self.index_path, 'w') as f:
-                    json.dump(self.cache_index, f, indent=2)
-            except Exception as e:
-                logger.error(f"Failed to save cache index: {e}")
+    def _save_index(self) -> None:
+        """Save cache index to disk with proper error handling."""
+        try:
+            # Create temporary file
+            temp_path = self.index_path.with_suffix('.tmp')
+            
+            # Write to temporary file first
+            with open(temp_path, 'w') as f:
+                json.dump({
+                    "version": self.cache_index["version"],
+                    "created_at": self.cache_index["created_at"],
+                    "last_updated": time.time(),
+                    "entries": self.cache_index["entries"],
+                    "stats": self.cache_index["stats"]
+                }, f, indent=2)
+            
+            # Atomic rename to actual index file
+            temp_path.replace(self.index_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to save cache index: {e}")
+            if temp_path.exists():
+                temp_path.unlink()  # Clean up temp file if it exists
+            raise
 
     def get_cache_key(self, path: Union[str, Path]) -> str:
         """Generate cache key from path."""
-        path = convert_windows_path(path) if is_windows_path(path) else Path(path)
-        return path.stem
+        try:
+            # Convert path to proper format
+            path = convert_windows_path(path)
+            # Use absolute path for more reliable keys
+            path = path.resolve()
+            # Create unique key from path
+            return f"{path.parent.name}_{path.stem}"
+        except Exception as e:
+            logger.warning(f"Failed to generate optimal cache key for {path}, falling back to basic key")
+            # Fallback to basic key if conversion fails
+            path = Path(str(path))
+            return path.stem
 
     def save_latents(
         self,
@@ -97,34 +120,25 @@ class CacheManager:
         original_path: Union[str, Path],
         metadata: Dict[str, Any]
     ) -> bool:
-        """Save tensors and metadata to cache.
-        
-        Args:
-            tensors: Dictionary of tensors to cache (model_input, prompt_embeds, pooled_prompt_embeds)
-            original_path: Original file path (used for cache key)
-            metadata: Additional metadata to store (original_size, crop_coords, target_size, etc)
-            
-        Returns:
-            bool: Success status
-        """
+        """Save tensors and metadata to cache."""
         try:
+            # Convert paths
+            original_path = convert_windows_path(original_path)
             cache_key = self.get_cache_key(original_path)
             
-            # Move tensors to CPU only when saving
-            tensors_to_save = {
-                "pixel_values": tensors["pixel_values"].cpu(),
-                "prompt_embeds": tensors["prompt_embeds"].cpu(),
-                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
-            }
-            
-            # Save tensors
+            # Create paths for saving
             tensors_path = self.latents_dir / f"{cache_key}.pt"
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            
+            # Move tensors to CPU and save
+            tensors_to_save = {
+                k: v.cpu() for k, v in tensors.items()
+            }
             torch.save(tensors_to_save, tensors_path)
             
-            # Save metadata
-            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            # Save metadata with full path info
             full_metadata = {
-                "original_path": str(original_path),
+                "original_path": str(original_path.resolve()),
                 "created_at": time.time(),
                 **metadata
             }
@@ -132,20 +146,28 @@ class CacheManager:
             with open(metadata_path, 'w') as f:
                 json.dump(full_metadata, f, indent=2)
             
-            # Update index
+            # Update index with thread safety
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
                     "tensors_path": str(tensors_path),
                     "metadata_path": str(metadata_path),
                     "created_at": time.time()
                 }
+                
+                # Update stats
                 self.cache_index["stats"]["total_entries"] = len(self.cache_index["entries"])
+                self.cache_index["stats"]["latents_size"] = sum(
+                    os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt")
+                )
+                self.cache_index["last_updated"] = time.time()
+                
+                # Save index file
                 self._save_index()
                 
             return True
             
         except Exception as e:
-            logger.error(f"Failed to save to cache: {e}")
+            logger.error(f"Failed to save to cache: {e}", exc_info=True)
             return False
             
     def load_latents(
