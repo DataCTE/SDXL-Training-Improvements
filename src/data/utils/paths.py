@@ -18,7 +18,7 @@ def is_windows_path(path: Union[str, Path]) -> bool:
     # Match patterns like C:, D:\, \\server\share, relative Windows paths, and dot paths
     return bool(re.match(r'^[a-zA-Z]:|^\\\\|\\|^[\w.]+$', path_str))
 
-def convert_windows_path(path: Union[str, Path]) -> Path:
+def convert_windows_path(path: Union[str, Path], make_absolute: bool = False) -> Path:
     """Convert Windows path to proper format for current system."""
     try:
         # Convert to string if Path object
@@ -26,7 +26,8 @@ def convert_windows_path(path: Union[str, Path]) -> Path:
         
         # Skip if already proper format
         if not is_windows_path(path_str):
-            return Path(path_str)
+            path = Path(path_str)
+            return path.resolve() if make_absolute else path
             
         # Handle Windows-style paths
         if "\\" in path_str:
@@ -39,7 +40,8 @@ def convert_windows_path(path: Union[str, Path]) -> Path:
             mount_point = get_wsl_drive_mount() or "/mnt"
             path_str = f"{mount_point}/{drive_letter}{path_without_drive}"
             
-        return Path(path_str)
+        path = Path(path_str)
+        return path.resolve() if make_absolute else path
         
     except Exception as e:
         logger.error(f"Path conversion failed: {str(e)}")

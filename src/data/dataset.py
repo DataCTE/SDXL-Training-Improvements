@@ -17,7 +17,7 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
 from src.core.logging import get_logger
-from src.data.utils.paths import convert_windows_path, is_windows_path
+from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.data.config import Config
 from src.data.preprocessing import (
     PreprocessingPipeline,
