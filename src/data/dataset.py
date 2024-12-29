@@ -112,7 +112,7 @@ class AspectBucketDataset(Dataset):
                 'tag_weighting_enabled': self.tag_weighter is not None
             })
 
-            except Exception as e:
+        except Exception as e:
             logger.error("Failed to initialize dataset", exc_info=True)
             raise
 
