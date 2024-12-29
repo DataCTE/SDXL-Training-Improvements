@@ -176,7 +176,7 @@ class DDPMTrainer(TrainingMethod):
                 if latents is None:
                     raise KeyError("No latent data found in batch")
 
-            # Process embeddings
+            # Process embeddings once
             prompt_embeds = batch.get("prompt_embeds", None)
             pooled_prompt_embeds = batch.get("pooled_prompt_embeds", None)
             if prompt_embeds is None or pooled_prompt_embeds is None:
@@ -186,33 +186,32 @@ class DDPMTrainer(TrainingMethod):
             prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
             pooled_prompt_embeds = pooled_prompt_embeds.to(self.unet.device, self.unet.dtype)
 
-            # Reshape prompt_embeds from [batch_size, num_encoders, seq_length, embed_dim] 
-            # to [batch_size, num_encoders * seq_length, embed_dim]
-            batch_size, num_encoders, seq_length, embed_dim = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.reshape(batch_size, num_encoders * seq_length, embed_dim)
-            
-            # Log the shape after reshaping
-            self.tensor_logger.log_checkpoint("Reshaped Embeddings", {
+            # Process time embeddings once
+            original_sizes = batch.get("original_sizes")
+            crop_top_lefts = batch.get("crop_top_lefts")
+            target_sizes = [(self.config.model.resolution, self.config.model.resolution) 
+                           for _ in range(len(original_sizes))]
+
+            add_time_ids = self._prepare_time_ids(
+                original_sizes=original_sizes,
+                crop_top_lefts=crop_top_lefts,
+                target_sizes=target_sizes,
+                dtype=self.unet.dtype,
+                device=self.unet.device
+            )
+
+            # Log shapes for debugging
+            self.tensor_logger.log_checkpoint("Processed Inputs", {
                 "prompt_embeds": prompt_embeds,
-                "prompt_embeds_shape": torch.tensor(prompt_embeds.shape)
+                "pooled_prompt_embeds": pooled_prompt_embeds,
+                "add_time_ids": add_time_ids,
+                "shapes": {
+                    "prompt_embeds": prompt_embeds.shape,
+                    "pooled_prompt_embeds": pooled_prompt_embeds.shape,
+                    "add_time_ids": add_time_ids.shape,
+                    "latents": latents.shape
+                }
             })
-
-            # Reshape pooled_prompt_embeds from [batch_size, num_encoders, embed_dim] 
-            # to [batch_size, num_encoders * embed_dim]
-            pooled_prompt_embeds = pooled_prompt_embeds.reshape(batch_size, -1)
-
-            # Validate shapes before proceeding
-            if prompt_embeds.dim() != 3:
-                raise ValueError(f"Expected prompt_embeds to be 3D after reshaping, got shape {prompt_embeds.shape}")
-            if pooled_prompt_embeds.dim() != 2:
-                raise ValueError(f"Expected pooled_prompt_embeds to be 2D after reshaping, got shape {pooled_prompt_embeds.shape}")
-
-            # Ensure embeddings have correct dimensions
-            target_dtype = self.unet.dtype
-            latents = latents.to(device=self.unet.device, dtype=target_dtype)
-            # Add this line to remove the extra singleton dimension
-            latents = latents.squeeze(1)
-            self.tensor_logger.log_checkpoint("Processed Latents", {"latents": latents})
 
             # ----------------------------------------------------------
             # 2. Generate noise & timesteps
@@ -220,9 +219,9 @@ class DDPMTrainer(TrainingMethod):
             if generator is not None:
                 with torch.random.fork_rng(devices=[latents.device]):
                     torch.random.manual_seed(generator.initial_seed())
-                    noise = torch.randn_like(latents, dtype=target_dtype)
+                    noise = torch.randn_like(latents, dtype=self.unet.dtype)
             else:
-                noise = torch.randn_like(latents, dtype=target_dtype)
+                noise = torch.randn_like(latents, dtype=self.unet.dtype)
 
             self.tensor_logger.log_checkpoint("Generated Noise", {"noise": noise})
 
@@ -245,37 +244,10 @@ class DDPMTrainer(TrainingMethod):
             self.tensor_logger.log_checkpoint("Noisy Latents", {"noisy_latents": noisy_latents})
 
             # ----------------------------------------------------------
-            # 4. Retrieve embeddings and conditioning inputs
+            # 4. Forward pass with all conditioning
             # ----------------------------------------------------------
-            prompt_embeds = batch.get("prompt_embeds", None)
-            if prompt_embeds is None:
-                raise ValueError("Missing prompt_embeds for UNet2DConditionModel")
-            prompt_embeds = prompt_embeds.to(self.unet.device, self.unet.dtype)
-
-            # Extract additional conditioning inputs
-            
-            # Get time embedding inputs
-            original_sizes = batch.get("original_sizes")
-            crop_top_lefts = batch.get("crop_top_lefts") 
-            target_sizes = batch.get("target_sizes")
-            
-            if any(x is None for x in [original_sizes, crop_top_lefts, target_sizes]):
-                raise ValueError("Missing required time embedding inputs")
-                
-            # Prepare time embeddings
-            add_time_ids = self._prepare_time_ids(
-                original_sizes=original_sizes,
-                crop_top_lefts=crop_top_lefts,
-                target_sizes=target_sizes,
-                dtype=self.unet.dtype,
-                device=self.unet.device
-            )
-
-            # ----------------------------------------------------------
-            # 5. Forward pass with all conditioning
-            # ----------------------------------------------------------
-            assert latents.dim() == 4, f" Forward pass: Expected latents to be 4D, got shape {latents.shape}"
-            assert prompt_embeds.dim() == 3, f" Forward pass: Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
+            assert latents.dim() == 4, f"Expected latents to be 4D, got shape {latents.shape}"
+            assert prompt_embeds.dim() == 3, f"Expected prompt_embeds to be 3D, got shape {prompt_embeds.shape}"
 
             noise_pred = self.unet(
                 sample=noisy_latents,
