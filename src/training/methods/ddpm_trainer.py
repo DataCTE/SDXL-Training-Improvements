@@ -124,12 +124,13 @@ class DDPMTrainer(TrainingMethod):
         Branches to either epsilon-pred or v-pred based on config.
         """
         try:
-            self.tensor_logger.log_checkpoint("Before Model Forward Pass", {
-                "noisy_latents.shape": noisy_latents.shape,
-                "timesteps.shape": timesteps.shape,
-                "prompt_embeds.shape": prompt_embeds.shape,
-                "text_embeds.shape": text_embeds.shape,
-                "add_time_ids.shape": add_time_ids.shape
+            # 1. Safely extract latents from the batch
+            # ----------------------------------------------------------
+            # Log initial batch state
+            self.tensor_logger.log_checkpoint("Initial Batch", {
+                "latent": batch.get("latent"),
+                "prompt_embeds": batch.get("prompt_embeds"),
+                "pooled_prompt_embeds": batch.get("pooled_prompt_embeds")
             })
             # 1. Safely extract latents from the batch
             # ----------------------------------------------------------
