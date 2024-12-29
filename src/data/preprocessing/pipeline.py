@@ -280,7 +280,12 @@ class PreprocessingPipeline:
                 with create_stream_context(stream):
                     result = func(*args, **kwargs)
                     if stream:
-                        stream.synchronize()
+                        # Add timeout to stream synchronization
+                        start_time = time.time()
+                        while not stream.query():
+                            if time.time() - start_time > self.stream_timeout:
+                                raise TimeoutError("Stream synchronization timeout")
+                            time.sleep(0.001)
                     return result
         except Exception as e:
             logger.error(f"GPU processing error: {str(e)}")

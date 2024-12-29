@@ -195,27 +195,18 @@ class AspectBucketDataset(Dataset):
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
 
-            logger.debug(f"Processing item at index {idx}: {image_path}")
-
-            # Try to load from cache first
-            if self.config.global_config.cache.use_cache:
-                cached_data = self.cache_manager.load_latents(image_path)
-                if cached_data is not None:
-                    self.stats.cache_hits += 1
-                    logger.debug(f"Cache hit for {image_path}")
-                    return cached_data
-
-                self.stats.cache_misses += 1
-                logger.debug(f"Cache miss for {image_path}")
-
-            self.stats.cache_misses += 1
-
             # Process image
             processed = self._process_image(image_path)
             if processed is None:
-                # Skip this image
-                logger.warning(f"Processing failed for image {image_path}, skipping.")
                 return None
+
+            # Here we need to convert from pipeline format to dataset format
+            processed_image = {
+                "pixel_values": processed["model_input"],  # Changed from processed["image"]
+                "original_size": processed["metadata"]["original_size"],
+                "crop_coords": processed["metadata"]["crop_coords"],
+                "target_size": processed["metadata"]["bucket_size"],  # Changed from target_size
+            }
 
             # Get text embeddings
             encoded_text = self.preprocessing_pipeline.encode_prompt(
@@ -224,67 +215,16 @@ class AspectBucketDataset(Dataset):
             )
 
             result = {
-                "pixel_values": processed["image"],
-                "original_size": processed["original_size"],
-                "crop_coords": processed["crop_coords"],
-                "target_size": processed["target_size"],
+                **processed_image,
                 "prompt_embeds": encoded_text["prompt_embeds"],
                 "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
                 "text": caption
             }
 
-            # Cache if enabled
-            if self.config.global_config.cache.use_cache:
-                # Save tensors and metadata separately
-                metadata = {
-                    "original_size": processed["original_size"],
-                    "crop_coords": processed["crop_coords"],
-                    "target_size": processed["target_size"],
-                    "text": caption
-                }
-                
-                tensors = {
-                    "pixel_values": result["pixel_values"].cpu(),
-                    "prompt_embeds": encoded_text["prompt_embeds"].cpu(),
-                    "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"].cpu()
-                }
-                
-                self.cache_manager.save_latents(
-                    tensors=tensors,
-                    original_path=image_path,
-                    metadata=metadata
-                )
-
-            logger.debug(f"Encoded text for {image_path}")
-
-            # Cache if enabled
-            if self.config.global_config.cache.use_cache:
-                # Save tensors and metadata separately
-                metadata = {
-                    "original_size": processed["original_size"],
-                    "crop_coords": processed["crop_coords"],
-                    "target_size": processed["target_size"],
-                    "text": caption
-                }
-
-                tensors = {
-                    "pixel_values": result["pixel_values"].cpu(),
-                    "prompt_embeds": encoded_text["prompt_embeds"].cpu(),
-                    "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"].cpu()
-                }
-
-                self.cache_manager.save_latents(
-                    tensors=tensors,
-                    original_path=image_path,
-                    metadata=metadata
-                )
-                logger.debug(f"Cached data for {image_path}")
-
             return result
 
         except Exception as e:
             logger.error(f"Error processing dataset item {idx}: {e}", exc_info=True)
-            # Skip this item
             return None
 
     def _setup_image_config(self):
