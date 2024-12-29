@@ -112,8 +112,9 @@ class CacheManager:
             
             # Ensure tensors are on CPU before saving
             tensors_to_save = {
-                k: v.cpu() if isinstance(v, torch.Tensor) else v 
-                for k, v in tensors.items()
+                "pixel_values": tensors["pixel_values"],
+                "prompt_embeds": tensors["prompt_embeds"],
+                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"]
             }
             
             # Save tensors
@@ -160,7 +161,7 @@ class CacheManager:
             
         Returns:
             Dict containing:
-                - model_input: Tensor
+                - pixel_values: Tensor
                 - prompt_embeds: Tensor
                 - pooled_prompt_embeds: Tensor
                 - original_size: Tuple[int, int]
@@ -195,15 +196,15 @@ class CacheManager:
             with open(metadata_path) as f:
                 metadata = json.load(f)
                 
-            # Format return dict to match dataset output format
+            # Format return dict with consistent field names
             return {
-                "model_input": tensors["model_input"],
+                "pixel_values": tensors["pixel_values"],
                 "prompt_embeds": tensors["prompt_embeds"],
                 "pooled_prompt_embeds": tensors["pooled_prompt_embeds"],
                 "original_size": metadata["original_size"],
                 "crop_coords": metadata["crop_coords"],
                 "target_size": metadata["target_size"],
-                "text": metadata.get("text")  # Optional
+                "text": metadata.get("text")
             }
             
         except Exception as e:

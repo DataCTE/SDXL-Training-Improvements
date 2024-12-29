@@ -470,11 +470,11 @@ class PreprocessingPipeline:
             if not img_tensor.is_floating_point():
                 img_tensor = img_tensor.float()
             
-            # Return in the format expected by the pipeline
+            # Return with standardized field names
             return {
-                "model_input": img_tensor,
+                "pixel_values": img_tensor,
                 "original_size": (w, h),
-                "bucket_size": (target_w, target_h),
+                "target_size": (target_w, target_h),
                 "bucket_index": bucket_idx,
                 "path": str(image_path),
                 "timestamp": time.time(),

@@ -8,8 +8,7 @@ import torch
 import torch.backends.cudnn
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
-from PIL import Image
-import numpy as np
+
 
 # Force speed optimizations
 torch.backends.cudnn.benchmark = True
@@ -144,10 +143,10 @@ class AspectBucketDataset(Dataset):
 
             # Combine results
             result = {
-                "pixel_values": processed["model_input"],
+                "pixel_values": processed["pixel_values"],
                 "original_size": processed["original_size"],
                 "crop_coords": processed["crop_coords"],
-                "target_size": processed["bucket_size"],
+                "target_size": processed["target_size"],
                 "prompt_embeds": encoded_text["prompt_embeds"],
                 "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
                 "text": caption
@@ -157,7 +156,7 @@ class AspectBucketDataset(Dataset):
             if self.config.global_config.cache.use_cache:
                 self.cache_manager.save_latents(
                     tensors={
-                        "model_input": processed["model_input"],
+                        "pixel_values": processed["pixel_values"],
                         "prompt_embeds": encoded_text["prompt_embeds"],
                         "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
                     },
@@ -165,7 +164,7 @@ class AspectBucketDataset(Dataset):
                     metadata={
                         "original_size": processed["original_size"],
                         "crop_coords": processed["crop_coords"],
-                        "target_size": processed["bucket_size"],
+                        "target_size": processed["target_size"],
                         "text": caption
                     }
                 )
@@ -216,7 +215,7 @@ class AspectBucketDataset(Dataset):
                         if processed is not None:
                             self.cache_manager.save_latents(
                                 tensors={
-                                    "model_input": processed["model_input"],
+                                    "pixel_values": processed["pixel_values"],
                                     "prompt_embeds": processed["prompt_embeds"],
                                     "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
                                 },
@@ -251,12 +250,11 @@ class AspectBucketDataset(Dataset):
                 raise ValueError("Empty batch after filtering")
 
             return {
-                "model_input": torch.stack([example["pixel_values"] for example in batch]),
+                "pixel_values": torch.stack([example["pixel_values"] for example in batch]),
                 "prompt_embeds": torch.stack([example["prompt_embeds"] for example in batch]),
                 "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in batch]),
                 "original_sizes": [example["original_size"] for example in batch],
                 "crop_top_lefts": [example["crop_coords"] for example in batch],
-                # Optional: include text if needed
                 "text": [example["text"] for example in batch] if "text" in batch[0] else None
             }
 
