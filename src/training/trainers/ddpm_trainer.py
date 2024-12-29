@@ -25,10 +25,15 @@ class DDPMTrainer(SDXLTrainer):
     def training_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Execute single DDPM training step."""
         try:
-            # Get latents and conditioning
-            latents = batch["latents"]
-            prompt_embeds = batch["prompt_embeds"]
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"]
+            # Get model input and conditioning
+            model_input = batch["model_input"].to(self.device)
+            prompt_embeds = batch["prompt_embeds"].to(self.device)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device)
+            
+            # Convert model input to latents using VAE
+            with torch.no_grad():
+                latents = self.model.vae.encode(model_input).latent_dist.sample()
+                latents = latents * self.model.vae.config.scaling_factor
             
             # Apply tag weights if available
             if "tag_weights" in batch:

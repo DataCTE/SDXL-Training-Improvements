@@ -100,9 +100,9 @@ class CacheManager:
         """Save tensors and metadata to cache.
         
         Args:
-            tensors: Dictionary of tensors to cache
+            tensors: Dictionary of tensors to cache (model_input, prompt_embeds, pooled_prompt_embeds)
             original_path: Original file path (used for cache key)
-            metadata: Additional metadata to store
+            metadata: Additional metadata to store (original_size, crop_coords, target_size, etc)
             
         Returns:
             bool: Success status
@@ -110,9 +110,15 @@ class CacheManager:
         try:
             cache_key = self.get_cache_key(original_path)
             
+            # Ensure tensors are on CPU before saving
+            tensors_to_save = {
+                k: v.cpu() if isinstance(v, torch.Tensor) else v 
+                for k, v in tensors.items()
+            }
+            
             # Save tensors
             tensors_path = self.latents_dir / f"{cache_key}.pt"
-            torch.save(tensors, tensors_path)
+            torch.save(tensors_to_save, tensors_path)
             
             # Save metadata
             metadata_path = self.metadata_dir / f"{cache_key}.json"
@@ -153,7 +159,14 @@ class CacheManager:
             device: Optional device to load tensors to
             
         Returns:
-            Dict containing tensors and metadata if found, None if not in cache
+            Dict containing:
+                - model_input: Tensor
+                - prompt_embeds: Tensor
+                - pooled_prompt_embeds: Tensor
+                - original_size: Tuple[int, int]
+                - crop_coords: Tuple[int, int]
+                - target_size: Tuple[int, int]
+                - text: str (optional)
         """
         try:
             cache_key = self.get_cache_key(path)
@@ -182,8 +195,16 @@ class CacheManager:
             with open(metadata_path) as f:
                 metadata = json.load(f)
                 
-            # Combine tensors and metadata
-            return {**tensors, **metadata}
+            # Format return dict to match dataset output format
+            return {
+                "model_input": tensors["model_input"],
+                "prompt_embeds": tensors["prompt_embeds"],
+                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"],
+                "original_size": metadata["original_size"],
+                "crop_coords": metadata["crop_coords"],
+                "target_size": metadata["target_size"],
+                "text": metadata.get("text")  # Optional
+            }
             
         except Exception as e:
             logger.error(f"Failed to load from cache: {e}")

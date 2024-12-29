@@ -172,6 +172,11 @@ class AspectBucketDataset(Dataset):
             img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
             img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
             
+            # Ensure tensor is contiguous
+            img_tensor = img_tensor.contiguous()
+            if not img_tensor.is_floating_point():
+                img_tensor = img_tensor.float()
+            
             # Return in the format expected by the pipeline
             return {
                 "model_input": img_tensor,
@@ -266,36 +271,25 @@ class AspectBucketDataset(Dataset):
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format."""
         try:
-            result = {
-                "latents": [],
-                "prompt_embeds": [],
-                "pooled_prompt_embeds": [],
-                "tag_weights": [] if self.tag_weighter else None
+            # Filter out None values from failed processing
+            batch = [b for b in batch if b is not None]
+            
+            if not batch:
+                raise ValueError("Empty batch after filtering")
+
+            return {
+                "model_input": torch.stack([example["pixel_values"] for example in batch]),
+                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in batch]),
+                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in batch]),
+                "original_sizes": [example["original_size"] for example in batch],
+                "crop_top_lefts": [example["crop_coords"] for example in batch],
+                # Optional: include text if needed
+                "text": [example["text"] for example in batch] if "text" in batch[0] else None
             }
-
-            for item in batch:
-                result["latents"].append(item["latents"])
-                if "prompt_embeds" in item:
-                    result["prompt_embeds"].append(item["prompt_embeds"])
-                if "pooled_prompt_embeds" in item:
-                    result["pooled_prompt_embeds"].append(item["pooled_prompt_embeds"])
-                if self.tag_weighter:
-                    result["tag_weights"].append(item.get("tag_weight", 1.0))
-
-            # Stack tensors
-            result["latents"] = torch.stack(result["latents"])
-            if result["prompt_embeds"]:
-                result["prompt_embeds"] = torch.stack(result["prompt_embeds"])
-            if result["pooled_prompt_embeds"]:
-                result["pooled_prompt_embeds"] = torch.stack(result["pooled_prompt_embeds"])
-            if result["tag_weights"]:
-                result["tag_weights"] = torch.tensor(result["tag_weights"], dtype=torch.float32)
-
-            return result
 
         except Exception as e:
             logger.error("Failed to collate batch", exc_info=True)
-            raise
+            raise RuntimeError(f"Collate failed: {str(e)}") from e
 
 def create_dataset(
     config: Config,

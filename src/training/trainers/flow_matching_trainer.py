@@ -59,17 +59,20 @@ class FlowMatchingTrainer(BaseTrainer):
     ) -> Dict[str, Tensor]:
         """Compute Flow Matching loss with new data format."""
         try:
-            # Get latents from batch
-            latents = batch["latents"]
+            # Get model input and conditioning
+            model_input = batch["model_input"].to(self.device)
+            prompt_embeds = batch["prompt_embeds"].to(self.device)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device)
+            
+            # Convert model input to latents using VAE
+            with torch.no_grad():
+                latents = self.model.vae.encode(model_input).latent_dist.sample()
+                latents = latents * self.model.vae.config.scaling_factor
             
             # Apply tag weights if available
             if "tag_weights" in batch:
                 tag_weights = batch["tag_weights"].to(latents.device)
                 latents = latents * tag_weights.view(-1, 1, 1, 1)
-
-            # Extract embeddings
-            prompt_embeds = batch["prompt_embeds"]
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"]
 
             # Use latents as target (x1)
             x1 = latents
@@ -87,9 +90,9 @@ class FlowMatchingTrainer(BaseTrainer):
             
             # Get time embeddings from metadata
             add_time_ids = get_add_time_ids(
-                original_sizes=batch["metadata"]["original_sizes"],
-                crop_top_lefts=batch["metadata"]["crop_top_lefts"],
-                target_sizes=batch["metadata"]["target_sizes"],
+                original_sizes=batch["original_sizes"],
+                crop_top_lefts=batch["crop_top_lefts"],
+                target_sizes=batch["target_size"],
                 dtype=prompt_embeds.dtype,
                 device=x1.device
             )
@@ -106,6 +109,7 @@ class FlowMatchingTrainer(BaseTrainer):
             # Log shapes for debugging
             if is_main_process():
                 self._log_tensor_shapes({
+                    "model_input": model_input,
                     "latents": latents,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
