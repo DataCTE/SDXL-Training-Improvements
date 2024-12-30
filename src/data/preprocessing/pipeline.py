@@ -40,14 +40,9 @@ class PreprocessingPipeline:
     def __init__(
         self,
         config: Config,
-        model: Optional[StableDiffusionXL] = None,
+        model: StableDiffusionXL,
         cache_manager: Optional[CacheManager] = None,
         is_train: bool = True,
-        num_gpu_workers: int = 1,
-        num_cpu_workers: int = 4,
-        num_io_workers: int = 2,
-        prefetch_factor: int = 2,
-        use_pinned_memory: bool = True,
         enable_memory_tracking: bool = True,
         stream_timeout: float = 10.0
     ):
@@ -68,31 +63,21 @@ class PreprocessingPipeline:
             torch.backends.cudnn.allow_tf32 = True
             torch.set_float32_matmul_precision('medium')
             
-            self.device_id = 0  # Always use first GPU
-            self.device = torch.device(f'cuda:{self.device_id}')
-            torch.cuda.set_device(self.device_id)
+            self.device = torch.device('cuda')
         else:
-            self.device_id = None
             self.device = torch.device('cpu')
             
         # Core components
         self.config = config
-        self.model = None
-        self.vae_encoder = None
-        self.text_encoders = None
-        self.tokenizers = None
+        self.model = model
+        self.vae_encoder = model.vae_encoder
+        self.text_encoders = model.text_encoders
+        self.tokenizers = model.tokenizers
         self.cache_manager = cache_manager
         self.is_train = is_train
         
-        # Worker configuration
-        self.num_gpu_workers = num_gpu_workers
-        self.num_cpu_workers = num_cpu_workers
-        self.num_io_workers = num_io_workers
-        
         # Stream management
         self._streams = {}
-        self.prefetch_factor = prefetch_factor
-        self.use_pinned_memory = use_pinned_memory
         self.enable_memory_tracking = enable_memory_tracking
         self.stream_timeout = stream_timeout
         self.stats = PipelineStats()
@@ -100,10 +85,6 @@ class PreprocessingPipeline:
         # Initialize buckets
         self.buckets = self.get_aspect_buckets(config)
         self.bucket_indices = []
-
-        # Initialize model if provided
-        if model is not None:
-            self.initialize_worker(model=model, cache_manager=cache_manager)
 
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
         return config.global_config.image.supported_dims
@@ -511,31 +492,6 @@ class PreprocessingPipeline:
             path: self.cache_manager.is_cached(path)
             for path in image_paths
         }
-
-    def initialize_worker(
-        self,
-        model: StableDiffusionXL,
-        cache_manager: Optional[CacheManager] = None,
-        device: Optional[torch.device] = None
-    ) -> None:
-        """Initialize worker with model and cache manager."""
-        try:
-            self.model = model
-            self.vae_encoder = model.vae_encoder
-            self.text_encoders = model.text_encoders
-            self.tokenizers = model.tokenizers
-            
-            if cache_manager:
-                self.cache_manager = cache_manager
-                
-            if device:
-                self.device = device
-                
-            logger.debug("Worker pipeline initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize worker pipeline: {str(e)}", exc_info=True)
-            raise
 
     def _check_initialized(self) -> None:
         """Check if pipeline is properly initialized."""

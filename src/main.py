@@ -285,43 +285,24 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Determine if we should use multiprocessing
-        use_workers = (
-            config.training.num_workers > 0 
-            and not config.training.debug_mode 
-            and torch.cuda.is_available()
+        # Create cache manager
+        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
+        cache_manager = CacheManager(
+            cache_dir=cache_dir,
+            max_cache_size=config.global_config.cache.max_cache_size,
+            device=device
         )
-
-          # Initialize pipeline in main process if not using workers
-        if not use_workers:
-            preprocessing_pipeline.initialize_worker(
-                model=model,
-                cache_manager=cache_manager,
-                device=device
-            )
-
-
-        # Create cache manager for main process if not using workers
-        cache_manager = None
-        if not use_workers:
-            cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-            cache_manager = CacheManager(
-                cache_dir=cache_dir,
-                max_cache_size=config.global_config.cache.max_cache_size,
-                device=device
-            )
 
         # Create preprocessing pipeline
         preprocessing_pipeline = PreprocessingPipeline(
             config=config,
-            model=None if use_workers else model,  # Initialize model only if not using workers
-            cache_manager=cache_manager,  # Pass cache manager only if not using workers
+            model=model,
+            cache_manager=cache_manager,
             is_train=True,
             enable_memory_tracking=True
         )
 
-      
-        # Create dataset with config values
+        # Create dataset
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
@@ -330,26 +311,18 @@ def setup_training(
             enable_memory_tracking=True
         )
 
-        # Create data loader with config values and multiprocessing settings
+        # Create data loader
         train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.training.batch_size,
             shuffle=True,
-            num_workers=config.training.num_workers if use_workers else 0,
-            pin_memory=config.training.pin_memory if use_workers else False,
+            num_workers=0,  # No multiprocessing
+            pin_memory=False,
             collate_fn=dataset.collate_fn,
-            multiprocessing_context='spawn' if use_workers else None,
-            persistent_workers=use_workers,
-            drop_last=True,  # Drop incomplete batches
-            worker_init_fn=lambda worker_id: worker_init_fn(
-                worker_id=worker_id,
-                config=config,
-                model=model,
-                device=device
-            ) if use_workers else None
+            drop_last=True  # Drop incomplete batches
         )
 
-        # Initialize optimizer based on config
+        # Initialize optimizer
         optimizer_cls = {
             "adamw": torch.optim.AdamW,
             "adamw_bf16": AdamWBF16,
@@ -374,13 +347,6 @@ def setup_training(
                 config=config.to_dict()
             )
 
-        # Validate training method
-        if config.training.method not in ["ddpm", "flow_matching"]:
-            raise ValueError(
-                f"Invalid training method: {config.training.method}. "
-                "Must be one of: ddpm, flow_matching"
-            )
-        
         return train_dataloader, optimizer, wandb_logger
         
     except Exception as e:
@@ -404,8 +370,7 @@ def check_system_limits():
 
 def worker_init_fn(
     worker_id: int, 
-    config: Config, 
-    model: StableDiffusionXL,
+    config: Config,
     device: torch.device
 ) -> None:
     """Initialize worker process."""
@@ -419,7 +384,6 @@ def worker_init_fn(
     # Set thread count for worker
     torch.set_num_threads(1)
     
-    # Initialize cache manager and preprocessing pipeline in worker process
     try:
         # Initialize cache manager
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
@@ -432,6 +396,9 @@ def worker_init_fn(
         # Get worker's dataset instance
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is not None:
+            # Initialize model in worker
+            model = setup_model(config, device)
+            
             # Initialize preprocessing pipeline in the worker
             worker_info.dataset.preprocessing_pipeline.initialize_worker(
                 model=model,
