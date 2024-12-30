@@ -1,9 +1,9 @@
 from diffusers import DDPMScheduler
 from .trainer import create_trainer
-from .trainers.sdxl_trainer import SDXLTrainer
+from .trainers.SDXL.SDXL_router import SDXLTrainer
 from .trainers.base import BaseTrainer
-from .trainers.ddpm_trainer import DDPMTrainer
-from .trainers.flow_matching_trainer import FlowMatchingTrainer
+from .trainers.SDXL.methods.ddpm_trainer import DDPMTrainer
+from .trainers.SDXL.methods.flow_matching_trainer import FlowMatchingTrainer
 from .optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 from .schedulers import (
     configure_noise_scheduler,
