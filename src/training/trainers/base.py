@@ -39,7 +39,70 @@ class BaseTrainer(ABC):
         """
         self.model = model
         self.optimizer = optimizer
-        self.train_dataloader = train_dataloader
+        
+        # Check if dataset can be pickled
+        try:
+            import pickle
+            pickle.dumps(train_dataloader.dataset)
+            can_pickle = True
+        except:
+            can_pickle = False
+            logger.warning("Dataset cannot be pickled, falling back to single-process data loading")
+        
+        # Define custom collate function that handles different sized tensors
+        def dynamic_collate(batch):
+            """Custom collate function that handles tensors of different sizes."""
+            error_context = {}
+            try:
+                # Filter out None values
+                batch = [b for b in batch if b is not None]
+                if not batch:
+                    raise RuntimeError("Empty batch after filtering")
+                
+                # Separate different keys
+                elem = batch[0]
+                if not isinstance(elem, dict):
+                    raise TypeError(f"Expected dict but got {type(elem)}")
+                
+                result = {}
+                for key in elem:
+                    error_context['current_key'] = key
+                    if isinstance(elem[key], torch.Tensor):
+                        # For tensors, pad to max size in batch
+                        tensors = [b[key] for b in batch]
+                        max_size = [max(s) for s in zip(*[t.size() for t in tensors])]
+                        padded = []
+                        for t in tensors:
+                            pad_size = []
+                            for i, (current, target) in enumerate(zip(t.size(), max_size)):
+                                pad_size.extend([0, target - current])
+                            padded.append(torch.nn.functional.pad(t, pad_size))
+                        result[key] = torch.stack(padded)
+                    else:
+                        # For non-tensors, use simple list
+                        result[key] = [b[key] for b in batch]
+                
+                return result
+                
+            except Exception as e:
+                error_context['batch_sizes'] = [
+                    {k: v.size() if isinstance(v, torch.Tensor) else len(v) for k, v in b.items()}
+                    for b in batch
+                ] if batch else []
+                logger.error(f"Collate failed: {str(e)}", extra=error_context)
+                raise RuntimeError(f"Collate failed: {str(e)}") from e
+        
+        # Store DataLoader configuration with custom collate
+        self._dataloader_config = {
+            'dataset': train_dataloader.dataset,
+            'batch_size': train_dataloader.batch_size,
+            'pin_memory': train_dataloader.pin_memory,
+            'collate_fn': dynamic_collate,  # Use our custom collate
+            'shuffle': True,
+            'drop_last': getattr(train_dataloader, 'drop_last', True),
+            'num_workers': train_dataloader.num_workers if can_pickle else 0,
+        }
+        
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.wandb_logger = wandb_logger
         self.config = config or {}
@@ -64,6 +127,11 @@ class BaseTrainer(ABC):
         for k, v in kwargs.items():
             setattr(self, k, v)
             
+    @property
+    def train_dataloader(self):
+        """Create new DataLoader instance when accessed."""
+        return torch.utils.data.DataLoader(**self._dataloader_config)
+        
     @abstractmethod
     def training_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Execute single training step.
