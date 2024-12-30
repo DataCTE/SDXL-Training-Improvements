@@ -281,30 +281,39 @@ class CacheManager:
         self.cleanup()
 
     def is_cached(self, path: Union[str, Path]) -> bool:
-        """Check if path is already cached and valid."""
-        try:
-            cache_key = self.get_cache_key(path)
-            
-            if cache_key not in self.cache_index["entries"]:
-                return False
-                
-            entry = self.cache_index["entries"][cache_key]
-            tensors_path = Path(entry["tensors_path"])
-            metadata_path = Path(entry["metadata_path"])
-            
-            # Verify files exist and are valid
-            if not tensors_path.exists() or not metadata_path.exists():
-                # Clean up invalid entry
-                with self._lock:
-                    del self.cache_index["entries"][cache_key]
-                    self._save_index()
-                return False
-                
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to check cache status: {e}")
+        """Check if path is already cached and valid.
+        
+        Optimized version that minimizes file system operations and uses
+        in-memory checks where possible.
+        """
+        cache_key = self.get_cache_key(path)
+        
+        # Quick dictionary lookup first
+        if cache_key not in self.cache_index["entries"]:
             return False
+        
+        entry = self.cache_index["entries"][cache_key]
+        
+        # Use cached validity status if available
+        if "is_valid" in entry and time.time() - entry.get("last_checked", 0) < 60:
+            return entry["is_valid"]
+        
+        # Check files exist
+        tensors_path = Path(entry["tensors_path"])
+        metadata_path = Path(entry["metadata_path"])
+        
+        is_valid = tensors_path.exists() and metadata_path.exists()
+        
+        # Cache the validity status
+        with self._lock:
+            entry["is_valid"] = is_valid
+            entry["last_checked"] = time.time()
+            
+            if not is_valid:
+                del self.cache_index["entries"][cache_key]
+                self._save_index()
+        
+        return is_valid
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get current cache statistics."""
