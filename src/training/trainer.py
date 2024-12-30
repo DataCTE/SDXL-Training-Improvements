@@ -4,7 +4,7 @@ import torch
 from src.core.logging import get_logger, WandbLogger
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXL
-from src.training.trainers.SDXL.SDXL_router import SDXLTrainer
+from src.training.trainers.sdxl_trainer import SDXLTrainer
 
 logger = get_logger(__name__)
 
