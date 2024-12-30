@@ -1,6 +1,7 @@
 """StableDiffusionXL model implementation with optimized encoders."""
 from typing import Dict, List, Optional, Tuple, Union, Any
 import torch
+import torch.inference_mode
 from diffusers import StableDiffusionXLPipeline
 from src.core.logging import get_logger
 from src.models.encoders import CLIPEncoder, VAEEncoder
@@ -153,6 +154,7 @@ class StableDiffusionXL:
         # Normalize weights
         return weights / weights.sum()
 
+    @torch.inference_mode()
     def encode_prompt(
         self,
         batch: Dict[str, Any],
@@ -170,6 +172,7 @@ class StableDiffusionXL:
             is_train=is_train
         )
 
+    @torch.inference_mode()
     def encode_images(
         self,
         pixel_values: torch.Tensor,
@@ -179,6 +182,7 @@ class StableDiffusionXL:
             pixel_values=pixel_values
         )
 
+    @torch.inference_mode()
     def create_pipeline(self) -> StableDiffusionXLPipeline:
         """Create a StableDiffusionXLPipeline for inference."""
         return StableDiffusionXLPipeline(
