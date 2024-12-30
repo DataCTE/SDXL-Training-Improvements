@@ -105,18 +105,22 @@ class DDPMTrainer(SDXLTrainer):
             model_dtype = next(self.model.parameters()).dtype
 
             # Get batch data and ensure consistent dtype
-            latents = batch["pixel_values"].to(self.device, dtype=model_dtype)
+            pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
             original_sizes = batch["original_sizes"]
             crop_top_lefts = batch["crop_top_lefts"]
+
+            # Convert images to latent space using VAE
+            latents = self.model.vae.encode(pixel_values).latent_dist.sample()
+            latents = latents * self.model.vae.config.scaling_factor
 
             # Prepare time embeddings for SDXL
             batch_size = latents.shape[0]
             time_ids = self._get_add_time_ids(
                 original_sizes=original_sizes,
                 crops_coords_top_left=crop_top_lefts,
-                target_size=(latents.shape[-2] * 8, latents.shape[-1] * 8),  # VAE scaling factor is 8
+                target_size=(pixel_values.shape[-2], pixel_values.shape[-1]),  # Use original image dimensions
                 dtype=prompt_embeds.dtype,
                 batch_size=batch_size
             )
