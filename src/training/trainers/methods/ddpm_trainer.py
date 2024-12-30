@@ -101,17 +101,32 @@ class DDPMTrainer(SDXLTrainer):
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Execute single training step."""
         try:
+            # Get model dtype from parameters
+            model_dtype = next(self.model.parameters()).dtype
+
             # Get batch data and ensure consistent dtype
-            latents = batch["pixel_values"].to(self.device, dtype=self.model.dtype)
-            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=self.model.dtype)
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=self.model.dtype)
+            latents = batch["pixel_values"].to(self.device, dtype=model_dtype)
+            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
+            original_sizes = batch["original_sizes"]
+            crop_top_lefts = batch["crop_top_lefts"]
+
+            # Prepare time embeddings for SDXL
+            batch_size = latents.shape[0]
+            time_ids = self._get_add_time_ids(
+                original_sizes=original_sizes,
+                crops_coords_top_left=crop_top_lefts,
+                target_size=(latents.shape[-2] * 8, latents.shape[-1] * 8),  # VAE scaling factor is 8
+                dtype=prompt_embeds.dtype,
+                batch_size=batch_size
+            )
+            time_ids = time_ids.to(device=self.device)
 
             # Sample noise and timesteps
-            noise = torch.randn_like(latents, device=self.device, dtype=self.model.dtype)
-            bsz = latents.shape[0]
+            noise = torch.randn_like(latents, device=self.device, dtype=model_dtype)
             timesteps = torch.randint(
                 0, self.noise_scheduler.config.num_train_timesteps, 
-                (bsz,), device=self.device
+                (batch_size,), device=self.device
             ).long()
 
             # Add noise to latents
@@ -119,12 +134,15 @@ class DDPMTrainer(SDXLTrainer):
                 latents, noise, timesteps
             )
 
-            # Get model prediction
+            # Get model prediction with time embeddings
             model_pred = self.model.unet(
                 noisy_latents,
                 timesteps,
                 prompt_embeds,
-                added_cond_kwargs={"text_embeds": pooled_prompt_embeds}
+                added_cond_kwargs={
+                    "text_embeds": pooled_prompt_embeds,
+                    "time_ids": time_ids
+                }
             ).sample
 
             # Calculate loss with consistent dtype
@@ -137,8 +155,8 @@ class DDPMTrainer(SDXLTrainer):
 
             # Ensure both tensors are in the same dtype for loss calculation
             loss = F.mse_loss(
-                model_pred.to(dtype=self.model.dtype),
-                target.to(dtype=self.model.dtype),
+                model_pred.to(dtype=model_dtype),
+                target.to(dtype=model_dtype),
                 reduction="mean"
             )
 
@@ -160,4 +178,30 @@ class DDPMTrainer(SDXLTrainer):
 
         except Exception as e:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
-            raise 
+            raise
+
+    def _get_add_time_ids(
+        self,
+        original_sizes,
+        crops_coords_top_left,
+        target_size,
+        dtype,
+        batch_size: int
+    ) -> torch.Tensor:
+        """Create time embeddings for SDXL."""
+        add_time_ids = []
+        for i in range(batch_size):
+            original_size = original_sizes[i]
+            crop_coords = crops_coords_top_left[i]
+            
+            add_time_id = torch.tensor([
+                original_size[0],  # Original image height
+                original_size[1],  # Original image width
+                crop_coords[0],    # Top coordinate of crop
+                crop_coords[1],    # Left coordinate of crop
+                target_size[0],    # Target image height
+                target_size[1],    # Target image width
+            ])
+            add_time_ids.append(add_time_id)
+        
+        return torch.stack(add_time_ids).to(dtype=dtype) 
