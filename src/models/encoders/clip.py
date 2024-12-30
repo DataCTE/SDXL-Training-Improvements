@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from src.core.logging import get_logger
+import torch.inference_mode
 
 logger = get_logger(__name__)
 
@@ -23,6 +24,7 @@ class CLIPEncoder:
         self.text_encoder = text_encoder
 
     @staticmethod
+    @torch.inference_mode()
     def encode_prompt(
         batch: Dict[str, Any],
         text_encoders: List[torch.nn.Module],
@@ -57,28 +59,27 @@ class CLIPEncoder:
                 # take a random caption if there are multiple
                 captions.append(random.choice(caption) if is_train else caption[0])
 
-        with torch.no_grad():
-            for tokenizer, text_encoder in zip(tokenizers, text_encoders):
-                text_inputs = tokenizer(
-                    captions,
-                    padding="max_length",
-                    max_length=tokenizer.model_max_length,
-                    truncation=True,
-                    return_tensors="pt",
-                )
-                text_input_ids = text_inputs.input_ids.to(text_encoder.device)
-                prompt_embeds = text_encoder(
-                    text_input_ids,
-                    output_hidden_states=True,
-                    return_dict=False,
-                )
+        for tokenizer, text_encoder in zip(tokenizers, text_encoders):
+            text_inputs = tokenizer(
+                captions,
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            )
+            text_input_ids = text_inputs.input_ids.to(text_encoder.device)
+            prompt_embeds = text_encoder(
+                text_input_ids,
+                output_hidden_states=True,
+                return_dict=False,
+            )
 
-                # Keep everything on GPU
-                pooled_prompt_embeds = prompt_embeds[0]
-                prompt_embeds = prompt_embeds[-1][-2]
-                bs_embed, seq_len, _ = prompt_embeds.shape
-                prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
-                prompt_embeds_list.append(prompt_embeds)
+            # Keep everything on GPU
+            pooled_prompt_embeds = prompt_embeds[0]
+            prompt_embeds = prompt_embeds[-1][-2]
+            bs_embed, seq_len, _ = prompt_embeds.shape
+            prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
+            prompt_embeds_list.append(prompt_embeds)
 
         # Concatenate on GPU
         prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)

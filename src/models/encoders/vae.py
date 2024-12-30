@@ -3,6 +3,7 @@ from typing import Dict, Optional, Union
 import torch
 from diffusers import AutoencoderKL
 from src.core.logging import get_logger
+import torch.inference_mode
 
 logger = get_logger(__name__)
 
@@ -24,6 +25,7 @@ class VAEEncoder:
         
         logger.info(f"VAE encoder initialized on {device}")
 
+    @torch.inference_mode()
     def encode_images(
         self,
         pixel_values: torch.Tensor
@@ -37,7 +39,7 @@ class VAEEncoder:
             pixel_values = pixel_values.to(dtype=torch.float32)
 
             # Process image and keep on GPU
-            with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
+            with torch.cuda.amp.autocast(enabled=False):
                 model_input = self.vae.encode(pixel_values).latent_dist.sample()
                 model_input = model_input * self.vae.config.scaling_factor
 
