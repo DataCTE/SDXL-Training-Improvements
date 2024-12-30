@@ -349,13 +349,25 @@ class AspectBucketDataset(Dataset):
             if not batch:
                 raise ValueError("Empty batch after filtering")
 
+            # Group samples by bucket size
+            bucket_groups = {}
+            for example in batch:
+                size = example["pixel_values"].shape[-2:]  # Get HxW dimensions
+                if size not in bucket_groups:
+                    bucket_groups[size] = []
+                bucket_groups[size].append(example)
+
+            # Take the largest group
+            largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
+            valid_batch = bucket_groups[largest_size]
+
             return {
-                "pixel_values": torch.stack([example["pixel_values"] for example in batch]),
-                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in batch]),
-                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in batch]),
-                "original_sizes": [example["original_size"] for example in batch],
-                "crop_top_lefts": [example["crop_coords"] for example in batch],
-                "text": [example["text"] for example in batch] if "text" in batch[0] else None
+                "pixel_values": torch.stack([example["pixel_values"] for example in valid_batch]),
+                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
+                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
+                "original_sizes": [example["original_size"] for example in valid_batch],
+                "crop_top_lefts": [example["crop_coords"] for example in valid_batch],
+                "text": [example["text"] for example in valid_batch] if "text" in valid_batch[0] else None
             }
 
         except Exception as e:

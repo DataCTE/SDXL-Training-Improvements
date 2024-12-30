@@ -98,37 +98,27 @@ class DDPMTrainer(SDXLTrainer):
         
         progress_bar.close()
 
-    def training_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        """Execute single DDPM training step."""
+    def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        """Execute single training step."""
         try:
-            # Get model input and conditioning
-            pixel_values = batch["pixel_values"].to(self.device)
-            prompt_embeds = batch["prompt_embeds"].to(self.device)
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device)
-            
-            # Convert pixel values to latents using VAE
-            with torch.no_grad():
-                latents = self.model.vae.encode(pixel_values).latent_dist.sample()
-                latents = latents * self.model.vae.config.scaling_factor
-            
-            # Apply tag weights if available
-            if "tag_weights" in batch:
-                tag_weights = batch["tag_weights"].to(self.device)
-                latents = latents * tag_weights.view(-1, 1, 1, 1)
-            
-            # Sample noise
-            noise = torch.randn_like(latents)
+            # Get batch data and ensure consistent dtype
+            latents = batch["pixel_values"].to(self.device, dtype=self.model.dtype)
+            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=self.model.dtype)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=self.model.dtype)
+
+            # Sample noise and timesteps
+            noise = torch.randn_like(latents, device=self.device, dtype=self.model.dtype)
             bsz = latents.shape[0]
-            
-            # Sample timesteps
             timesteps = torch.randint(
                 0, self.noise_scheduler.config.num_train_timesteps, 
-                (bsz,), device=latents.device
-            )
-            
+                (bsz,), device=self.device
+            ).long()
+
             # Add noise to latents
-            noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-            
+            noisy_latents = self.noise_scheduler.add_noise(
+                latents, noise, timesteps
+            )
+
             # Get model prediction
             model_pred = self.model.unet(
                 noisy_latents,
@@ -136,17 +126,22 @@ class DDPMTrainer(SDXLTrainer):
                 prompt_embeds,
                 added_cond_kwargs={"text_embeds": pooled_prompt_embeds}
             ).sample
-            
-            # Calculate loss
+
+            # Calculate loss with consistent dtype
             if self.config.training.prediction_type == "epsilon":
                 target = noise
             elif self.config.training.prediction_type == "v_prediction":
                 target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
             else:
                 raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
-                
-            loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-            
+
+            # Ensure both tensors are in the same dtype for loss calculation
+            loss = F.mse_loss(
+                model_pred.to(dtype=self.model.dtype),
+                target.to(dtype=self.model.dtype),
+                reduction="mean"
+            )
+
             # Log metrics
             metrics = {
                 "loss": loss.detach().item(),
@@ -154,15 +149,15 @@ class DDPMTrainer(SDXLTrainer):
                 "timestep_mean": timesteps.float().mean().item(),
                 "timestep_std": timesteps.float().std().item()
             }
-            
+
             if self.wandb_logger and is_main_process():
                 self.wandb_logger.log_metrics(metrics)
-            
+
             return {
                 "loss": loss,
                 "metrics": metrics
             }
-            
+
         except Exception as e:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise 
