@@ -311,17 +311,25 @@ def setup_training(
             enable_memory_tracking=True
         )
 
+        # Determine if we should use multiprocessing
+        use_workers = (
+            config.training.num_workers > 0 
+            and not config.training.debug_mode 
+            and torch.cuda.is_available()
+        )
+
         # Create data loader with config values and multiprocessing settings
         train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.training.batch_size,
             shuffle=True,
-            num_workers=config.training.num_workers if not config.training.debug_mode else 0,  # Disable workers in debug mode
-            pin_memory=config.training.pin_memory,
+            num_workers=config.training.num_workers if use_workers else 0,
+            pin_memory=config.training.pin_memory if use_workers else False,
             collate_fn=dataset.collate_fn,
-            multiprocessing_context='spawn' if config.training.num_workers > 0 else None,
-            persistent_workers=True if config.training.num_workers > 0 else False,
-            drop_last=True  # Drop incomplete batches
+            multiprocessing_context='spawn' if use_workers else None,
+            persistent_workers=use_workers,
+            drop_last=True,  # Drop incomplete batches
+            worker_init_fn=worker_init_fn if use_workers else None
         )
 
         # Initialize optimizer based on config
@@ -376,6 +384,16 @@ def check_system_limits():
     except Exception as e:
         logger.warning(f"Could not increase file limit: {e}")
         logger.warning("You may need to increase system file limits (ulimit -n)")
+
+def worker_init_fn(worker_id: int) -> None:
+    """Initialize worker process."""
+    # Set different seed for each worker
+    worker_seed = torch.initial_seed() % 2**32
+    torch.manual_seed(worker_seed)
+    # Disable TorchDynamo in worker processes
+    os.environ['TORCHDYNAMO_DISABLE'] = '1'
+    # Set thread count for worker
+    torch.set_num_threads(1)
 
 def main():
     """Main training entry point."""

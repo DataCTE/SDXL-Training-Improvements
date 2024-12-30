@@ -68,6 +68,8 @@ class TrainingConfig:
     clip_grad_norm: float = 1.0
     num_inference_steps: int = 50
     method_config: MethodConfig = field(default_factory=MethodConfig)
+    debug_mode: bool = False
+    save_final_model: bool = True
 
 @dataclass
 class ImageConfig:
