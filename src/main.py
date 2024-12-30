@@ -13,7 +13,7 @@ import threading
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.distributed import init_process_group
 from torch.cuda.amp import autocast
@@ -285,30 +285,22 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Initialize cache manager with proper path conversion
-        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-        cache_manager = CacheManager(
-            cache_dir=cache_dir,
-            max_cache_size=config.global_config.cache.max_cache_size,
-            device=device
-        )
+        # Extract only the necessary model components for preprocessing
+        model_config = {
+            'image_size': model.unet.config.sample_size,
+            'vae_scale_factor': model.vae.config.scaling_factor,
+            'tokenizer_1_max_length': model.tokenizer_1.model_max_length,
+            'tokenizer_2_max_length': model.tokenizer_2.model_max_length,
+        }
 
-        # Create preprocessing pipeline
-        preprocessing_pipeline = PreprocessingPipeline(
-            config=config,
-            model=model,
-            cache_manager=cache_manager,
-            is_train=True,
-            enable_memory_tracking=True
-        )
-
-        # Create dataset with config values
+        # Create dataset with config values but defer preprocessing pipeline creation
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            preprocessing_pipeline=preprocessing_pipeline,
-            enable_memory_tracking=True
+            preprocessing_pipeline=None,  # Will be created in worker_init_fn
+            enable_memory_tracking=True,
+            model_config=model_config  # Pass only necessary model config
         )
 
         # Determine if we should use multiprocessing
@@ -329,7 +321,12 @@ def setup_training(
             multiprocessing_context='spawn' if use_workers else None,
             persistent_workers=use_workers,
             drop_last=True,  # Drop incomplete batches
-            worker_init_fn=worker_init_fn if use_workers else None
+            worker_init_fn=lambda worker_id: worker_init_fn(
+                worker_id=worker_id,
+                config=config,
+                model_config=model_config,
+                device=device
+            ) if use_workers else None
         )
 
         # Initialize optimizer based on config
@@ -385,15 +382,50 @@ def check_system_limits():
         logger.warning(f"Could not increase file limit: {e}")
         logger.warning("You may need to increase system file limits (ulimit -n)")
 
-def worker_init_fn(worker_id: int) -> None:
+def worker_init_fn(
+    worker_id: int, 
+    config: Config, 
+    model_config: Dict[str, Any],
+    device: torch.device
+) -> None:
     """Initialize worker process."""
     # Set different seed for each worker
     worker_seed = torch.initial_seed() % 2**32
     torch.manual_seed(worker_seed)
+    
     # Disable TorchDynamo in worker processes
     os.environ['TORCHDYNAMO_DISABLE'] = '1'
+    
     # Set thread count for worker
     torch.set_num_threads(1)
+    
+    # Initialize cache manager and preprocessing pipeline in worker process
+    try:
+        # Initialize cache manager
+        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
+        cache_manager = CacheManager(
+            cache_dir=cache_dir,
+            max_cache_size=config.global_config.cache.max_cache_size,
+            device=device
+        )
+
+        # Create preprocessing pipeline with model config instead of full model
+        preprocessing_pipeline = PreprocessingPipeline(
+            config=config,
+            model_config=model_config,  # Pass model config instead of model
+            cache_manager=cache_manager,
+            is_train=True,
+            enable_memory_tracking=True
+        )
+        
+        # Attach preprocessing pipeline to dataset in worker process
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is not None:
+            worker_info.dataset.preprocessing_pipeline = preprocessing_pipeline
+            
+    except Exception as e:
+        logger.error(f"Failed to initialize worker {worker_id}: {str(e)}", exc_info=True)
+        raise
 
 def main():
     """Main training entry point."""
