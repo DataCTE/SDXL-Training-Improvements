@@ -252,8 +252,6 @@ def create_trainer(
             device=device,
             wandb_logger=wandb_logger,
             config=config,
-            # Add training_method parameter
-            training_method=config.training.method,
             # Pass additional training configuration
             mixed_precision=config.training.mixed_precision,
             gradient_accumulation_steps=config.training.gradient_accumulation_steps,

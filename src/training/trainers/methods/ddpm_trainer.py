@@ -24,7 +24,6 @@ class DDPMTrainer(SDXLTrainer):
         config=None,
         **kwargs
     ):
-        # Pass training_method explicitly to parent class
         super().__init__(
             model=model,
             optimizer=optimizer,
@@ -32,7 +31,6 @@ class DDPMTrainer(SDXLTrainer):
             device=device,
             wandb_logger=wandb_logger,
             config=config,
-            training_method="ddpm",  # Explicitly set the training method
             **kwargs
         )
         self.noise_scheduler = model.noise_scheduler
