@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
-from .SDXL_router import SDXLTrainer
+from ..SDXL_router import SDXLTrainer
 from src.core.distributed import is_main_process
 
 logger = get_logger(__name__)
