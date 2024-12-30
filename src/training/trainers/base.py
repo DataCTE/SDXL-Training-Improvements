@@ -4,12 +4,14 @@ from typing import Dict, Optional, Any
 from pathlib import Path
 import time
 from abc import ABC, abstractmethod
+import json
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
 from src.core.distributed import is_main_process
 from src.data.utils.paths import convert_windows_path
 from src.core.logging import WandbLogger
+from safetensors.torch import save_file, load_file
 
 logger = get_logger(__name__)
 
@@ -39,143 +41,19 @@ class BaseTrainer(ABC):
         """
         self.model = model
         self.optimizer = optimizer
-        
-        # Check if dataset can be pickled
-        try:
-            import pickle
-            pickle.dumps(train_dataloader.dataset)
-            can_pickle = True
-        except:
-            can_pickle = False
-            logger.warning("Dataset cannot be pickled, falling back to single-process data loading")
-        
-        # Define custom collate function that handles different sized tensors
-        def dynamic_collate(batch):
-            """Custom collate function that handles tensors of different sizes."""
-            error_context = {}
-            try:
-                # Filter out None values
-                batch = [b for b in batch if b is not None]
-                if not batch:
-                    raise RuntimeError("Empty batch after filtering")
-                
-                # Separate different keys
-                elem = batch[0]
-                if not isinstance(elem, dict):
-                    raise TypeError(f"Expected dict but got {type(elem)}")
-                
-                result = {}
-                for key in elem:
-                    error_context['current_key'] = key
-                    if isinstance(elem[key], torch.Tensor):
-                        # Move tensors to CPU if they're on CUDA
-                        tensors = [b[key].cpu() if b[key].is_cuda else b[key] for b in batch]
-                        
-                        # Get target size from config
-                        if (hasattr(self.config, 'global_config') and 
-                            hasattr(self.config.global_config, 'image') and
-                            hasattr(self.config.global_config.image, 'target_size')):
-                            target_size = self.config.global_config.image.target_size
-                        else:
-                            # Use minimum dimensions as fallback
-                            sizes = [t.size() for t in tensors]
-                            target_size = [min(s[i] for s in sizes) for i in range(2)]
-                        
-                        # Resize tensors to target size if they don't match
-                        resized_tensors = []
-                        for t in tensors:
-                            if len(t.shape) >= 3:  # Only resize if tensor has spatial dimensions
-                                if t.size(-2) != target_size[0] or t.size(-1) != target_size[1]:
-                                    # Preserve batch dimension and channels
-                                    t = torch.nn.functional.interpolate(
-                                        t.unsqueeze(0) if len(t.shape) == 3 else t,
-                                        size=target_size,
-                                        mode='bilinear',
-                                        align_corners=False
-                                    )
-                                    if len(t.shape) == 4:  # Remove batch dimension if it was added
-                                        t = t.squeeze(0)
-                            resized_tensors.append(t)
-                        
-                        # Stack the resized tensors
-                        try:
-                            result[key] = torch.stack(resized_tensors)
-                        except Exception as e:
-                            error_context.update({
-                                'tensor_shapes': [t.size() for t in resized_tensors],
-                                'target_size': target_size,
-                                'key': key
-                            })
-                            raise RuntimeError(f"Failed to stack tensors for key {key}: {str(e)}") from e
-                    else:
-                        # For non-tensors, use simple list
-                        result[key] = [b[key] for b in batch]
-                
-                return result
-                
-            except Exception as e:
-                error_context['batch_sizes'] = [
-                    {k: v.size() if isinstance(v, torch.Tensor) else len(v) for k, v in b.items()}
-                    for b in batch
-                ] if batch else []
-                logger.error(f"Collate failed: {str(e)}", extra=error_context)
-                raise RuntimeError(f"Collate failed: {str(e)}") from e
-        
-        # Store DataLoader configuration with custom collate
-        self._dataloader_config = {
-            'dataset': train_dataloader.dataset,
-            'batch_size': train_dataloader.batch_size,
-            'collate_fn': dynamic_collate,
-            'shuffle': True,
-            'drop_last': getattr(train_dataloader, 'drop_last', True),
-            'num_workers': train_dataloader.num_workers if can_pickle else 0,
-            # Only enable pin_memory if using CPU tensors and CUDA is available
-            'pin_memory': (train_dataloader.pin_memory and 
-                         torch.cuda.is_available() and 
-                         not any(isinstance(getattr(train_dataloader.dataset, attr, None), torch.Tensor) and 
-                                getattr(train_dataloader.dataset, attr, None).is_cuda
-                                for attr in dir(train_dataloader.dataset))),
-        }
-        
-        # Log DataLoader configuration
-        logger.info(f"DataLoader config: workers={self._dataloader_config['num_workers']}, "
-                   f"pin_memory={self._dataloader_config['pin_memory']}")
-        
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.wandb_logger = wandb_logger
         self.config = config or {}
         
-        # Get noise scheduler from model and initialize it
-        self.noise_scheduler = model.noise_scheduler
-        
-        # Configure scheduler based on config
-        if (hasattr(self.config, 'training') and 
-            hasattr(self.config.training, 'method_config') and 
-            hasattr(self.config.training.method_config, 'scheduler')):
-            scheduler_config = self.config.training.method_config.scheduler
-            # Convert scheduler config to dictionary if it's not already
-            if not isinstance(scheduler_config, dict):
-                scheduler_config = scheduler_config.__dict__ if hasattr(scheduler_config, '__dict__') else {}
-            
-            for key, value in scheduler_config.items():
-                if hasattr(self.noise_scheduler, key):
-                    try:
-                        setattr(self.noise_scheduler, key, value)
-                        logger.info(f"Set scheduler {key}={value}")
-                    except Exception as e:
-                        logger.warning(f"Failed to set scheduler {key}={value}: {str(e)}")
-        
-        # Set number of inference steps
-        num_inference_steps = (
-            self.config.training.num_inference_steps 
-            if hasattr(self.config, 'training') and hasattr(self.config.training, 'num_inference_steps')
-            else 1000
-        )
-        self.noise_scheduler.set_timesteps(num_inference_steps)
-        logger.info(f"Set noise scheduler timesteps to {num_inference_steps}")
-            
-        # Store timesteps after initialization
-        self.timesteps = self.noise_scheduler.timesteps.to(self.device)
+        # Store DataLoader configuration
+        self._dataloader_config = {
+            'dataset': train_dataloader.dataset,
+            'batch_size': train_dataloader.batch_size,
+            'shuffle': True,
+            'drop_last': True,
+            'num_workers': train_dataloader.num_workers,
+            'pin_memory': train_dataloader.pin_memory,
+        }
         
         # Training state
         self.step = 0
@@ -281,10 +159,7 @@ class BaseTrainer(ABC):
                     self.save_checkpoint("best_model.pt")
                     
                 # Regular checkpoint
-                save_every = (self.config.training.save_every 
-                            if hasattr(self.config, 'training') and hasattr(self.config.training, 'save_every')
-                            else 1)
-                if (epoch + 1) % save_every == 0:
+                if (epoch + 1) % self.config.get("save_every", 1) == 0:
                     self.save_checkpoint(f"checkpoint_epoch_{epoch}.pt")
                     
         except Exception as e:
@@ -292,27 +167,45 @@ class BaseTrainer(ABC):
             raise
             
     def save_checkpoint(self, path: str, **kwargs):
-        """Save training checkpoint."""
+        """Save training checkpoint using safetensors format."""
         try:
+            # Convert .pt extension to .safetensors if present
             save_path = convert_windows_path(path)
+            if save_path.endswith('.pt'):
+                save_path = save_path[:-3] + '.safetensors'
             save_dir = Path(save_path).parent
             save_dir.mkdir(parents=True, exist_ok=True)
             
+            # Prepare tensors for safetensors format
             checkpoint = {
-                "model_state": self.model.state_dict(),
-                "optimizer_state": self.optimizer.state_dict(),
-                "step": self.step,
-                "epoch": self.epoch,
-                "global_step": self.global_step,
-                "best_loss": self.best_loss,
-                "config": self.config,
-                "timestamp": time.time()
+                "model": self.model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                # Convert scalar values to tensors
+                "step": torch.tensor(self.step),
+                "epoch": torch.tensor(self.epoch),
+                "global_step": torch.tensor(self.global_step),
+                "best_loss": torch.tensor(self.best_loss),
+                "timestamp": torch.tensor(time.time())
             }
             
-            # Add any additional data
-            checkpoint.update(kwargs)
+            # Add any additional tensor data
+            for k, v in kwargs.items():
+                if isinstance(v, torch.Tensor):
+                    checkpoint[k] = v
+                else:
+                    try:
+                        checkpoint[k] = torch.tensor(v)
+                    except Exception:
+                        logger.warning(f"Skipping non-tensor kwargs item: {k}")
             
-            torch.save(checkpoint, save_path)
+            # Save using safetensors
+            save_file(checkpoint, save_path)
+            
+            # Save config separately as it can't be stored in safetensors
+            config_path = Path(save_path).with_suffix('.config.json')
+            with open(config_path, 'w') as f:
+                json.dump(self.config, f, indent=2)
+            
             logger.info(f"Saved checkpoint to {save_path}")
             
         except Exception as e:
@@ -320,32 +213,36 @@ class BaseTrainer(ABC):
             raise
             
     def load_checkpoint(self, path: str):
-        """Load training checkpoint."""
+        """Load training checkpoint from safetensors format."""
         try:
+            # Convert .pt extension to .safetensors if present
             load_path = convert_windows_path(path)
+            if load_path.endswith('.pt'):
+                load_path = load_path[:-3] + '.safetensors'
             if not Path(load_path).exists():
                 raise FileNotFoundError(f"Checkpoint not found: {load_path}")
                 
-            checkpoint = torch.load(load_path, map_location=self.device)
+            # Load tensors using safetensors
+            checkpoint = load_file(load_path)
             
-            self.model.load_state_dict(checkpoint["model_state"])
-            self.optimizer.load_state_dict(checkpoint["optimizer_state"])
-            self.step = checkpoint["step"]
-            self.epoch = checkpoint["epoch"]
-            self.global_step = checkpoint.get("global_step", self.step)
-            self.best_loss = checkpoint.get("best_loss", float('inf'))
+            # Load model and optimizer states
+            self.model.load_state_dict(checkpoint["model"])
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            
+            # Load scalar values
+            self.step = checkpoint["step"].item()
+            self.epoch = checkpoint["epoch"].item()
+            self.global_step = checkpoint["global_step"].item()
+            self.best_loss = checkpoint["best_loss"].item()
+            
+            # Load config from separate file if it exists
+            config_path = Path(load_path).with_suffix('.config.json')
+            if config_path.exists():
+                with open(config_path) as f:
+                    self.config = json.load(f)
             
             logger.info(f"Loaded checkpoint from {load_path}")
             
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {str(e)}", exc_info=True)
             raise 
-
-    def get_timestep(self, batch_size: int) -> torch.Tensor:
-        """Get timesteps for the current training step."""
-        if not hasattr(self, 'timesteps'):
-            raise RuntimeError("Timesteps not initialized. Did you forget to set_timesteps?")
-            
-        # Sample timesteps uniformly
-        indices = torch.randint(0, len(self.timesteps), (batch_size,), device=self.device)
-        return self.timesteps[indices] 
