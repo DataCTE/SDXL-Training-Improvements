@@ -311,14 +311,17 @@ def setup_training(
             enable_memory_tracking=True
         )
 
-        # Create data loader with config values
+        # Create data loader with config values and multiprocessing settings
         train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.training.batch_size,
             shuffle=True,
-            num_workers=config.training.num_workers,
+            num_workers=config.training.num_workers if not config.training.debug_mode else 0,  # Disable workers in debug mode
             pin_memory=config.training.pin_memory,
-            collate_fn=dataset.collate_fn
+            collate_fn=dataset.collate_fn,
+            multiprocessing_context='spawn' if config.training.num_workers > 0 else None,
+            persistent_workers=True if config.training.num_workers > 0 else False,
+            drop_last=True  # Drop incomplete batches
         )
 
         # Initialize optimizer based on config
