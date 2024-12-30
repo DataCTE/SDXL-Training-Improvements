@@ -39,11 +39,11 @@ class VAEEncoder:
 
             # Process image and keep on GPU
             with torch.cuda.amp.autocast(enabled=False):
-                model_input = self.vae.encode(pixel_values).latent_dist.sample()
-                model_input = model_input * self.vae.config.scaling_factor
+                latents = self.vae.encode(pixel_values).latent_dist.sample()
+                latents = latents * self.vae.config.scaling_factor
 
                 return {
-                    "model_input": model_input  # Keep on GPU
+                    "pixel_values": latents  # Changed from model_input to pixel_values
                 }
 
         except Exception as e:
