@@ -292,6 +292,15 @@ def setup_training(
             and torch.cuda.is_available()
         )
 
+          # Initialize pipeline in main process if not using workers
+        if not use_workers:
+            preprocessing_pipeline.initialize_worker(
+                model=model,
+                cache_manager=cache_manager,
+                device=device
+            )
+
+
         # Create cache manager for main process if not using workers
         cache_manager = None
         if not use_workers:
@@ -311,14 +320,7 @@ def setup_training(
             enable_memory_tracking=True
         )
 
-        # Initialize pipeline in main process if not using workers
-        if not use_workers:
-            preprocessing_pipeline.initialize_worker(
-                model=model,
-                cache_manager=cache_manager,
-                device=device
-            )
-
+      
         # Create dataset with config values
         dataset = create_dataset(
             config=config,
