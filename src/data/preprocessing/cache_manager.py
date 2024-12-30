@@ -323,19 +323,21 @@ class CacheManager:
         original_paths: List[Union[str, Path]],
         batch_metadata: List[Dict[str, Any]]
     ) -> List[bool]:
-        """Batch save latents with async IO."""
+        """Batch save latents with optimized IO."""
         try:
             import concurrent.futures
             import asyncio
+            import io
+            import pickle
             
             results = []
             
-            # Prepare all CPU transfers in parallel
+            # Pre-allocate CPU tensors in one go
             cpu_tensors = [{
                 k: v.cpu() for k, v in tensors.items()
             } for tensors in batch_tensors]
             
-            # Async save operations
+            # Optimize IO operations
             async def save_batch():
                 async def save_single(tensors, path, metadata, idx):
                     try:
@@ -343,32 +345,56 @@ class CacheManager:
                         tensors_path = self.latents_dir / f"{cache_key}.pt"
                         metadata_path = self.metadata_dir / f"{cache_key}.json"
                         
-                        # Use ThreadPoolExecutor for IO operations
+                        # Serialize tensor data to bytes buffer first
+                        buffer = io.BytesIO()
+                        torch.save(tensors, buffer)
+                        tensor_bytes = buffer.getvalue()
+                        
+                        # Use ThreadPoolExecutor for parallel IO
                         with concurrent.futures.ThreadPoolExecutor() as pool:
-                            # Save tensors and metadata in parallel
+                            # Write both files in parallel
                             await asyncio.gather(
                                 asyncio.get_event_loop().run_in_executor(
-                                    pool, torch.save, tensors, tensors_path
+                                    pool,
+                                    lambda: tensors_path.write_bytes(tensor_bytes)
                                 ),
                                 asyncio.get_event_loop().run_in_executor(
-                                    pool, 
-                                    lambda: json.dump(metadata, open(metadata_path, 'w'), indent=2)
+                                    pool,
+                                    lambda: json.dump(
+                                        metadata,
+                                        open(metadata_path, 'w'),
+                                        indent=2
+                                    )
                                 )
                             )
+                            
+                            # Update index in memory only
+                            self.cache_index["entries"][cache_key] = {
+                                "tensors_path": str(tensors_path),
+                                "metadata_path": str(metadata_path),
+                                "created_at": time.time()
+                            }
+                            
                         return True
+                        
                     except Exception as e:
                         logger.error(f"Failed to save cache entry: {e}")
                         return False
                 
-                # Create tasks for all items in batch
+                # Process all items in parallel
                 tasks = [
                     save_single(t, p, m, i) 
                     for i, (t, p, m) in enumerate(zip(cpu_tensors, original_paths, batch_metadata))
                 ]
                 return await asyncio.gather(*tasks)
             
-            # Run async batch save
+            # Run batch save
             results = asyncio.run(save_batch())
+            
+            # Update index file periodically instead of every save
+            if any(results):
+                self._save_index()
+                
             return results
             
         except Exception as e:
