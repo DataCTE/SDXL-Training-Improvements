@@ -34,7 +34,7 @@ from .models import (
 )
 
 from .training import (
-    BaseTrainer,
+    BaseRouter,
     SDXLTrainer,
     DDPMTrainer,
     FlowMatchingTrainer,
@@ -83,7 +83,7 @@ __all__: List[str] = [
     "VAEEncoder",
 
     # Training components
-    "BaseTrainer",
+    "BaseRouter",
     "SDXLTrainer",
     "DDPMTrainer",
     "FlowMatchingTrainer",

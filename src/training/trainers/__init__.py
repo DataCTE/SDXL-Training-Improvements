@@ -1,12 +1,16 @@
-from src.training.trainers.SDXL.methods.ddpm_trainer import DDPMTrainer
-from src.training.trainers.SDXL.SDXL_router import SDXLTrainer
-from src.training.trainers.SDXL.methods.flow_matching_trainer import FlowMatchingTrainer
-from src.training.trainers.base import BaseTrainer
+# Base trainer and router
+from src.training.trainors.base import BaseTrainer
+from src.training.trainers.base_router import BaseRouter
+
+# SDXL trainers
+from src.training.trainers.sdxl_trainer import SDXLTrainer
+from src.training.trainers.SDXL.methods import DDPMTrainer, FlowMatchingTrainer
 
 __all__ = [
-    "DDPMTrainer",
-    "SDXLTrainer",
-    "FlowMatchingTrainer",
-    "BaseTrainer"
+    'BaseTrainer',
+    'BaseRouter',
+    'SDXLTrainer', 
+    'DDPMTrainer',
+    'FlowMatchingTrainer'
 ]
 

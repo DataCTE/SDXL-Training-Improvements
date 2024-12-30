@@ -43,10 +43,8 @@ from src.data.preprocessing import (
     CacheManager
 )
 from src.training.trainers import (
-    BaseTrainer,
+    BaseRouter,
     SDXLTrainer,
-    DDPMTrainer,
-    FlowMatchingTrainer
 )
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.models import ModelType, StableDiffusionXL
@@ -235,7 +233,7 @@ def create_trainer(
     train_dataloader: torch.utils.data.DataLoader,
     device: torch.device,
     wandb_logger: Optional[WandbLogger] = None,
-) -> BaseTrainer:
+) -> BaseRouter:
     """Create appropriate trainer based on config."""
     try:
         # Create SDXL trainer with specified training method
