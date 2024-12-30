@@ -42,9 +42,11 @@ from src.data.preprocessing import (
     PreprocessingPipeline,
     CacheManager
 )
-from src.training import (
+from src.training.trainers import (
     BaseTrainer,
-    create_trainer,
+    SDXLTrainer,
+    DDPMTrainer,
+    FlowMatchingTrainer
 )
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.models import ModelType, StableDiffusionXL
@@ -226,6 +228,49 @@ def process_image_caption_pairs(image_files: List[Path]) -> tuple[List[str], Lis
             logger.warning(f"Missing caption file for {img_path}")
     return valid_images, valid_captions
 
+def create_trainer(
+    config: Config,
+    model: StableDiffusionXL,
+    optimizer: torch.optim.Optimizer,
+    train_dataloader: torch.utils.data.DataLoader,
+    device: torch.device,
+    wandb_logger: Optional[WandbLogger] = None,
+) -> BaseTrainer:
+    """Create appropriate trainer based on config."""
+    try:
+        # Create SDXL trainer with specified training method
+        trainer = SDXLTrainer(
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            training_method=config.training.method,  # "ddpm" or "flow_matching"
+            device=device,
+            wandb_logger=wandb_logger,
+            config=config,
+            # Pass additional training configuration
+            mixed_precision=config.training.mixed_precision,
+            gradient_accumulation_steps=config.training.gradient_accumulation_steps,
+            max_grad_norm=config.training.max_grad_norm,
+            enable_xformers=config.training.enable_xformers
+        )
+        
+        logger.info(f"Created SDXL trainer with {config.training.method} method")
+        return trainer
+        
+    except Exception as e:
+        error_context = {
+            'training_method': config.training.method,
+            'model_type': config.model.model_type,
+            'batch_size': config.training.batch_size,
+            'error': str(e)
+        }
+        logger.error(
+            "Failed to create trainer",
+            exc_info=True,
+            extra=error_context
+        )
+        raise TrainingSetupError("Failed to create trainer", error_context) from e
+
 def setup_training(
     config: Config,
     model: StableDiffusionXL,
@@ -296,8 +341,15 @@ def setup_training(
                 config=config.to_dict()
             )
 
+        # Validate training method
+        if config.training.method not in ["ddpm", "flow_matching"]:
+            raise ValueError(
+                f"Invalid training method: {config.training.method}. "
+                "Must be one of: ddpm, flow_matching"
+            )
+        
         return train_dataloader, optimizer, wandb_logger
-
+        
     except Exception as e:
         logger.error("Failed to setup training", exc_info=True)
         raise
