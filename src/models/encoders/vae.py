@@ -3,7 +3,6 @@ from typing import Dict, Optional, Union
 import torch
 from diffusers import AutoencoderKL
 from src.core.logging import get_logger
-import torch.inference_mode
 
 logger = get_logger(__name__)
 

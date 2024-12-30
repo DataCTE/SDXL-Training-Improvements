@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from src.core.logging import get_logger
-import torch.inference_mode
 
 logger = get_logger(__name__)
 

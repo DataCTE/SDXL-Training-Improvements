@@ -1,7 +1,6 @@
 """StableDiffusionXL model implementation with optimized encoders."""
 from typing import Dict, List, Optional, Tuple, Union, Any
 import torch
-import torch.inference_mode
 from diffusers import StableDiffusionXLPipeline
 from src.core.logging import get_logger
 from src.models.encoders import CLIPEncoder, VAEEncoder
