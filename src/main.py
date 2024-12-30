@@ -285,14 +285,39 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Create preprocessing pipeline with deferred model initialization
+        # Determine if we should use multiprocessing
+        use_workers = (
+            config.training.num_workers > 0 
+            and not config.training.debug_mode 
+            and torch.cuda.is_available()
+        )
+
+        # Create cache manager for main process if not using workers
+        cache_manager = None
+        if not use_workers:
+            cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
+            cache_manager = CacheManager(
+                cache_dir=cache_dir,
+                max_cache_size=config.global_config.cache.max_cache_size,
+                device=device
+            )
+
+        # Create preprocessing pipeline
         preprocessing_pipeline = PreprocessingPipeline(
             config=config,
-            model=None,  # Will be initialized in worker processes
-            cache_manager=None,  # Will be initialized in worker processes
+            model=None if use_workers else model,  # Initialize model only if not using workers
+            cache_manager=cache_manager,  # Pass cache manager only if not using workers
             is_train=True,
             enable_memory_tracking=True
         )
+
+        # Initialize pipeline in main process if not using workers
+        if not use_workers:
+            preprocessing_pipeline.initialize_worker(
+                model=model,
+                cache_manager=cache_manager,
+                device=device
+            )
 
         # Create dataset with config values
         dataset = create_dataset(
@@ -301,13 +326,6 @@ def setup_training(
             captions=captions,
             preprocessing_pipeline=preprocessing_pipeline,
             enable_memory_tracking=True
-        )
-
-        # Determine if we should use multiprocessing
-        use_workers = (
-            config.training.num_workers > 0 
-            and not config.training.debug_mode 
-            and torch.cuda.is_available()
         )
 
         # Create data loader with config values and multiprocessing settings
@@ -324,7 +342,7 @@ def setup_training(
             worker_init_fn=lambda worker_id: worker_init_fn(
                 worker_id=worker_id,
                 config=config,
-                model=model,  # Pass the full model
+                model=model,
                 device=device
             ) if use_workers else None
         )
