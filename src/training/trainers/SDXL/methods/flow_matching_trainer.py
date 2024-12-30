@@ -6,14 +6,14 @@ from typing import Dict, Optional, Any
 from torch import Tensor
 
 from src.core.logging import get_logger, MetricsLogger
-from src.training.trainers.base import BaseTrainer
+from src.training.trainers.SDXL.SDXL_router import SDXLTrainer
 from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
 from src.core.distributed import is_main_process
 
 logger = get_logger(__name__)
 
-class FlowMatchingTrainer(BaseTrainer):
+class FlowMatchingTrainer(SDXLTrainer):
     """Flow Matching trainer with memory optimizations."""
     
     name = "flow_matching"

@@ -6,9 +6,9 @@ from pathlib import Path
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
 from src.core.distributed import is_main_process
-from ..base import BaseTrainer
-from .methods.ddpm_trainer import DDPMTrainer
-from .methods.flow_matching_trainer import FlowMatchingTrainer
+from src.training.trainers.base import BaseTrainer
+from src.training.trainers.SDXL.methods.ddpm_trainer import DDPMTrainer
+from src.training.trainers.SDXL.methods.flow_matching_trainer import FlowMatchingTrainer
 
 logger = get_logger(__name__)
 
