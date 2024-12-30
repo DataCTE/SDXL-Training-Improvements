@@ -4,7 +4,9 @@ from torch.utils.data import DataLoader
 
 from src.core.logging import WandbLogger
 from src.data.config import Config
-from .base_router import BaseRouter
+from src.training.trainers.base_router import BaseRouter
+from src.training.trainers.methods.ddpm_trainer import DDPMTrainer
+from src.training.trainers.methods.flow_matching_trainer import FlowMatchingTrainer
 
 class SDXLTrainer(BaseRouter):
     def __init__(
