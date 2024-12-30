@@ -285,22 +285,22 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Extract only the necessary model components for preprocessing
-        model_config = {
-            'image_size': model.unet.config.sample_size,
-            'vae_scale_factor': model.vae.config.scaling_factor,
-            'tokenizer_1_max_length': model.tokenizer_1.model_max_length,
-            'tokenizer_2_max_length': model.tokenizer_2.model_max_length,
-        }
+        # Create preprocessing pipeline with deferred model initialization
+        preprocessing_pipeline = PreprocessingPipeline(
+            config=config,
+            model=None,  # Will be initialized in worker processes
+            cache_manager=None,  # Will be initialized in worker processes
+            is_train=True,
+            enable_memory_tracking=True
+        )
 
-        # Create dataset with config values but defer preprocessing pipeline creation
+        # Create dataset with config values
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            preprocessing_pipeline=None,  # Will be created in worker_init_fn
-            enable_memory_tracking=True,
-            model_config=model_config  # Pass only necessary model config
+            preprocessing_pipeline=preprocessing_pipeline,
+            enable_memory_tracking=True
         )
 
         # Determine if we should use multiprocessing
@@ -324,7 +324,7 @@ def setup_training(
             worker_init_fn=lambda worker_id: worker_init_fn(
                 worker_id=worker_id,
                 config=config,
-                model_config=model_config,
+                model=model,  # Pass the full model
                 device=device
             ) if use_workers else None
         )
@@ -385,7 +385,7 @@ def check_system_limits():
 def worker_init_fn(
     worker_id: int, 
     config: Config, 
-    model_config: Dict[str, Any],
+    model: StableDiffusionXL,
     device: torch.device
 ) -> None:
     """Initialize worker process."""
@@ -409,19 +409,15 @@ def worker_init_fn(
             device=device
         )
 
-        # Create preprocessing pipeline with model config instead of full model
-        preprocessing_pipeline = PreprocessingPipeline(
-            config=config,
-            model_config=model_config,  # Pass model config instead of model
-            cache_manager=cache_manager,
-            is_train=True,
-            enable_memory_tracking=True
-        )
-        
-        # Attach preprocessing pipeline to dataset in worker process
+        # Get worker's dataset instance
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is not None:
-            worker_info.dataset.preprocessing_pipeline = preprocessing_pipeline
+            # Initialize preprocessing pipeline in the worker
+            worker_info.dataset.preprocessing_pipeline.initialize_worker(
+                model=model,
+                cache_manager=cache_manager,
+                device=device
+            )
             
     except Exception as e:
         logger.error(f"Failed to initialize worker {worker_id}: {str(e)}", exc_info=True)
