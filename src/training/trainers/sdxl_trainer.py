@@ -42,15 +42,19 @@ class SDXLTrainer(BaseTrainer):
                 tag_weights = batch["tag_weights"].to(self.device)
                 latents = latents * tag_weights.view(-1, 1, 1, 1)
             
-            # Get timesteps
-            timesteps = self.noise_scheduler.get_timesteps(
-                num_inference_steps=self.config.training.num_inference_steps,
-                device=self.device
-            )
+            # Get timesteps using the base trainer's method
+            timesteps = self.get_timestep(batch_size=latents.shape[0])
             
             # Add noise
             noise = torch.randn_like(latents)
             noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+            
+            # Convert inputs to model's dtype
+            model_dtype = next(self.model.unet.parameters()).dtype
+            noisy_latents = noisy_latents.to(dtype=model_dtype)
+            timesteps = timesteps.to(dtype=model_dtype)
+            prompt_embeds = prompt_embeds.to(dtype=model_dtype)
+            pooled_prompt_embeds = pooled_prompt_embeds.to(dtype=model_dtype)
             
             # Get model prediction
             model_pred = self.model.unet(
@@ -60,8 +64,12 @@ class SDXLTrainer(BaseTrainer):
                 added_cond_kwargs={"text_embeds": pooled_prompt_embeds}
             ).sample
             
-            # Calculate loss
-            loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+            # Calculate loss (ensure both tensors are in float32 for loss calculation)
+            loss = torch.nn.functional.mse_loss(
+                model_pred.float(),
+                noise.float(),
+                reduction="mean"
+            )
             
             # Log metrics
             metrics = {

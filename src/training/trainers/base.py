@@ -68,16 +68,45 @@ class BaseTrainer(ABC):
                 for key in elem:
                     error_context['current_key'] = key
                     if isinstance(elem[key], torch.Tensor):
-                        # For tensors, pad to max size in batch
-                        tensors = [b[key] for b in batch]
-                        max_size = [max(s) for s in zip(*[t.size() for t in tensors])]
-                        padded = []
+                        # Move tensors to CPU if they're on CUDA
+                        tensors = [b[key].cpu() if b[key].is_cuda else b[key] for b in batch]
+                        
+                        # Get target size from config
+                        if (hasattr(self.config, 'global_config') and 
+                            hasattr(self.config.global_config, 'image') and
+                            hasattr(self.config.global_config.image, 'target_size')):
+                            target_size = self.config.global_config.image.target_size
+                        else:
+                            # Use minimum dimensions as fallback
+                            sizes = [t.size() for t in tensors]
+                            target_size = [min(s[i] for s in sizes) for i in range(2)]
+                        
+                        # Resize tensors to target size if they don't match
+                        resized_tensors = []
                         for t in tensors:
-                            pad_size = []
-                            for i, (current, target) in enumerate(zip(t.size(), max_size)):
-                                pad_size.extend([0, target - current])
-                            padded.append(torch.nn.functional.pad(t, pad_size))
-                        result[key] = torch.stack(padded)
+                            if len(t.shape) >= 3:  # Only resize if tensor has spatial dimensions
+                                if t.size(-2) != target_size[0] or t.size(-1) != target_size[1]:
+                                    # Preserve batch dimension and channels
+                                    t = torch.nn.functional.interpolate(
+                                        t.unsqueeze(0) if len(t.shape) == 3 else t,
+                                        size=target_size,
+                                        mode='bilinear',
+                                        align_corners=False
+                                    )
+                                    if len(t.shape) == 4:  # Remove batch dimension if it was added
+                                        t = t.squeeze(0)
+                            resized_tensors.append(t)
+                        
+                        # Stack the resized tensors
+                        try:
+                            result[key] = torch.stack(resized_tensors)
+                        except Exception as e:
+                            error_context.update({
+                                'tensor_shapes': [t.size() for t in resized_tensors],
+                                'target_size': target_size,
+                                'key': key
+                            })
+                            raise RuntimeError(f"Failed to stack tensors for key {key}: {str(e)}") from e
                     else:
                         # For non-tensors, use simple list
                         result[key] = [b[key] for b in batch]
@@ -96,25 +125,63 @@ class BaseTrainer(ABC):
         self._dataloader_config = {
             'dataset': train_dataloader.dataset,
             'batch_size': train_dataloader.batch_size,
-            'pin_memory': train_dataloader.pin_memory,
-            'collate_fn': dynamic_collate,  # Use our custom collate
+            'collate_fn': dynamic_collate,
             'shuffle': True,
             'drop_last': getattr(train_dataloader, 'drop_last', True),
             'num_workers': train_dataloader.num_workers if can_pickle else 0,
+            # Only enable pin_memory if using CPU tensors and CUDA is available
+            'pin_memory': (train_dataloader.pin_memory and 
+                         torch.cuda.is_available() and 
+                         not any(isinstance(getattr(train_dataloader.dataset, attr, None), torch.Tensor) and 
+                                getattr(train_dataloader.dataset, attr, None).is_cuda
+                                for attr in dir(train_dataloader.dataset))),
         }
+        
+        # Log DataLoader configuration
+        logger.info(f"DataLoader config: workers={self._dataloader_config['num_workers']}, "
+                   f"pin_memory={self._dataloader_config['pin_memory']}")
         
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.wandb_logger = wandb_logger
         self.config = config or {}
+        
+        # Get noise scheduler from model and initialize it
+        self.noise_scheduler = model.noise_scheduler
+        
+        # Configure scheduler based on config
+        if (hasattr(self.config, 'training') and 
+            hasattr(self.config.training, 'method_config') and 
+            hasattr(self.config.training.method_config, 'scheduler')):
+            scheduler_config = self.config.training.method_config.scheduler
+            # Convert scheduler config to dictionary if it's not already
+            if not isinstance(scheduler_config, dict):
+                scheduler_config = scheduler_config.__dict__ if hasattr(scheduler_config, '__dict__') else {}
+            
+            for key, value in scheduler_config.items():
+                if hasattr(self.noise_scheduler, key):
+                    try:
+                        setattr(self.noise_scheduler, key, value)
+                        logger.info(f"Set scheduler {key}={value}")
+                    except Exception as e:
+                        logger.warning(f"Failed to set scheduler {key}={value}: {str(e)}")
+        
+        # Set number of inference steps
+        num_inference_steps = (
+            self.config.training.num_inference_steps 
+            if hasattr(self.config, 'training') and hasattr(self.config.training, 'num_inference_steps')
+            else 1000
+        )
+        self.noise_scheduler.set_timesteps(num_inference_steps)
+        logger.info(f"Set noise scheduler timesteps to {num_inference_steps}")
+            
+        # Store timesteps after initialization
+        self.timesteps = self.noise_scheduler.timesteps.to(self.device)
         
         # Training state
         self.step = 0
         self.epoch = 0
         self.global_step = 0
         self.best_loss = float('inf')
-        
-        # Get noise scheduler from model
-        self.noise_scheduler = model.noise_scheduler
         
         # Initialize metrics tracking
         self.train_metrics = {}
@@ -214,7 +281,10 @@ class BaseTrainer(ABC):
                     self.save_checkpoint("best_model.pt")
                     
                 # Regular checkpoint
-                if (epoch + 1) % self.config.get("save_every", 1) == 0:
+                save_every = (self.config.training.save_every 
+                            if hasattr(self.config, 'training') and hasattr(self.config.training, 'save_every')
+                            else 1)
+                if (epoch + 1) % save_every == 0:
                     self.save_checkpoint(f"checkpoint_epoch_{epoch}.pt")
                     
         except Exception as e:
@@ -270,3 +340,12 @@ class BaseTrainer(ABC):
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {str(e)}", exc_info=True)
             raise 
+
+    def get_timestep(self, batch_size: int) -> torch.Tensor:
+        """Get timesteps for the current training step."""
+        if not hasattr(self, 'timesteps'):
+            raise RuntimeError("Timesteps not initialized. Did you forget to set_timesteps?")
+            
+        # Sample timesteps uniformly
+        indices = torch.randint(0, len(self.timesteps), (batch_size,), device=self.device)
+        return self.timesteps[indices] 
