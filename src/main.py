@@ -18,7 +18,6 @@ import torch
 from torch.distributed import init_process_group
 from torch.cuda.amp import autocast
 
-
 from src.core.logging import (
     setup_logging,
     get_logger,
@@ -44,7 +43,9 @@ from src.data.preprocessing import (
 )
 from src.training.trainers import (
     BaseRouter,
-    SDXLTrainer,
+    DDPMTrainer,
+    FlowMatchingTrainer,
+    save_checkpoint
 )
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.models import ModelType, StableDiffusionXL
@@ -236,12 +237,18 @@ def create_trainer(
 ) -> BaseRouter:
     """Create appropriate trainer based on config."""
     try:
-        # Create SDXL trainer with specified training method
-        trainer = SDXLTrainer(
+        trainer_cls = None
+        if config.training.method == "ddpm":
+            trainer_cls = DDPMTrainer
+        elif config.training.method == "flow_matching":
+            trainer_cls = FlowMatchingTrainer
+        else:
+            raise ValueError(f"Unknown training method: {config.training.method}")
+            
+        trainer = trainer_cls(
             model=model,
             optimizer=optimizer,
             train_dataloader=train_dataloader,
-            training_method=config.training.method,  # "ddpm" or "flow_matching"
             device=device,
             wandb_logger=wandb_logger,
             config=config,
@@ -252,7 +259,7 @@ def create_trainer(
             enable_xformers=config.training.enable_xformers
         )
         
-        logger.info(f"Created SDXL trainer with {config.training.method} method")
+        logger.info(f"Created {trainer_cls.__name__} trainer")
         return trainer
         
     except Exception as e:
@@ -413,11 +420,20 @@ def main():
                 wandb_logger=wandb_logger
             )
             
-            logger.info("Starting training...")
+            logger.info(f"Starting training with {config.training.method} method for {config.training.num_epochs} epochs...")
             trainer.train(num_epochs=config.training.num_epochs)
             
             if is_main_process():
                 logger.info("Training complete!")
+                # Save final model checkpoint
+                if config.training.save_final_model:
+                    save_checkpoint(
+                        model=model,
+                        optimizer=optimizer,
+                        epoch=config.training.num_epochs,
+                        config=config,
+                        is_final=True
+                    )
 
     except Exception as e:
         error_context = {

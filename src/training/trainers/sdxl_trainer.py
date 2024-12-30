@@ -59,3 +59,10 @@ class SDXLTrainer(BaseRouter):
     def train(self, num_epochs: int):
         """Delegate training to the specific trainer implementation."""
         return self.trainer.train(num_epochs) 
+    
+    
+def save_checkpoint(model, epoch: int, is_final: bool = False):
+    """Save checkpoint in diffusers format using save_pretrained."""
+    path = "final_checkpoint" if is_final else f"checkpoint_{epoch}"
+    model.save_pretrained(path)
+        

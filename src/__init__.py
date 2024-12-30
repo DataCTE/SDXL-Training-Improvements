@@ -43,7 +43,8 @@ from .training import (
     get_sigmas,
     get_scheduler_parameters,
     get_add_time_ids,
-    create_trainer
+    create_trainer,
+    save_checkpoint
 )
 
 __version__ = "0.1.0"
@@ -92,5 +93,6 @@ __all__: List[str] = [
     "get_sigmas",
     "get_scheduler_parameters",
     "get_add_time_ids",
-    "create_trainer"
+    "create_trainer",
+    "save_checkpoint"
 ]
