@@ -2,6 +2,7 @@
 import torch
 from typing import Dict, Any
 import torch.nn.functional as F
+from tqdm import tqdm
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
@@ -21,7 +22,71 @@ class DDPMTrainer(SDXLTrainer):
         **kwargs
     ):
         super().__init__(model, optimizer, train_dataloader, **kwargs)
+        self.noise_scheduler = model.noise_scheduler
         
+    def train(self, num_epochs: int):
+        """Execute training loop for specified number of epochs."""
+        total_steps = len(self.train_dataloader) * num_epochs
+        progress_bar = tqdm(
+            total=total_steps,
+            disable=not is_main_process(),
+            desc="Training"
+        )
+        
+        for epoch in range(num_epochs):
+            self.model.train()
+            epoch_loss = 0.0
+            num_steps = len(self.train_dataloader)
+            
+            for step, batch in enumerate(self.train_dataloader):
+                # Zero gradients
+                self.optimizer.zero_grad()
+                
+                # Execute training step
+                step_output = self.training_step(batch)
+                loss = step_output["loss"]
+                metrics = step_output["metrics"]
+                
+                # Backward pass and optimization
+                loss.backward()
+                if self.config.training.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.training.max_grad_norm
+                    )
+                self.optimizer.step()
+                
+                # Update progress
+                epoch_loss += loss.item()
+                if is_main_process():
+                    progress_bar.update(1)
+                    progress_bar.set_postfix({
+                        'epoch': epoch + 1,
+                        'step': step + 1,
+                        'loss': loss.item(),
+                        'avg_loss': epoch_loss / (step + 1)
+                    })
+                    
+                    # Log step metrics
+                    if self.wandb_logger:
+                        self.wandb_logger.log_metrics({
+                            'epoch': epoch + 1,
+                            'step': step + 1,
+                            **metrics
+                        })
+            
+            # Log epoch metrics
+            avg_epoch_loss = epoch_loss / num_steps
+            if is_main_process():
+                logger.info(f"Epoch {epoch + 1}/{num_epochs} - Average Loss: {avg_epoch_loss:.6f}")
+                if self.wandb_logger:
+                    self.wandb_logger.log_metrics({
+                        'epoch': epoch + 1,
+                        'epoch_loss': avg_epoch_loss
+                    })
+        
+        progress_bar.close()
+
     def training_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Execute single DDPM training step."""
         try:

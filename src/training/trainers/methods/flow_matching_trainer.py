@@ -4,12 +4,14 @@ import torch.backends.cudnn
 import torch.nn.functional as F
 from typing import Dict, Optional, Any
 from torch import Tensor
+from tqdm import tqdm
 
 from src.core.logging import get_logger, MetricsLogger
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
 from src.core.distributed import is_main_process
+from src.core.logging import WandbLogger
 
 logger = get_logger(__name__)
 
@@ -18,14 +20,26 @@ class FlowMatchingTrainer(SDXLTrainer):
     
     name = "flow_matching"
 
-    def __init__(self, unet: torch.nn.Module, config: Config):
-        super().__init__(unet, config)
-        self.logger.debug("Initializing Flow Matching Trainer")
-        
-        # Initialize metrics logger
+    def __init__(
+        self,
+        model,
+        optimizer,
+        train_dataloader: torch.utils.data.DataLoader,
+        device: torch.device,
+        wandb_logger: Optional[WandbLogger] = None,
+        config: Optional[Config] = None,
+        **kwargs
+    ):
+        super().__init__(
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            device=device,
+            wandb_logger=wandb_logger,
+            config=config,
+            **kwargs
+        )
         self.metrics_logger = MetricsLogger(window_size=100)
-        
-        # Initialize tensor shape tracking
         self._shape_logs = []
         
         # Try to compile loss computation if available
@@ -44,6 +58,71 @@ class FlowMatchingTrainer(SDXLTrainer):
                     exc_info=True,
                     extra={'error': str(e)}
                 )
+
+    def train(self, num_epochs: int):
+        """Execute training loop for specified number of epochs."""
+        total_steps = len(self.train_dataloader) * num_epochs
+        progress_bar = tqdm(
+            total=total_steps,
+            disable=not is_main_process(),
+            desc="Training Flow Matching"
+        )
+        
+        for epoch in range(num_epochs):
+            self.model.train()
+            epoch_loss = 0.0
+            num_steps = len(self.train_dataloader)
+            
+            for step, batch in enumerate(self.train_dataloader):
+                # Zero gradients
+                self.optimizer.zero_grad()
+                
+                # Compute loss
+                loss_output = self.compute_loss(self.model, batch)
+                loss = loss_output["loss"]
+                metrics = loss_output["metrics"]
+                
+                # Backward pass and optimization
+                loss.backward()
+                if self.config.training.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.training.max_grad_norm
+                    )
+                self.optimizer.step()
+                
+                # Update progress
+                epoch_loss += loss.item()
+                if is_main_process():
+                    progress_bar.update(1)
+                    progress_bar.set_postfix({
+                        'epoch': epoch + 1,
+                        'step': step + 1,
+                        'loss': loss.item(),
+                        'avg_loss': epoch_loss / (step + 1),
+                        'x0_norm': metrics['x0_norm'],
+                        'x1_norm': metrics['x1_norm']
+                    })
+                    
+                    # Log step metrics
+                    if self.wandb_logger:
+                        self.wandb_logger.log_metrics({
+                            'epoch': epoch + 1,
+                            'step': step + 1,
+                            **metrics
+                        })
+            
+            # Log epoch metrics
+            avg_epoch_loss = epoch_loss / num_steps
+            if is_main_process():
+                logger.info(f"Epoch {epoch + 1}/{num_epochs} - Average Loss: {avg_epoch_loss:.6f}")
+                if self.wandb_logger:
+                    self.wandb_logger.log_metrics({
+                        'epoch': epoch + 1,
+                        'epoch_loss': avg_epoch_loss
+                    })
+        
+        progress_bar.close()
 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, Tensor]:
         """Compute training loss."""
