@@ -19,9 +19,22 @@ class DDPMTrainer(SDXLTrainer):
         model: StableDiffusionXL,
         optimizer: torch.optim.Optimizer,
         train_dataloader: torch.utils.data.DataLoader,
+        device: torch.device,
+        wandb_logger=None,
+        config=None,
         **kwargs
     ):
-        super().__init__(model, optimizer, train_dataloader, **kwargs)
+        # Pass training_method explicitly to parent class
+        super().__init__(
+            model=model,
+            optimizer=optimizer,
+            train_dataloader=train_dataloader,
+            device=device,
+            wandb_logger=wandb_logger,
+            config=config,
+            training_method="ddpm",  # Explicitly set the training method
+            **kwargs
+        )
         self.noise_scheduler = model.noise_scheduler
         
     def train(self, num_epochs: int):
