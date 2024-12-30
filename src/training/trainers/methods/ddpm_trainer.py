@@ -5,12 +5,12 @@ import torch.nn.functional as F
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
-from src.training.trainers.sdxl_trainer import SDXLTrainer
+from src.training.trainers.base_router import BaseRouter
 from src.core.distributed import is_main_process
 
 logger = get_logger(__name__)
 
-class DDPMTrainer(SDXLTrainer):
+class DDPMTrainer(BaseRouter):
     """DDPM-specific trainer implementation."""
     
     def __init__(
