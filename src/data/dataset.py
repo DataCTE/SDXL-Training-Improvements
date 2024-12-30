@@ -219,14 +219,12 @@ class AspectBucketDataset(Dataset):
         
         def update_progress_stats():
             """Calculate and update progress statistics."""
-            # Calculate speed using moving window
             if processing_times:
                 window = processing_times[-window_size:]
                 current_speed = len(window) / sum(window) if window else 0
                 
-                # Calculate ETA based on recent speed
-                remaining = total_images - (processed_images + failed_images)
-                eta_seconds = remaining / current_speed if current_speed > 0 else 0
+                # Use remaining_images here
+                eta_seconds = remaining_images / current_speed if current_speed > 0 else 0
                 
                 # Calculate success rate
                 success_rate = (processed_images / (processed_images + failed_images)) * 100 if (processed_images + failed_images) > 0 else 100
@@ -235,7 +233,7 @@ class AspectBucketDataset(Dataset):
                     'processed': processed_images,
                     'failed': failed_images,
                     'cached': already_cached,
-                    'remaining': remaining,
+                    'remaining': remaining_images,
                     'speed': f'{current_speed:.2f} img/s',
                     'eta': time.strftime('%H:%M:%S', time.gmtime(eta_seconds)),
                     'success': f'{success_rate:.1f}%'

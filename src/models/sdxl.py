@@ -194,3 +194,26 @@ class StableDiffusionXL:
             scheduler=self.scheduler
         )
 
+    def parameters(self, train_text_encoder: bool = False, train_vae: bool = False):
+        """Get trainable parameters of the model.
+        
+        Args:
+            train_text_encoder: Whether to include text encoder parameters
+            train_vae: Whether to include VAE parameters
+        """
+        params = []
+        
+        # UNet parameters (always included)
+        params.extend(self.unet.parameters())
+        
+        # Optionally include text encoder parameters
+        if train_text_encoder:
+            for encoder in self.text_encoders:
+                params.extend(encoder.parameters())
+            
+        # Optionally include VAE parameters
+        if train_vae:
+            params.extend(self.vae.parameters())
+        
+        return params
+
