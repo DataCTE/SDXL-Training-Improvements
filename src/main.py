@@ -255,7 +255,7 @@ def create_trainer(
             # Pass additional training configuration
             mixed_precision=config.training.mixed_precision,
             gradient_accumulation_steps=config.training.gradient_accumulation_steps,
-            max_grad_norm=config.training.max_grad_norm,
+            clip_grad_norm=config.training.clip_grad_norm,
             enable_xformers=config.training.enable_xformers
         )
         
