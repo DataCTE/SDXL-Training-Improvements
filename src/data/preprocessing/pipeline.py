@@ -497,3 +497,13 @@ class PreprocessingPipeline:
             "timestamp": time.time(),
             "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
         }
+
+    def _get_cached_status(self, image_paths: List[str]) -> Dict[str, bool]:
+        """Get cache status for each image path."""
+        if not self.cache_manager:
+            return {path: False for path in image_paths}
+            
+        return {
+            path: self.cache_manager.is_cached(path)
+            for path in image_paths
+        }

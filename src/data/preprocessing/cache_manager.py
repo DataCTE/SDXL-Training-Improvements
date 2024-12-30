@@ -279,3 +279,40 @@ class CacheManager:
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.cleanup()
+
+    def is_cached(self, path: Union[str, Path]) -> bool:
+        """Check if path is already cached and valid."""
+        try:
+            cache_key = self.get_cache_key(path)
+            
+            if cache_key not in self.cache_index["entries"]:
+                return False
+                
+            entry = self.cache_index["entries"][cache_key]
+            tensors_path = Path(entry["tensors_path"])
+            metadata_path = Path(entry["metadata_path"])
+            
+            # Verify files exist and are valid
+            if not tensors_path.exists() or not metadata_path.exists():
+                # Clean up invalid entry
+                with self._lock:
+                    del self.cache_index["entries"][cache_key]
+                    self._save_index()
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to check cache status: {e}")
+            return False
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get current cache statistics."""
+        return {
+            "total_entries": len(self.cache_index["entries"]),
+            "cache_size_bytes": sum(
+                os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt")
+            ),
+            "last_updated": self.cache_index["last_updated"],
+            "last_cleanup": self.cache_index["stats"]["last_cleanup"]
+        }

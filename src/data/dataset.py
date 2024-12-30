@@ -191,41 +191,56 @@ class AspectBucketDataset(Dataset):
         self.bucket_indices = self.preprocessing_pipeline._assign_bucket_indices(self.image_paths)
 
     def _precompute_latents(self) -> None:
-        """Precompute and cache latents for all images."""
+        """Precompute and cache latents for all images with resume support."""
         total_images = len(self)
-        skipped_images = 0
-        processed_images = 0
-        batch_size = 32  # Internal batch size for processing
         
-        # Create progress bar for total images
+        # Get cache status for all images
+        cached_status = self.preprocessing_pipeline._get_cached_status(self.image_paths)
+        already_cached = sum(1 for is_cached in cached_status.values() if is_cached)
+        
+        remaining_images = total_images - already_cached
+        skipped_images = 0
+        processed_images = already_cached
+        batch_size = 32
+        
+        logger.info(f"Found {already_cached} previously cached images")
+        
+        # Create progress bar for remaining images
         pbar = tqdm(
-            total=total_images,
+            total=remaining_images,
             desc="Precomputing latents",
-            unit="img",  # Show progress in images
+            unit="img",
+            initial=already_cached,  # Start from previously cached count
             postfix={
-                'processed': 0,
-                'skipped': 0,
-                'success_rate': '0.0%'
+                'processed': processed_images,
+                'skipped': skipped_images,
+                'cached': already_cached,
+                'success_rate': f"{(processed_images/total_images)*100:.1f}%"
             }
         )
         
-        for start_idx in range(0, total_images, batch_size):
+        # Process only uncached images
+        uncached_indices = [
+            i for i, path in enumerate(self.image_paths)
+            if not cached_status[path]
+        ]
+        
+        for start_idx in range(0, len(uncached_indices), batch_size):
             try:
-                end_idx = min(start_idx + batch_size, total_images)
-                batch_indices = range(start_idx, end_idx)
+                end_idx = min(start_idx + batch_size, len(uncached_indices))
+                batch_indices = uncached_indices[start_idx:end_idx]
                 
-                # Process batch internally
+                # Process batch
                 batch_paths = [self.image_paths[i] for i in batch_indices]
                 batch_captions = [self.captions[i] for i in batch_indices]
                 
-                # Get individual results
                 processed_items = self.preprocessing_pipeline.process_image_batch(
                     image_paths=batch_paths,
                     captions=batch_captions,
                     config=self.config
                 )
                 
-                # Cache and track individual results
+                # Cache results
                 if self.config.global_config.cache.use_cache:
                     for path, processed, caption in zip(batch_paths, processed_items, batch_captions):
                         if processed is not None:
@@ -244,31 +259,28 @@ class AspectBucketDataset(Dataset):
                                 }
                             )
                             
-                            # Update counters for individual images
                             if cache_success:
                                 processed_images += 1
                             else:
                                 skipped_images += 1
                         else:
                             skipped_images += 1
-                        
-                        # Update progress for each individual image
+                            
                         pbar.update(1)
                         pbar.set_postfix({
                             'processed': processed_images,
                             'skipped': skipped_images,
-                            'success_rate': f"{(processed_images / (processed_images + skipped_images) * 100):.1f}%"
+                            'cached': already_cached,
+                            'success_rate': f"{(processed_images/total_images)*100:.1f}%"
                         })
                 
-                # Force CUDA synchronization periodically
+                # Periodic CUDA sync
                 if torch.cuda.is_available() and (start_idx + batch_size) % (batch_size * 4) == 0:
                     torch.cuda.synchronize()
                     
             except Exception as e:
                 logger.error(f"Failed to process batch at index {start_idx}", exc_info=True)
-                # Mark all images in failed batch as skipped
                 skipped_images += len(batch_indices)
-                # Update progress for skipped images
                 pbar.update(len(batch_indices))
                 pbar.set_postfix({
                     'processed': processed_images,
@@ -277,13 +289,15 @@ class AspectBucketDataset(Dataset):
                 })
                 continue
         
-        # Close progress bar
         pbar.close()
         
-        # Log final statistics
+        # Log final statistics including previously cached
+        cache_stats = self.cache_manager.get_cache_stats() if self.cache_manager else {}
         logger.info(
             f"Precomputing complete: {processed_images}/{total_images} images processed successfully "
-            f"({skipped_images} skipped) - Success rate: {(processed_images/total_images)*100:.1f}%"
+            f"({skipped_images} skipped, {already_cached} previously cached) - "
+            f"Success rate: {(processed_images/total_images)*100:.1f}%\n"
+            f"Cache stats: {cache_stats}"
         )
 
     def __len__(self) -> int:
