@@ -1,5 +1,5 @@
 """StableDiffusionXL model implementation with optimized encoders."""
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Dict, List, Optional, Tuple, Union, Any, Iterator
 import torch
 from diffusers import StableDiffusionXLPipeline
 from src.core.logging import get_logger
@@ -67,6 +67,9 @@ class StableDiffusionXL:
         
         logger.info(f"Initialized {model_type.value} model on {device}")
         return instance
+
+    def __init__(self):
+        self.training = False  # Add training state
 
     def to(self, device: torch.device) -> "StableDiffusionXL":
         """Move model to device."""
@@ -216,4 +219,27 @@ class StableDiffusionXL:
             params.extend(self.vae.parameters())
         
         return params
+
+    def train(self, mode: bool = True) -> 'StableDiffusionXL':
+        """Set the model in training mode."""
+        self.training = mode
+        self.unet.train(mode)
+        # VAE and text encoders should typically stay in eval mode
+        self.vae_encoder.vae.eval()
+        for encoder in self.text_encoders:
+            encoder.eval()
+        return self
+    
+    def eval(self) -> 'StableDiffusionXL':
+        """Set the model in evaluation mode."""
+        return self.train(False)
+    
+    def parameters(self) -> Iterator[torch.nn.Parameter]:
+        """Get trainable parameters."""
+        # Typically only UNet parameters are trained
+        return self.unet.parameters()
+    
+    def zero_grad(self) -> None:
+        """Zero out parameter gradients."""
+        self.unet.zero_grad()
 

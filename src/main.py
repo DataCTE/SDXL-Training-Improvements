@@ -364,7 +364,7 @@ def main():
             )
             
             logger.info("Starting training...")
-            trainer.train()
+            trainer.train(num_epochs=config.training.num_epochs)
             
             if is_main_process():
                 logger.info("Training complete!")

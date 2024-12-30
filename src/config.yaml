@@ -22,7 +22,7 @@ optimizer:
 # Training configuration
 training:
   batch_size: 4
-  num_epochs: 100
+  num_epochs: 10
   save_every: 1
   method: "ddpm"  # Options: ddpm, flow_matching
   num_workers: 4

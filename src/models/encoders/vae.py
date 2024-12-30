@@ -24,6 +24,11 @@ class VAEEncoder:
         
         logger.info(f"VAE encoder initialized on {device}")
 
+    def to(self, device: torch.device) -> 'VAEEncoder':
+        """Move VAE encoder to specified device."""
+        self.vae = self.vae.to(device)
+        return self
+
     @torch.inference_mode()
     def encode_images(
         self,
