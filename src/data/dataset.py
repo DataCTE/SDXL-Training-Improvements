@@ -191,7 +191,7 @@ class AspectBucketDataset(Dataset):
         self.bucket_indices = self.preprocessing_pipeline._assign_bucket_indices(self.image_paths)
 
     def _precompute_latents(self) -> None:
-        """Precompute and cache latents with speed tracking and time estimates."""
+        """Precompute and cache latents with accurate progress tracking."""
         total_images = len(self)
         start_time = time.time()
         
@@ -200,47 +200,48 @@ class AspectBucketDataset(Dataset):
         already_cached = sum(1 for is_cached in cached_status.values() if is_cached)
         
         remaining_images = total_images - already_cached
-        skipped_images = 0
+        failed_images = 0
         processed_images = already_cached
         batch_size = 64
         
-        # Speed tracking
+        # Speed tracking with moving window
         processing_times = []
+        window_size = 50  # Number of images for moving average
         
-        # Create progress bar with proper initial state and ETA
+        # Create progress bar with detailed stats
         pbar = tqdm(
             total=total_images,
             desc="Precomputing latents",
             unit="img",
             initial=already_cached,
-            postfix={
-                'processed': processed_images,
-                'skipped': skipped_images,
-                'cached': already_cached,
-                'total': total_images,
-                'remaining': remaining_images,
-                'speed': '0.00 img/s',
-                'eta': 'calculating...',
-                'success_rate': f"{(processed_images/total_images)*100:.1f}%"
-            }
+            dynamic_ncols=True,  # Better terminal handling
         )
         
-        # Log initial state
-        logger.info(
-            f"Starting latent computation:\n"
-            f"- Total images: {total_images}\n"
-            f"- Already cached: {already_cached}\n"
-            f"- Remaining: {remaining_images}"
-        )
-        
-        if already_cached > 0:
-            cache_stats = self.cache_manager.get_cache_stats()
-            logger.info(
-                f"Cache status:\n"
-                f"- Cached entries: {cache_stats['total_entries']}\n"
-                f"- Cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
-            )
-        
+        def update_progress_stats():
+            """Calculate and update progress statistics."""
+            # Calculate speed using moving window
+            if processing_times:
+                window = processing_times[-window_size:]
+                current_speed = len(window) / sum(window) if window else 0
+                
+                # Calculate ETA based on recent speed
+                remaining = total_images - (processed_images + failed_images)
+                eta_seconds = remaining / current_speed if current_speed > 0 else 0
+                
+                # Calculate success rate
+                success_rate = (processed_images / (processed_images + failed_images)) * 100 if (processed_images + failed_images) > 0 else 100
+                
+                return {
+                    'processed': processed_images,
+                    'failed': failed_images,
+                    'cached': already_cached,
+                    'remaining': remaining,
+                    'speed': f'{current_speed:.2f} img/s',
+                    'eta': time.strftime('%H:%M:%S', time.gmtime(eta_seconds)),
+                    'success': f'{success_rate:.1f}%'
+                }
+            return {}
+
         # Process only uncached images
         uncached_indices = [
             i for i, path in enumerate(self.image_paths)
@@ -252,6 +253,7 @@ class AspectBucketDataset(Dataset):
             try:
                 end_idx = min(start_idx + batch_size, len(uncached_indices))
                 batch_indices = uncached_indices[start_idx:end_idx]
+                batch_size_actual = len(batch_indices)
                 
                 # Process batch
                 batch_paths = [self.image_paths[i] for i in batch_indices]
@@ -263,12 +265,17 @@ class AspectBucketDataset(Dataset):
                     config=self.config
                 )
                 
-                # Cache results
-                if self.config.global_config.cache.use_cache:
+                # Track successful and failed items
+                successful_items = [item for item in processed_items if item is not None]
+                failed_in_batch = batch_size_actual - len(successful_items)
+                
+                # Cache successful results
+                if self.config.global_config.cache.use_cache and successful_items:
                     batch_tensors = []
                     batch_metadata = []
+                    valid_paths = []
                     
-                    for processed, caption in zip(processed_items, batch_captions):
+                    for processed, caption, path in zip(processed_items, batch_captions, batch_paths):
                         if processed is not None:
                             batch_tensors.append({
                                 "pixel_values": processed["pixel_values"],
@@ -281,71 +288,43 @@ class AspectBucketDataset(Dataset):
                                 "target_size": processed["target_size"],
                                 "text": caption
                             })
+                            valid_paths.append(path)
                     
-                    # Batch save with async IO
-                    cache_results = self.cache_manager.save_latents_batch(
-                        batch_tensors=batch_tensors,
-                        original_paths=batch_paths,
-                        batch_metadata=batch_metadata
-                    )
-                    
-                    # Update counters
-                    new_processed = sum(1 for r in cache_results if r)
-                    new_skipped = sum(1 for r in cache_results if not r)
-                    processed_images += new_processed
-                    skipped_images += new_skipped
-                    
-                    # Calculate speed metrics
-                    batch_time = time.time() - batch_start_time
-                    processing_times.append(batch_time / len(batch_indices))  # Time per image
-                    
-                    # Calculate moving average speed (last 5 batches)
-                    recent_speed = 1.0 / (sum(processing_times[-5:]) / len(processing_times[-5:]))
-                    
-                    # Calculate ETA
-                    remaining = total_images - (processed_images + skipped_images + already_cached)
-                    eta_seconds = remaining / recent_speed if recent_speed > 0 else 0
-                    eta_str = time.strftime('%H:%M:%S', time.gmtime(eta_seconds))
-                    
-                    # Update progress bar with complete stats
-                    pbar.update(len(batch_indices))
-                    pbar.set_postfix({
-                        'processed': processed_images,
-                        'skipped': skipped_images,
-                        'cached': already_cached,
-                        'speed': f'{recent_speed:.2f} img/s',
-                        'eta': eta_str,
-                        'success_rate': f"{((processed_images + already_cached)/total_images)*100:.1f}%"
-                    })
+                    # Batch save
+                    if batch_tensors:
+                        cache_results = self.cache_manager.save_latents_batch(
+                            batch_tensors=batch_tensors,
+                            original_paths=valid_paths,
+                            batch_metadata=batch_metadata
+                        )
+                        
+                        # Update counters
+                        successful_saves = sum(1 for r in cache_results if r)
+                        failed_saves = sum(1 for r in cache_results if not r)
+                        
+                        processed_images += successful_saves
+                        failed_images += failed_saves + failed_in_batch
+                        
+                        # Track processing time for successful items
+                        batch_time = time.time() - batch_start_time
+                        processing_times.extend([batch_time / successful_saves] * successful_saves)
                 
-                # Periodic progress save with speed metrics
-                if processed_images % (batch_size * 4) == 0:
-                    elapsed_time = time.time() - start_time
-                    avg_speed = processed_images / elapsed_time
-                    cache_stats = self.cache_manager.get_cache_stats()
-                    logger.info(
-                        f"Progress update:\n"
-                        f"- Processed: {processed_images}\n"
-                        f"- Skipped: {skipped_images}\n"
-                        f"- Cached: {already_cached}\n"
-                        f"- Average speed: {avg_speed:.2f} img/s\n"
-                        f"- Current speed: {recent_speed:.2f} img/s\n"
-                        f"- Elapsed time: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}\n"
-                        f"- Estimated remaining: {eta_str}\n"
-                        f"- Cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
-                    )
+                # Update progress bar
+                pbar.update(batch_size_actual)
+                pbar.set_postfix(update_progress_stats())
                 
             except Exception as e:
                 logger.error(f"Failed to process batch at index {start_idx}", exc_info=True)
-                skipped_images += len(batch_indices)
-                pbar.update(len(batch_indices))
+                failed_images += batch_size_actual
+                pbar.update(batch_size_actual)
                 continue
-                
+        
         pbar.close()
         
-        # Final statistics with timing information
+        # Final statistics
         total_time = time.time() - start_time
         avg_speed = processed_images / total_time if total_time > 0 else 0
+        success_rate = (processed_images / total_images) * 100 if total_images > 0 else 0
         cache_stats = self.cache_manager.get_cache_stats()
         
         logger.info(
@@ -353,11 +332,10 @@ class AspectBucketDataset(Dataset):
             f"- Total images: {total_images}\n"
             f"- Successfully processed: {processed_images}\n"
             f"- Previously cached: {already_cached}\n"
-            f"- Skipped/failed: {skipped_images}\n"
+            f"- Failed: {failed_images}\n"
             f"- Total time: {time.strftime('%H:%M:%S', time.gmtime(total_time))}\n"
             f"- Average speed: {avg_speed:.2f} img/s\n"
-            f"- Average time per image: {(total_time/processed_images):.2f}s\n"
-            f"- Success rate: {((processed_images + already_cached)/total_images)*100:.1f}%\n"
+            f"- Success rate: {success_rate:.1f}%\n"
             f"- Final cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
         )
 
