@@ -191,8 +191,9 @@ class AspectBucketDataset(Dataset):
         self.bucket_indices = self.preprocessing_pipeline._assign_bucket_indices(self.image_paths)
 
     def _precompute_latents(self) -> None:
-        """Precompute and cache latents for all images with resume support."""
+        """Precompute and cache latents with speed tracking and time estimates."""
         total_images = len(self)
+        start_time = time.time()
         
         # Get cache status for all images
         cached_status = self.preprocessing_pipeline._get_cached_status(self.image_paths)
@@ -201,23 +202,44 @@ class AspectBucketDataset(Dataset):
         remaining_images = total_images - already_cached
         skipped_images = 0
         processed_images = already_cached
-        batch_size = 32
+        batch_size = 64
         
-        logger.info(f"Found {already_cached} previously cached images")
+        # Speed tracking
+        processing_times = []
         
-        # Create progress bar for remaining images
+        # Create progress bar with proper initial state and ETA
         pbar = tqdm(
-            total=remaining_images,
+            total=total_images,
             desc="Precomputing latents",
             unit="img",
-            initial=already_cached,  # Start from previously cached count
+            initial=already_cached,
             postfix={
                 'processed': processed_images,
                 'skipped': skipped_images,
                 'cached': already_cached,
+                'total': total_images,
+                'remaining': remaining_images,
+                'speed': '0.00 img/s',
+                'eta': 'calculating...',
                 'success_rate': f"{(processed_images/total_images)*100:.1f}%"
             }
         )
+        
+        # Log initial state
+        logger.info(
+            f"Starting latent computation:\n"
+            f"- Total images: {total_images}\n"
+            f"- Already cached: {already_cached}\n"
+            f"- Remaining: {remaining_images}"
+        )
+        
+        if already_cached > 0:
+            cache_stats = self.cache_manager.get_cache_stats()
+            logger.info(
+                f"Cache status:\n"
+                f"- Cached entries: {cache_stats['total_entries']}\n"
+                f"- Cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
+            )
         
         # Process only uncached images
         uncached_indices = [
@@ -226,6 +248,7 @@ class AspectBucketDataset(Dataset):
         ]
         
         for start_idx in range(0, len(uncached_indices), batch_size):
+            batch_start_time = time.time()
             try:
                 end_idx = min(start_idx + batch_size, len(uncached_indices))
                 batch_indices = uncached_indices[start_idx:end_idx]
@@ -242,62 +265,100 @@ class AspectBucketDataset(Dataset):
                 
                 # Cache results
                 if self.config.global_config.cache.use_cache:
-                    for path, processed, caption in zip(batch_paths, processed_items, batch_captions):
-                        if processed is not None:
-                            cache_success = self.cache_manager.save_latents(
-                                tensors={
-                                    "pixel_values": processed["pixel_values"],
-                                    "prompt_embeds": processed["prompt_embeds"],
-                                    "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
-                                },
-                                original_path=path,
-                                metadata={
-                                    "original_size": processed["original_size"],
-                                    "crop_coords": processed["crop_coords"],
-                                    "target_size": processed["target_size"],
-                                    "text": caption
-                                }
-                            )
-                            
-                            if cache_success:
-                                processed_images += 1
-                            else:
-                                skipped_images += 1
-                        else:
-                            skipped_images += 1
-                            
-                        pbar.update(1)
-                        pbar.set_postfix({
-                            'processed': processed_images,
-                            'skipped': skipped_images,
-                            'cached': already_cached,
-                            'success_rate': f"{(processed_images/total_images)*100:.1f}%"
-                        })
-                
-                # Periodic CUDA sync
-                if torch.cuda.is_available() and (start_idx + batch_size) % (batch_size * 4) == 0:
-                    torch.cuda.synchronize()
+                    batch_tensors = []
+                    batch_metadata = []
                     
+                    for processed, caption in zip(processed_items, batch_captions):
+                        if processed is not None:
+                            batch_tensors.append({
+                                "pixel_values": processed["pixel_values"],
+                                "prompt_embeds": processed["prompt_embeds"],
+                                "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
+                            })
+                            batch_metadata.append({
+                                "original_size": processed["original_size"],
+                                "crop_coords": processed["crop_coords"],
+                                "target_size": processed["target_size"],
+                                "text": caption
+                            })
+                    
+                    # Batch save with async IO
+                    cache_results = self.cache_manager.save_latents_batch(
+                        batch_tensors=batch_tensors,
+                        original_paths=batch_paths,
+                        batch_metadata=batch_metadata
+                    )
+                    
+                    # Update counters
+                    new_processed = sum(1 for r in cache_results if r)
+                    new_skipped = sum(1 for r in cache_results if not r)
+                    processed_images += new_processed
+                    skipped_images += new_skipped
+                    
+                    # Calculate speed metrics
+                    batch_time = time.time() - batch_start_time
+                    processing_times.append(batch_time / len(batch_indices))  # Time per image
+                    
+                    # Calculate moving average speed (last 5 batches)
+                    recent_speed = 1.0 / (sum(processing_times[-5:]) / len(processing_times[-5:]))
+                    
+                    # Calculate ETA
+                    remaining = total_images - (processed_images + skipped_images + already_cached)
+                    eta_seconds = remaining / recent_speed if recent_speed > 0 else 0
+                    eta_str = time.strftime('%H:%M:%S', time.gmtime(eta_seconds))
+                    
+                    # Update progress bar with complete stats
+                    pbar.update(len(batch_indices))
+                    pbar.set_postfix({
+                        'processed': processed_images,
+                        'skipped': skipped_images,
+                        'cached': already_cached,
+                        'speed': f'{recent_speed:.2f} img/s',
+                        'eta': eta_str,
+                        'success_rate': f"{((processed_images + already_cached)/total_images)*100:.1f}%"
+                    })
+                
+                # Periodic progress save with speed metrics
+                if processed_images % (batch_size * 4) == 0:
+                    elapsed_time = time.time() - start_time
+                    avg_speed = processed_images / elapsed_time
+                    cache_stats = self.cache_manager.get_cache_stats()
+                    logger.info(
+                        f"Progress update:\n"
+                        f"- Processed: {processed_images}\n"
+                        f"- Skipped: {skipped_images}\n"
+                        f"- Cached: {already_cached}\n"
+                        f"- Average speed: {avg_speed:.2f} img/s\n"
+                        f"- Current speed: {recent_speed:.2f} img/s\n"
+                        f"- Elapsed time: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}\n"
+                        f"- Estimated remaining: {eta_str}\n"
+                        f"- Cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
+                    )
+                
             except Exception as e:
                 logger.error(f"Failed to process batch at index {start_idx}", exc_info=True)
                 skipped_images += len(batch_indices)
                 pbar.update(len(batch_indices))
-                pbar.set_postfix({
-                    'processed': processed_images,
-                    'skipped': skipped_images,
-                    'success_rate': f"{(processed_images / (processed_images + skipped_images) * 100):.1f}%"
-                })
                 continue
-        
+                
         pbar.close()
         
-        # Log final statistics including previously cached
-        cache_stats = self.cache_manager.get_cache_stats() if self.cache_manager else {}
+        # Final statistics with timing information
+        total_time = time.time() - start_time
+        avg_speed = processed_images / total_time if total_time > 0 else 0
+        cache_stats = self.cache_manager.get_cache_stats()
+        
         logger.info(
-            f"Precomputing complete: {processed_images}/{total_images} images processed successfully "
-            f"({skipped_images} skipped, {already_cached} previously cached) - "
-            f"Success rate: {(processed_images/total_images)*100:.1f}%\n"
-            f"Cache stats: {cache_stats}"
+            f"Latent computation complete:\n"
+            f"- Total images: {total_images}\n"
+            f"- Successfully processed: {processed_images}\n"
+            f"- Previously cached: {already_cached}\n"
+            f"- Skipped/failed: {skipped_images}\n"
+            f"- Total time: {time.strftime('%H:%M:%S', time.gmtime(total_time))}\n"
+            f"- Average speed: {avg_speed:.2f} img/s\n"
+            f"- Average time per image: {(total_time/processed_images):.2f}s\n"
+            f"- Success rate: {((processed_images + already_cached)/total_images)*100:.1f}%\n"
+            f"- Final cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
         )
 
     def __len__(self) -> int:

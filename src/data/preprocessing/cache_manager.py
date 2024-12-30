@@ -316,3 +316,61 @@ class CacheManager:
             "last_updated": self.cache_index["last_updated"],
             "last_cleanup": self.cache_index["stats"]["last_cleanup"]
         }
+
+    def save_latents_batch(
+        self,
+        batch_tensors: List[Dict[str, torch.Tensor]],
+        original_paths: List[Union[str, Path]],
+        batch_metadata: List[Dict[str, Any]]
+    ) -> List[bool]:
+        """Batch save latents with async IO."""
+        try:
+            import concurrent.futures
+            import asyncio
+            
+            results = []
+            
+            # Prepare all CPU transfers in parallel
+            cpu_tensors = [{
+                k: v.cpu() for k, v in tensors.items()
+            } for tensors in batch_tensors]
+            
+            # Async save operations
+            async def save_batch():
+                async def save_single(tensors, path, metadata, idx):
+                    try:
+                        cache_key = self.get_cache_key(path)
+                        tensors_path = self.latents_dir / f"{cache_key}.pt"
+                        metadata_path = self.metadata_dir / f"{cache_key}.json"
+                        
+                        # Use ThreadPoolExecutor for IO operations
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            # Save tensors and metadata in parallel
+                            await asyncio.gather(
+                                asyncio.get_event_loop().run_in_executor(
+                                    pool, torch.save, tensors, tensors_path
+                                ),
+                                asyncio.get_event_loop().run_in_executor(
+                                    pool, 
+                                    lambda: json.dump(metadata, open(metadata_path, 'w'), indent=2)
+                                )
+                            )
+                        return True
+                    except Exception as e:
+                        logger.error(f"Failed to save cache entry: {e}")
+                        return False
+                
+                # Create tasks for all items in batch
+                tasks = [
+                    save_single(t, p, m, i) 
+                    for i, (t, p, m) in enumerate(zip(cpu_tensors, original_paths, batch_metadata))
+                ]
+                return await asyncio.gather(*tasks)
+            
+            # Run async batch save
+            results = asyncio.run(save_batch())
+            return results
+            
+        except Exception as e:
+            logger.error(f"Batch save failed: {e}")
+            return [False] * len(batch_tensors)
