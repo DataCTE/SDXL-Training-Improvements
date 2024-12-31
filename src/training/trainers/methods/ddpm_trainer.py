@@ -318,7 +318,7 @@ class DDPMTrainer(SDXLTrainer):
             
             # Extract latents and embeddings directly from batch
             # These should already be cached and loaded by the dataloader
-            latents = batch["latents"].to(device=self.device, dtype=model_dtype)
+            latents = batch["pixel_values"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             

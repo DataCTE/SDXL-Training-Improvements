@@ -132,7 +132,7 @@ class AspectBucketDataset(Dataset):
             
             # Return batch with all necessary components
             return {
-                "latents": cached_data["pixel_values"],
+                "pixel_values": cached_data["pixel_values"],
                 "prompt_embeds": cached_data["prompt_embeds"],
                 "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
                 "text": caption,  # Use the actual caption
