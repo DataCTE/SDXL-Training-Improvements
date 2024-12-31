@@ -2,17 +2,6 @@
 import argparse
 import os
 import time
-
-# Disable TorchDynamo in DataLoader workers
-os.environ['TORCHDYNAMO_DISABLE'] = '1'
-import multiprocessing as mp
-import torch.cuda
-import logging
-import sys
-import threading
-import traceback
-from contextlib import contextmanager
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.distributed import init_process_group
@@ -60,6 +49,12 @@ from src.training.optimizers import (
     AdamWScheduleFreeKahan,
     SOAP
 )
+import multiprocessing as mp
+import traceback
+import sys
+import logging
+from contextlib import contextmanager
+from pathlib import Path
 
 logger = get_logger(__name__)
 
@@ -408,10 +403,10 @@ def check_system_limits():
         # Try to increase soft limit to hard limit
         resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
         
-        print(f"Increased file limit from {soft} to {hard}")  # Use print until logger is properly initialized
+        logger.info(f"Increased file limit from {soft} to {hard}")
     except Exception as e:
-        print(f"Could not increase file limit: {e}")  # Use print until logger is properly initialized
-        print("You may need to increase system file limits (ulimit -n)")
+        logger.warning(f"Could not increase file limit: {e}")
+        logger.warning("You may need to increase system file limits (ulimit -n)")
 
 def worker_init_fn(
     worker_id: int, 
@@ -481,6 +476,48 @@ def setup_device(config: Config) -> torch.device:
         )
         raise
 
+def initialize_logging(config: Config) -> Tuple[logging.Logger, TensorLogger]:
+    """Initialize logging system with proper error handling.
+    
+    Args:
+        config: Configuration object containing logging settings
+        
+    Returns:
+        Tuple of (main logger, tensor logger)
+        
+    Raises:
+        RuntimeError: If logger initialization fails
+    """
+    try:
+        # Create log directory if it doesn't exist
+        log_dir = Path(config.global_config.logging.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Setup logging
+        logger, tensor_logger = setup_logging(
+            config=config.global_config.logging,
+            log_dir=str(log_dir),
+            level=config.global_config.logging.file_level,
+            filename=config.global_config.logging.filename,
+            module_name="sdxl_training",
+            capture_warnings=config.global_config.logging.capture_warnings,
+            console_level=config.global_config.logging.console_level
+        )
+        
+        if not logger:
+            raise RuntimeError("Logger initialization returned None")
+            
+        logger.info("Logger initialized successfully")
+        logger.info(f"Loaded configuration from {config.config_path}")
+        
+        return logger, tensor_logger
+        
+    except Exception as e:
+        # Use print since logger isn't available yet
+        print(f"Failed to initialize logging system: {str(e)}")
+        print(f"Stack trace:\n{traceback.format_exc()}")
+        raise RuntimeError(f"Failed to initialize logging: {str(e)}") from e
+
 def main():
     """Main training entry point."""
     print("Starting SDXL training script...")
@@ -496,28 +533,10 @@ def main():
         args = parse_args()
         config = Config.from_yaml(args.config)
         
-        # Create log directory if it doesn't exist
-        log_dir = Path(config.global_config.logging.log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
+        # Initialize logging system
+        logger, tensor_logger = initialize_logging(config)
         
-        # Setup logging using the existing setup_logging function
-        logger, tensor_logger = setup_logging(
-            config=config.global_config.logging,
-            log_dir=str(log_dir),
-            level=config.global_config.logging.file_level,
-            filename=config.global_config.logging.filename,
-            module_name="sdxl_training",
-            capture_warnings=config.global_config.logging.capture_warnings,
-            console_level=config.global_config.logging.console_level
-        )
-        
-        if not logger:
-            raise RuntimeError("Failed to initialize logger")
-            
-        logger.info("Logger initialized successfully")
-        logger.info(f"Loaded configuration from {args.config}")
-        
-        # Check system limits using print for reliability
+        # Check system limits
         check_system_limits()
         
         with setup_environment(args):
