@@ -2,6 +2,17 @@
 import argparse
 import os
 import time
+
+# Disable TorchDynamo in DataLoader workers
+os.environ['TORCHDYNAMO_DISABLE'] = '1'
+import multiprocessing as mp
+import torch.cuda
+import logging
+import sys
+import threading
+import traceback
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.distributed import init_process_group
@@ -34,7 +45,6 @@ from src.training.trainers import (
     BaseRouter,
     DDPMTrainer,
     FlowMatchingTrainer,
-    SDXLTrainer,
     save_checkpoint
 )
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
@@ -49,12 +59,6 @@ from src.training.optimizers import (
     AdamWScheduleFreeKahan,
     SOAP
 )
-import multiprocessing as mp
-import traceback
-import sys
-import logging
-from contextlib import contextmanager
-from pathlib import Path
 
 logger = get_logger(__name__)
 
@@ -82,6 +86,35 @@ def setup_environment(args: argparse.Namespace):
     finally:
         cleanup_distributed()
         torch_sync()
+
+def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
+    """Setup device and logging configuration."""
+    # Create main logger with enhanced formatting
+    logger = create_enhanced_logger(
+        "main",
+        level=config.global_config.logging.console_level,
+        log_file=Path(config.global_config.logging.log_dir) / config.global_config.logging.filename,
+        capture_warnings=config.global_config.logging.capture_warnings
+    )
+    logger.debug("Logging system initialized")
+    
+    # Set up device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    if is_main_process():
+        logger.info(f"Using device: {device}")
+        if device.type == "cuda":
+            logger.info(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+            logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            
+            # Set mixed precision if enabled
+            if config.training.mixed_precision != "no":
+                logger.info(f"Using mixed precision: {config.training.mixed_precision}")
+                
+            if config.training.enable_xformers:
+                logger.info("xFormers optimization enabled")
+
+    return device
 
 def setup_model(config: Config, device: torch.device) -> StableDiffusionXL:
     """Initialize model with proper error handling."""
@@ -204,15 +237,21 @@ def create_trainer(
 ) -> BaseRouter:
     """Create appropriate trainer based on config."""
     try:
-        # Create trainer through SDXLTrainer for proper delegation
-        trainer = SDXLTrainer(
+        trainer_cls = None
+        if config.training.method == "ddpm":
+            trainer_cls = DDPMTrainer
+        elif config.training.method == "flow_matching":
+            trainer_cls = FlowMatchingTrainer
+        else:
+            raise ValueError(f"Unknown training method: {config.training.method}")
+            
+        trainer = trainer_cls(
             model=model,
             optimizer=optimizer,
             train_dataloader=train_dataloader,
             device=device,
             wandb_logger=wandb_logger,
             config=config,
-            training_method=config.training.method,  # Pass method to SDXLTrainer
             # Pass additional training configuration
             mixed_precision=config.training.mixed_precision,
             gradient_accumulation_steps=config.training.gradient_accumulation_steps,
@@ -220,7 +259,7 @@ def create_trainer(
             enable_xformers=config.training.enable_xformers
         )
         
-        logger.info(f"Created trainer for method: {config.training.method}")
+        logger.info(f"Created {trainer_cls.__name__} trainer")
         return trainer
         
     except Exception as e:
@@ -302,95 +341,19 @@ def setup_training(
         # Initialize wandb logger if enabled
         wandb_logger = None
         if config.global_config.logging.use_wandb and is_main_process():
-            # Create a descriptive run name based on training method
-            method_specific_info = {
-                "ddpm": f"-{config.training.prediction_type}-{config.noise_scheduler.num_train_timesteps}steps",
-                "flow_matching": "-flow"
-            }.get(config.training.method, "")
-            
-            run_name = (
-                f"{config.model.model_type}"
-                f"-{config.training.method}"
-                f"{method_specific_info}"
-                f"-{config.optimizer.optimizer_type}"
-                f"-lr{config.optimizer.learning_rate:.2e}"
-                f"-bs{config.training.batch_size}"
-                f"-{time.strftime('%Y%m%d-%H%M%S')}"
-            )
-            
-            # Enhanced tags based on training method
-            method_specific_tags = {
-                "ddpm": [
-                    f"pred_{config.training.prediction_type}",
-                    f"steps_{config.noise_scheduler.num_train_timesteps}"
-                ],
-                "flow_matching": ["flow_matching"]
-            }.get(config.training.method, [])
-            
             wandb_logger = WandbLogger(
                 project=config.global_config.logging.wandb_project,
                 entity=config.global_config.logging.wandb_entity,
-                name=run_name,
-                config=config.to_dict(),
-                tags=[
-                    config.model.model_type,
-                    config.training.method,
-                    config.optimizer.optimizer_type,
-                    f"bs{config.training.batch_size}",
-                    config.training.mixed_precision,
-                    *method_specific_tags
-                ]
+                config=config.to_dict()
             )
-            
-            # Log wandb URL to terminal
-            if wandb_logger.run is not None:
-                logger.info(
-                    f"\nWandB run started: {wandb_logger.run.url}\n"
-                    f"View live training progress at the URL above ☝️"
-                )
-            
-            # Log additional method-specific configuration
-            method_config = {
-                "training_method": config.training.method,
-                "optimizer": {
-                    "type": config.optimizer.optimizer_type,
-                    "learning_rate": config.optimizer.learning_rate,
-                    "weight_decay": config.optimizer.weight_decay,
-                    "beta1": config.optimizer.beta1,
-                    "beta2": config.optimizer.beta2,
-                    "epsilon": config.optimizer.epsilon
-                },
-                "batch_size": config.training.batch_size,
-                "mixed_precision": config.training.mixed_precision,
-                "gradient_clipping": config.training.max_grad_norm
-            }
-            
-            # Add method-specific config
-            if config.training.method == "ddpm":
-                method_config.update({
-                    "prediction_type": config.training.prediction_type,
-                    "num_train_timesteps": config.training.method_config.scheduler.num_train_timesteps,
-                    "beta_schedule": config.training.method_config.scheduler.beta_schedule,
-                    "rescale_betas_zero_snr": config.training.method_config.scheduler.rescale_betas_zero_snr
-                })
-            elif config.training.method == "flow_matching":
-                method_config.update({
-                    "flow_type": "optimal_transport"
-                })
-                
-            wandb_logger.log_hyperparams(method_config)
+            # Print wandb URL to console
+            if wandb_logger.run:
+                logger.info(f"\nWeights & Biases run: {wandb_logger.run.get_url()}\n")
 
         return train_dataloader, optimizer, wandb_logger
-
+        
     except Exception as e:
-        logger.error(
-            "Failed to setup training",
-            exc_info=True,
-            extra={
-                'config': config.to_dict(),
-                'error': str(e)
-            }
-        )
+        logger.error("Failed to setup training", exc_info=True)
         raise
 
 def check_system_limits():
@@ -450,111 +413,26 @@ def worker_init_fn(
         logger.error(f"Failed to initialize worker {worker_id}: {str(e)}", exc_info=True)
         raise
 
-def setup_device(config: Config) -> torch.device:
-    """Setup device with proper error handling."""
-    try:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        if device.type == "cuda":
-            # Set device index if using distributed training
-            if torch.distributed.is_initialized():
-                local_rank = torch.distributed.get_rank()
-                device = torch.device(f"cuda:{local_rank}")
-                torch.cuda.set_device(device)
-        
-        return device
-        
-    except Exception as e:
-        logger.error(
-            "Failed to setup device",
-            exc_info=True,
-            extra={
-                'cuda_available': torch.cuda.is_available(),
-                'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-                'error': str(e)
-            }
-        )
-        raise
-
-def initialize_logging(config: Config) -> Tuple[logging.Logger, TensorLogger]:
-    """Initialize logging system with proper error handling.
-    
-    Args:
-        config: Configuration object containing logging settings
-        
-    Returns:
-        Tuple of (main logger, tensor logger)
-        
-    Raises:
-        RuntimeError: If logger initialization fails
-    """
-    try:
-        # Create log directory if it doesn't exist
-        log_dir = Path(config.global_config.logging.log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Setup logging
-        logger, tensor_logger = setup_logging(
-            config=config.global_config.logging,
-            log_dir=str(log_dir),
-            level=config.global_config.logging.file_level,
-            filename=config.global_config.logging.filename,
-            module_name="sdxl_training",
-            capture_warnings=config.global_config.logging.capture_warnings,
-            console_level=config.global_config.logging.console_level
-        )
-        
-        if not logger:
-            raise RuntimeError("Logger initialization returned None")
-            
-        logger.info("Logger initialized successfully")
-        logger.info(f"Loaded configuration from {config.config_path}")
-        
-        return logger, tensor_logger
-        
-    except Exception as e:
-        # Use print since logger isn't available yet
-        print(f"Failed to initialize logging system: {str(e)}")
-        print(f"Stack trace:\n{traceback.format_exc()}")
-        raise RuntimeError(f"Failed to initialize logging: {str(e)}") from e
-
 def main():
     """Main training entry point."""
     print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
-    
-    # Initialize these before try block so they're available in error handling
-    device = None
-    logger = None
-    config = None
     
     try:
         # Parse args and load config first
         args = parse_args()
         config = Config.from_yaml(args.config)
         
-        # Initialize logging system
-        logger, tensor_logger = initialize_logging(config)
+        # Setup logging
+        logger, tensor_logger = setup_logging(config.global_config.logging)
         
         # Check system limits
         check_system_limits()
         
+        device = None
+        
         with setup_environment(args):
-            # Setup device
-            device = setup_device(config)
-            
-            if torch.cuda.is_available():
-                logger.info(f"Using CUDA device: {torch.cuda.get_device_name()}")
-                logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
-                
-                # Log mixed precision settings
-                if config.training.mixed_precision != "no":
-                    logger.info(f"Using mixed precision: {config.training.mixed_precision}")
-                if config.training.enable_xformers:
-                    logger.info("xFormers optimization enabled")
-            else:
-                logger.info("Using CPU device")
-            
+            device = setup_device_and_logging(config)
             model = setup_model(config, device)
             
             if model is None:
@@ -571,8 +449,7 @@ def main():
                 image_paths=image_paths,
                 captions=captions
             )
-            
-            # Create trainer through SDXLTrainer for proper delegation
+
             trainer = create_trainer(
                 config=config,
                 model=model,
@@ -582,24 +459,13 @@ def main():
                 wandb_logger=wandb_logger
             )
             
-            # Log training start
-            total_steps = len(train_dataloader) * config.training.num_epochs
-            logger.info(
-                f"Starting training with {config.training.method} method:\n"
-                f"- Total epochs: {config.training.num_epochs}\n"
-                f"- Steps per epoch: {len(train_dataloader)}\n"
-                f"- Total steps: {total_steps}\n"
-                f"- Batch size: {config.training.batch_size}\n"
-                f"- Device: {device}"
-            )
-            
-            # Execute training
+            logger.info(f"Starting training with {config.training.method} method for {config.training.num_epochs} epochs...")
             trainer.train(num_epochs=config.training.num_epochs)
             
             if is_main_process():
                 logger.info("Training complete!")
+                # Save final model checkpoint
                 if config.training.save_final_model:
-                    logger.info("Saving final checkpoint...")
                     save_checkpoint(
                         model=model,
                         optimizer=optimizer,
@@ -614,31 +480,16 @@ def main():
             'device': str(device) if device is not None else 'unknown',
             'cuda_available': torch.cuda.is_available(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            'config_file': args.config if 'args' in locals() else 'unknown',
-            'config': config.to_dict() if config else None,
             'error': str(e),
             'stack_trace': traceback.format_exc()
         }
         
-        # Always use print for error logging to ensure output
-        print("\nERROR: Training failed", file=sys.stderr)
-        print(f"Error context: {error_context}", file=sys.stderr)
-        print("\nFull traceback:", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
-        
-        # Try to use logger if available
-        if logger and hasattr(logger, 'error'):
-            try:
-                logger.error(
-                    "Training failed",
-                    exc_info=True,
-                    extra=error_context
-                )
-            except:
-                pass  # Ignore logger errors in error handling
-                
+        logger.error(
+            "Training failed",
+            exc_info=True,
+            extra=error_context
+        )
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-
