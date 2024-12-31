@@ -341,15 +341,30 @@ def setup_training(
         # Initialize wandb logger if enabled
         wandb_logger = None
         if config.global_config.logging.use_wandb and is_main_process():
-            # Create a descriptive run name
+            # Create a descriptive run name based on training method
+            method_specific_info = {
+                "ddpm": f"-{config.training.prediction_type}-{config.noise_scheduler.num_train_timesteps}steps",
+                "flow_matching": "-flow"
+            }.get(config.training.method, "")
+            
             run_name = (
                 f"{config.model.model_type}"
                 f"-{config.training.method}"
+                f"{method_specific_info}"
                 f"-{config.optimizer.optimizer_type}"
                 f"-lr{config.optimizer.learning_rate:.2e}"
                 f"-bs{config.training.batch_size}"
                 f"-{time.strftime('%Y%m%d-%H%M%S')}"
             )
+            
+            # Enhanced tags based on training method
+            method_specific_tags = {
+                "ddpm": [
+                    f"pred_{config.training.prediction_type}",
+                    f"steps_{config.noise_scheduler.num_train_timesteps}"
+                ],
+                "flow_matching": ["flow_matching"]
+            }.get(config.training.method, [])
             
             wandb_logger = WandbLogger(
                 project=config.global_config.logging.wandb_project,
@@ -361,14 +376,52 @@ def setup_training(
                     config.training.method,
                     config.optimizer.optimizer_type,
                     f"bs{config.training.batch_size}",
-                    config.training.mixed_precision
+                    config.training.mixed_precision,
+                    *method_specific_tags
                 ]
             )
+            
+            # Log additional method-specific configuration
+            method_config = {
+                "training_method": config.training.method,
+                "optimizer": {
+                    "type": config.optimizer.optimizer_type,
+                    "learning_rate": config.optimizer.learning_rate,
+                    "weight_decay": config.optimizer.weight_decay,
+                    "beta1": config.optimizer.beta1,
+                    "beta2": config.optimizer.beta2,
+                    "epsilon": config.optimizer.epsilon
+                },
+                "batch_size": config.training.batch_size,
+                "mixed_precision": config.training.mixed_precision,
+                "gradient_clipping": config.training.max_grad_norm
+            }
+            
+            # Add method-specific config
+            if config.training.method == "ddpm":
+                method_config.update({
+                    "prediction_type": config.training.prediction_type,
+                    "num_train_timesteps": config.noise_scheduler.num_train_timesteps,
+                    "beta_schedule": config.noise_scheduler.beta_schedule
+                })
+            elif config.training.method == "flow_matching":
+                method_config.update({
+                    "flow_type": "optimal_transport"  # Add any flow-specific configs here
+                })
+                
+            wandb_logger.log_hyperparams(method_config)
 
         return train_dataloader, optimizer, wandb_logger
-        
+
     except Exception as e:
-        logger.error("Failed to setup training", exc_info=True)
+        logger.error(
+            "Failed to setup training",
+            exc_info=True,
+            extra={
+                'config': config.to_dict(),
+                'error': str(e)
+            }
+        )
         raise
 
 def check_system_limits():
