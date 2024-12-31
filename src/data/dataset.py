@@ -125,24 +125,51 @@ class AspectBucketDataset(Dataset):
             # Get cache key
             cache_key = self.cache_manager.get_cache_key(image_path)
             
-            # Load cached tensors
+            # Load cached tensors with better error handling
             cached_data = self.cache_manager.load_tensors(cache_key)
             if cached_data is None:
-                raise ValueError(f"No cached data found for key: {cache_key}")
-            
+                # If cache is invalid or missing, try to reprocess the image
+                processed = self.preprocessing_pipeline.process_single_image(
+                    image_path=image_path,
+                    caption=caption,
+                    config=self.config
+                )
+                
+                if processed is None:
+                    raise ValueError(f"Failed to process image: {image_path}")
+                    
+                # Cache the newly processed data
+                if self.config.global_config.cache.use_cache:
+                    tensors = {
+                        "pixel_values": processed["pixel_values"],
+                        "prompt_embeds": processed["prompt_embeds"],
+                        "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
+                    }
+                    metadata = {
+                        "original_size": processed["original_size"],
+                        "crop_coords": processed["crop_coords"],
+                        "target_size": processed["target_size"],
+                        "text": caption
+                    }
+                    self.cache_manager.save_latents(tensors, image_path, metadata)
+                
+                cached_data = tensors
+                
             # Return batch with all necessary components
             return {
                 "pixel_values": cached_data["pixel_values"],
                 "prompt_embeds": cached_data["prompt_embeds"],
                 "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
-                "text": caption,  # Use the actual caption
-                "original_size": cached_data["metadata"]["original_size"],
-                "target_size": cached_data["metadata"]["target_size"],
-                "crop_coords": cached_data["metadata"].get("crop_coords", (0, 0))
+                "text": caption,
+                "original_size": processed["original_size"] if 'processed' in locals() else cached_data["metadata"]["original_size"],
+                "target_size": processed["target_size"] if 'processed' in locals() else cached_data["metadata"]["target_size"],
+                "crop_coords": processed["crop_coords"] if 'processed' in locals() else cached_data["metadata"].get("crop_coords", (0, 0))
             }
+            
         except Exception as e:
-            logger.error(f"Error getting dataset item {idx}: {str(e)}")
-            raise
+            logger.error(f"Error getting dataset item {idx} for image {self.image_paths[idx]}: {str(e)}")
+            # Return None to allow the collate_fn to filter out failed items
+            return None
 
     def _setup_image_config(self):
         """Set up image configuration parameters."""

@@ -410,25 +410,68 @@ class CacheManager:
         
         return asyncio.run(save_batch())
 
-    def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, torch.Tensor]]:
-        """Load cached tensors with safe loading enabled."""
+    def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
+        """Load cached tensors with improved validation and error handling."""
         try:
             entry = self.cache_index["entries"].get(cache_key)
-            if not entry or not self._is_valid_cache(cache_key):
+            if not entry:
+                logger.debug(f"No cache entry found for key: {cache_key}")
                 return None
             
-            # Use weights_only=True for safer loading
-            tensors = torch.load(
-                entry["tensors_path"],
-                map_location=device,
-                weights_only=True  # Safe loading mode
-            )
+            # Validate cache files exist
+            tensor_path = Path(entry["tensors_path"])
+            metadata_path = Path(entry["metadata_path"])
             
-            return tensors
+            if not tensor_path.exists() or not metadata_path.exists():
+                logger.debug(f"Cache files missing for key: {cache_key}")
+                self._invalidate_cache_entry(cache_key)
+                return None
             
+            # Load tensors and metadata
+            device = device or self.device
+            try:
+                tensors = torch.load(
+                    tensor_path,
+                    map_location=device,
+                    weights_only=True
+                )
+                
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+                    
+                # Validate required tensor keys
+                required_keys = {"pixel_values", "prompt_embeds", "pooled_prompt_embeds"}
+                if not all(key in tensors for key in required_keys):
+                    logger.warning(f"Cache entry {cache_key} missing required tensor keys")
+                    self._invalidate_cache_entry(cache_key)
+                    return None
+                    
+                tensors["metadata"] = metadata
+                return tensors
+                
+            except (RuntimeError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load cache entry {cache_key}: {str(e)}")
+                self._invalidate_cache_entry(cache_key)
+                return None
+                
         except Exception as e:
-            logger.warning(f"Failed to load cached tensors for {cache_key}: {str(e)}")
+            logger.error(f"Unexpected error loading cache for {cache_key}: {str(e)}")
             return None
+        
+    def _invalidate_cache_entry(self, cache_key: str) -> None:
+        """Invalidate and clean up a cache entry."""
+        with self._lock:
+            if cache_key in self.cache_index["entries"]:
+                entry = self.cache_index["entries"][cache_key]
+                # Try to clean up files
+                try:
+                    Path(entry["tensors_path"]).unlink(missing_ok=True)
+                    Path(entry["metadata_path"]).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                # Remove from index
+                del self.cache_index["entries"][cache_key]
+                self._save_index()
 
     def save_tensors(self, tensors: Dict[str, torch.Tensor], cache_key: str) -> Tuple[bool, str, str]:
         """Save tensors with safe saving enabled."""
