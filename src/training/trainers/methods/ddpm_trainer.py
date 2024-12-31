@@ -3,6 +3,7 @@ import torch
 from typing import Dict, Any
 import torch.nn.functional as F
 from tqdm import tqdm
+from collections import defaultdict
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
@@ -45,17 +46,35 @@ class DDPMTrainer(SDXLTrainer):
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
-            desc="Training",
-            position=0,  # Ensure it's at the top
-            leave=True,  # Keep the progress bar after completion
-            ncols=100    # Fixed width for better formatting
+            desc=f"Training DDPM ({self.config.training.prediction_type})",
+            position=0,
+            leave=True,
+            ncols=100
         )
         
         try:
+            if is_main_process() and self.wandb_logger:
+                # Log initial model configuration
+                self.wandb_logger.log_model(
+                    model=self.model,
+                    optimizer=self.optimizer
+                )
+                
+                # Log training configuration
+                self.wandb_logger.log_hyperparams({
+                    'num_epochs': num_epochs,
+                    'total_steps': total_steps,
+                    'batch_size': self.config.training.batch_size,
+                    'learning_rate': self.config.optimizer.learning_rate,
+                    'prediction_type': self.config.training.prediction_type,
+                    'num_timesteps': self.noise_scheduler.config.num_train_timesteps
+                })
+            
             for epoch in range(num_epochs):
                 self.model.train()
                 epoch_loss = 0.0
                 num_steps = len(self.train_dataloader)
+                epoch_metrics = defaultdict(float)
                 
                 for step, batch in enumerate(self.train_dataloader):
                     # Zero gradients
@@ -66,13 +85,18 @@ class DDPMTrainer(SDXLTrainer):
                     loss = step_output["loss"]
                     metrics = step_output["metrics"]
                     
+                    # Update epoch metrics
+                    for k, v in metrics.items():
+                        epoch_metrics[k] += v
+                    
                     # Backward pass and optimization
                     loss.backward()
                     if self.config.training.max_grad_norm > 0:
-                        torch.nn.utils.clip_grad_norm_(
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(),
                             self.config.training.max_grad_norm
                         )
+                        metrics['grad_norm'] = grad_norm.item()
                     self.optimizer.step()
                     
                     # Update progress
@@ -87,7 +111,8 @@ class DDPMTrainer(SDXLTrainer):
                                 'step': f"{step + 1}/{num_steps}",
                                 'loss': f"{loss.item():.4f}",
                                 'avg_loss': f"{epoch_loss / (step + 1):.4f}",
-                                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}"
+                                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}",
+                                'pred_type': self.config.training.prediction_type
                             },
                             refresh=True
                         )
@@ -99,34 +124,50 @@ class DDPMTrainer(SDXLTrainer):
                                 'epoch': epoch + 1,
                                 'step': current_step,
                                 'global_step': current_step,
-                                **metrics
+                                'learning_rate': self.optimizer.param_groups[0]['lr'],
+                                **metrics,
+                                'gpu_memory_allocated': torch.cuda.memory_allocated() / 1024**2,
+                                'gpu_memory_reserved': torch.cuda.memory_reserved() / 1024**2
                             })
                         
                         # Print periodic updates to console
-                        if step % max(1, num_steps // 10) == 0:  # Log ~10 times per epoch
+                        if step % max(1, num_steps // 10) == 0:
                             logger.info(
                                 f"Epoch {epoch + 1}/{num_epochs} "
                                 f"[{step + 1}/{num_steps}] "
                                 f"Loss: {loss.item():.4f} "
-                                f"Avg Loss: {epoch_loss / (step + 1):.4f}"
+                                f"Avg Loss: {epoch_loss / (step + 1):.4f} "
+                                f"LR: {self.optimizer.param_groups[0]['lr']:.2e}"
                             )
                 
                 # Log epoch metrics
                 avg_epoch_loss = epoch_loss / num_steps
+                avg_epoch_metrics = {k: v / num_steps for k, v in epoch_metrics.items()}
+                
                 if is_main_process():
                     logger.info(
                         f"\nEpoch {epoch + 1}/{num_epochs} completed - "
-                        f"Average Loss: {avg_epoch_loss:.6f}\n"
+                        f"Average Loss: {avg_epoch_loss:.6f} "
+                        f"Average Timestep: {avg_epoch_metrics.get('timestep_mean', 0):.1f}\n"
                     )
                     if self.wandb_logger:
                         self.wandb_logger.log_metrics({
                             'epoch': epoch + 1,
                             'epoch_loss': avg_epoch_loss,
-                            'learning_rate': self.optimizer.param_groups[0]['lr']
+                            'epoch_learning_rate': self.optimizer.param_groups[0]['lr'],
+                            **{f"epoch_{k}": v for k, v in avg_epoch_metrics.items()}
                         })
         
         except Exception as e:
-            logger.error("Training loop failed", exc_info=True)
+            logger.error(
+                "Training loop failed",
+                exc_info=True,
+                extra={
+                    'epoch': epoch if 'epoch' in locals() else None,
+                    'step': step if 'step' in locals() else None,
+                    'error': str(e)
+                }
+            )
             raise
         finally:
             progress_bar.close()
