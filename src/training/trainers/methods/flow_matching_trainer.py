@@ -138,24 +138,23 @@ class FlowMatchingTrainer(SDXLTrainer):
     ) -> Dict[str, Tensor]:
         """Compute Flow Matching loss with new data format."""
         try:
-            # Get model input and conditioning
-            model_input = batch["model_input"].to(self.device)
-            prompt_embeds = batch["prompt_embeds"].to(self.device)
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device)
-            
-            # Convert model input to latents using VAE
-            with torch.no_grad():
-                latents = self.model.vae.encode(model_input).latent_dist.sample()
-                latents = latents * self.model.vae.config.scaling_factor
-            
-            # Apply tag weights if available
-            if "tag_weights" in batch:
-                tag_weights = batch["tag_weights"].to(latents.device)
-                latents = latents * tag_weights.view(-1, 1, 1, 1)
+            # Get model dtype from parameters
+            model_dtype = next(self.model.parameters()).dtype
+
+            # Get batch data and ensure consistent dtype
+            pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype)
+            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
+            original_sizes = batch["original_sizes"]
+            crop_top_lefts = batch["crop_top_lefts"]
+
+            # Convert images to latent space using VAE
+            latents = self.model.vae.encode(pixel_values).latent_dist.sample()
+            latents = latents * self.model.vae.config.scaling_factor
 
             # Use latents as target (x1)
             x1 = latents
-            
+
             # Sample time steps
             t = self.sample_logit_normal(
                 (x1.shape[0],),
@@ -163,46 +162,33 @@ class FlowMatchingTrainer(SDXLTrainer):
                 x1.dtype,
                 generator=generator
             )
-            
-            # Generate random starting point
-            x0 = torch.randn_like(x1)
-            
-            # Get time embeddings from metadata
-            add_time_ids = get_add_time_ids(
-                original_sizes=batch["original_sizes"],
-                crop_top_lefts=batch["crop_top_lefts"],
-                target_sizes=batch["target_size"],
+
+            # Generate random starting point with matching dtype
+            x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
+
+            # Prepare time embeddings for SDXL
+            time_ids = self._get_add_time_ids(
+                original_sizes=original_sizes,
+                crops_coords_top_left=crop_top_lefts,
+                target_size=(pixel_values.shape[-2], pixel_values.shape[-1]),
                 dtype=prompt_embeds.dtype,
-                device=x1.device
+                batch_size=x1.shape[0]
             )
-            
+            time_ids = time_ids.to(device=self.device)
+
             # Prepare conditioning embeddings
             cond_emb = {
                 "prompt_embeds": prompt_embeds,
                 "added_cond_kwargs": {
                     "text_embeds": pooled_prompt_embeds,
-                    "time_ids": add_time_ids
+                    "time_ids": time_ids
                 }
             }
-            
-            # Log shapes for debugging
-            if is_main_process():
-                self._log_tensor_shapes({
-                    "model_input": model_input,
-                    "latents": latents,
-                    "prompt_embeds": prompt_embeds,
-                    "pooled_prompt_embeds": pooled_prompt_embeds,
-                    "time_ids": add_time_ids
-                }, step="input")
 
             # Compute flow matching loss
-            loss = self.compute_flow_matching_loss(self.unet, x0, x1, t, cond_emb)
-            
-            # Apply any additional weights
-            if "loss_weights" in batch:
-                loss = loss * batch["loss_weights"].to(loss.device)
+            loss = self.compute_flow_matching_loss(self.model.unet, x0, x1, t, cond_emb)
             loss = loss.mean()
-            
+
             # Compute additional metrics
             metrics = {
                 "loss": loss.detach().item(),
@@ -211,23 +197,19 @@ class FlowMatchingTrainer(SDXLTrainer):
                 "time_mean": t.mean().item(),
                 "time_std": t.std().item()
             }
-            
-            # Update metrics logger
-            self.metrics_logger.update(metrics)
-            
+
             return {
                 "loss": loss,
                 "metrics": metrics
             }
 
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 "Error computing Flow Matching loss",
                 exc_info=True,
                 extra={
                     'error': str(e),
                     'error_type': type(e).__name__,
-                    'shape_logs': self._shape_logs,
                     'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
                     'device_info': {
                         'x1_device': x1.device if 'x1' in locals() else None,
