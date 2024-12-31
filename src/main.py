@@ -88,22 +88,6 @@ def setup_environment(args: argparse.Namespace):
         cleanup_distributed()
         torch_sync()
 
-def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logger]:
-    """Setup device and logging configuration."""
-    # Create main logger with enhanced formatting
-    logger = create_enhanced_logger(
-        "main",
-        level=config.global_config.logging.console_level,
-        log_file=Path(config.global_config.logging.log_dir) / config.global_config.logging.filename,
-        capture_warnings=config.global_config.logging.capture_warnings
-    )
-    logger.debug("Logging system initialized")
-    
-    # Set up device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    return device
-
 def setup_model(config: Config, device: torch.device) -> StableDiffusionXL:
     """Initialize model with proper error handling."""
     try:
@@ -471,6 +455,32 @@ def worker_init_fn(
         logger.error(f"Failed to initialize worker {worker_id}: {str(e)}", exc_info=True)
         raise
 
+def setup_device(config: Config) -> torch.device:
+    """Setup device with proper error handling."""
+    try:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        if device.type == "cuda":
+            # Set device index if using distributed training
+            if torch.distributed.is_initialized():
+                local_rank = torch.distributed.get_rank()
+                device = torch.device(f"cuda:{local_rank}")
+                torch.cuda.set_device(device)
+        
+        return device
+        
+    except Exception as e:
+        logger.error(
+            "Failed to setup device",
+            exc_info=True,
+            extra={
+                'cuda_available': torch.cuda.is_available(),
+                'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+                'error': str(e)
+            }
+        )
+        raise
+
 def main():
     """Main training entry point."""
     print("Starting SDXL training script...")
@@ -511,11 +521,18 @@ def main():
         check_system_limits()
         
         with setup_environment(args):
-            device = setup_device_and_logging(config)
+            # Setup device
+            device = setup_device(config)
             
             if torch.cuda.is_available():
                 logger.info(f"Using CUDA device: {torch.cuda.get_device_name()}")
                 logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
+                
+                # Log mixed precision settings
+                if config.training.mixed_precision != "no":
+                    logger.info(f"Using mixed precision: {config.training.mixed_precision}")
+                if config.training.enable_xformers:
+                    logger.info("xFormers optimization enabled")
             else:
                 logger.info("Using CPU device")
             
