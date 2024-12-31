@@ -100,11 +100,31 @@ class CacheManager:
             raise
 
     def get_cache_key(self, path: Union[str, Path]) -> str:
-        """Generate cache key from path using fast string operations."""
-        # Simplified path handling - avoid expensive operations
+        """Generate cache key from path using ultra-fast string operations."""
+        # Convert to string only once
         path_str = str(path)
-        parts = path_str.replace('\\', '/').split('/')
-        return f"{parts[-2]}_{parts[-1].split('.')[0]}"
+        
+        # Find last directory separator
+        last_sep = max(path_str.rfind('/'), path_str.rfind('\\'))
+        if last_sep == -1:
+            # No directory separator found, use whole path
+            second_last_sep = -1
+        else:
+            # Find second-to-last separator
+            second_last_sep = max(
+                path_str.rfind('/', 0, last_sep),
+                path_str.rfind('\\', 0, last_sep)
+            )
+        
+        # Find extension dot
+        dot_pos = path_str.rfind('.')
+        
+        # Extract parts directly using string slicing
+        dir_name = path_str[second_last_sep + 1:last_sep]
+        file_name = path_str[last_sep + 1:dot_pos]
+        
+        # Join with underscore using string concatenation
+        return f"{dir_name}_{file_name}"
 
     def save_latents(
         self,
