@@ -45,6 +45,7 @@ from src.training.trainers import (
     BaseRouter,
     DDPMTrainer,
     FlowMatchingTrainer,
+    SDXLTrainer,
     save_checkpoint
 )
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
@@ -237,21 +238,15 @@ def create_trainer(
 ) -> BaseRouter:
     """Create appropriate trainer based on config."""
     try:
-        trainer_cls = None
-        if config.training.method == "ddpm":
-            trainer_cls = DDPMTrainer
-        elif config.training.method == "flow_matching":
-            trainer_cls = FlowMatchingTrainer
-        else:
-            raise ValueError(f"Unknown training method: {config.training.method}")
-            
-        trainer = trainer_cls(
+        # Create trainer through SDXLTrainer for proper delegation
+        trainer = SDXLTrainer(
             model=model,
             optimizer=optimizer,
             train_dataloader=train_dataloader,
             device=device,
             wandb_logger=wandb_logger,
             config=config,
+            training_method=config.training.method,  # Pass method to SDXLTrainer
             # Pass additional training configuration
             mixed_precision=config.training.mixed_precision,
             gradient_accumulation_steps=config.training.gradient_accumulation_steps,
@@ -259,7 +254,7 @@ def create_trainer(
             enable_xformers=config.training.enable_xformers
         )
         
-        logger.info(f"Created {trainer_cls.__name__} trainer")
+        logger.info(f"Created trainer for method: {config.training.method}")
         return trainer
         
     except Exception as e:
@@ -381,6 +376,13 @@ def setup_training(
                 ]
             )
             
+            # Log wandb URL to terminal
+            if wandb_logger.run is not None:
+                logger.info(
+                    f"\nWandB run started: {wandb_logger.run.url}\n"
+                    f"View live training progress at the URL above ☝️"
+                )
+            
             # Log additional method-specific configuration
             method_config = {
                 "training_method": config.training.method,
@@ -406,7 +408,7 @@ def setup_training(
                 })
             elif config.training.method == "flow_matching":
                 method_config.update({
-                    "flow_type": "optimal_transport"  # Add any flow-specific configs here
+                    "flow_type": "optimal_transport"
                 })
                 
             wandb_logger.log_hyperparams(method_config)
@@ -492,7 +494,7 @@ def main():
         config = Config.from_yaml(args.config)
         
         # Setup logging
-        logger, tensor_logger = setup_logging(config.global_config.logging)
+        logger = setup_logging(config.global_config.logging)
         
         # Check system limits
         check_system_limits()
@@ -518,6 +520,7 @@ def main():
                 captions=captions
             )
 
+            # Create trainer through SDXLTrainer for proper delegation
             trainer = create_trainer(
                 config=config,
                 model=model,
@@ -527,13 +530,24 @@ def main():
                 wandb_logger=wandb_logger
             )
             
-            logger.info(f"Starting training with {config.training.method} method for {config.training.num_epochs} epochs...")
+            # Log training start
+            total_steps = len(train_dataloader) * config.training.num_epochs
+            logger.info(
+                f"Starting training with {config.training.method} method:\n"
+                f"- Total epochs: {config.training.num_epochs}\n"
+                f"- Steps per epoch: {len(train_dataloader)}\n"
+                f"- Total steps: {total_steps}\n"
+                f"- Batch size: {config.training.batch_size}\n"
+                f"- Device: {device}"
+            )
+            
+            # Execute training
             trainer.train(num_epochs=config.training.num_epochs)
             
             if is_main_process():
                 logger.info("Training complete!")
-                # Save final model checkpoint
                 if config.training.save_final_model:
+                    logger.info("Saving final checkpoint...")
                     save_checkpoint(
                         model=model,
                         optimizer=optimizer,
