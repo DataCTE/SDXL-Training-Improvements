@@ -1,6 +1,6 @@
 """DDPM trainer implementation with memory optimizations."""
 import torch
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import torch.nn.functional as F
 from tqdm import tqdm
 from collections import defaultdict
@@ -11,6 +11,7 @@ from src.models import StableDiffusionXL
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.core.distributed import is_main_process
 from src.core.types import DataType, ModelWeightDtypes
+from src.data.config import Config
 
 logger = get_logger(__name__)
 
@@ -24,7 +25,7 @@ class DDPMTrainer(SDXLTrainer):
         train_dataloader: torch.utils.data.DataLoader,
         device: torch.device,
         wandb_logger=None,
-        config=None,
+        config: Optional[Config] = None,
         **kwargs
     ):
         super().__init__(
@@ -35,6 +36,17 @@ class DDPMTrainer(SDXLTrainer):
             wandb_logger=wandb_logger,
             config=config,
             **kwargs
+        )
+        
+        # Verify effective batch size with gradient accumulation
+        self.effective_batch_size = (
+            config.training.batch_size * 
+            config.training.gradient_accumulation_steps
+        )
+        logger.info(
+            f"Effective batch size: {self.effective_batch_size} "
+            f"(batch_size={config.training.batch_size} × "
+            f"gradient_accumulation_steps={config.training.gradient_accumulation_steps})"
         )
         
         # Enable memory optimizations on individual components
@@ -194,6 +206,14 @@ class DDPMTrainer(SDXLTrainer):
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Execute single training step with memory optimizations."""
         try:
+            # Verify batch size
+            actual_batch_size = batch["pixel_values"].shape[0]
+            if actual_batch_size != self.config.training.batch_size:
+                logger.warning(
+                    f"Received batch size {actual_batch_size} differs from "
+                    f"configured batch size {self.config.training.batch_size}"
+                )
+            
             # Clear cache before forward pass
             torch.cuda.empty_cache()
             
