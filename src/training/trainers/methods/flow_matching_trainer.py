@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from typing import Dict, Optional, Any
 from torch import Tensor
 from tqdm import tqdm
+from collections import defaultdict
 
 from src.core.logging import get_logger, MetricsLogger
 from src.training.trainers.sdxl_trainer import SDXLTrainer
@@ -66,33 +67,55 @@ class FlowMatchingTrainer(SDXLTrainer):
             total=total_steps,
             disable=not is_main_process(),
             desc="Training Flow Matching",
-            position=0,  # Ensure it's at the top
-            leave=True,  # Keep the progress bar after completion
-            ncols=100    # Fixed width for better formatting
+            position=0,
+            leave=True,
+            ncols=100
         )
         
         try:
+            if is_main_process() and self.wandb_logger:
+                # Log initial model configuration
+                self.wandb_logger.log_model(
+                    model=self.model,
+                    optimizer=self.optimizer
+                )
+                
+                # Log training configuration
+                self.wandb_logger.log_hyperparams({
+                    'num_epochs': num_epochs,
+                    'total_steps': total_steps,
+                    'batch_size': self.config.training.batch_size,
+                    'learning_rate': self.config.optimizer.learning_rate,
+                    'method': 'flow_matching'
+                })
+            
             for epoch in range(num_epochs):
                 self.model.train()
                 epoch_loss = 0.0
                 num_steps = len(self.train_dataloader)
+                epoch_metrics = defaultdict(float)
                 
                 for step, batch in enumerate(self.train_dataloader):
                     # Zero gradients
                     self.optimizer.zero_grad()
                     
-                    # Compute loss
-                    loss_output = self.compute_loss(self.model, batch)
-                    loss = loss_output["loss"]
-                    metrics = loss_output["metrics"]
+                    # Execute training step
+                    step_output = self.training_step(batch)
+                    loss = step_output["loss"]
+                    metrics = step_output["metrics"]
+                    
+                    # Update epoch metrics
+                    for k, v in metrics.items():
+                        epoch_metrics[k] += v
                     
                     # Backward pass and optimization
                     loss.backward()
                     if self.config.training.max_grad_norm > 0:
-                        torch.nn.utils.clip_grad_norm_(
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(),
                             self.config.training.max_grad_norm
                         )
+                        metrics['grad_norm'] = grad_norm.item()
                     self.optimizer.step()
                     
                     # Update progress
@@ -119,20 +142,26 @@ class FlowMatchingTrainer(SDXLTrainer):
                                 'epoch': epoch + 1,
                                 'step': current_step,
                                 'global_step': current_step,
-                                **metrics
+                                'learning_rate': self.optimizer.param_groups[0]['lr'],
+                                **metrics,
+                                'gpu_memory_allocated': torch.cuda.memory_allocated() / 1024**2,
+                                'gpu_memory_reserved': torch.cuda.memory_reserved() / 1024**2
                             })
                         
                         # Print periodic updates to console
-                        if step % max(1, num_steps // 10) == 0:  # Log ~10 times per epoch
+                        if step % max(1, num_steps // 10) == 0:
                             logger.info(
                                 f"Epoch {epoch + 1}/{num_epochs} "
                                 f"[{step + 1}/{num_steps}] "
                                 f"Loss: {loss.item():.4f} "
-                                f"Avg Loss: {epoch_loss / (step + 1):.4f}"
+                                f"Avg Loss: {epoch_loss / (step + 1):.4f} "
+                                f"LR: {self.optimizer.param_groups[0]['lr']:.2e}"
                             )
                 
                 # Log epoch metrics
                 avg_epoch_loss = epoch_loss / num_steps
+                avg_epoch_metrics = {k: v / num_steps for k, v in epoch_metrics.items()}
+                
                 if is_main_process():
                     logger.info(
                         f"\nEpoch {epoch + 1}/{num_epochs} completed - "
@@ -142,11 +171,20 @@ class FlowMatchingTrainer(SDXLTrainer):
                         self.wandb_logger.log_metrics({
                             'epoch': epoch + 1,
                             'epoch_loss': avg_epoch_loss,
-                            'learning_rate': self.optimizer.param_groups[0]['lr']
+                            'epoch_learning_rate': self.optimizer.param_groups[0]['lr'],
+                            **{f"epoch_{k}": v for k, v in avg_epoch_metrics.items()}
                         })
         
         except Exception as e:
-            logger.error("Training loop failed", exc_info=True)
+            logger.error(
+                "Training loop failed",
+                exc_info=True,
+                extra={
+                    'epoch': epoch if 'epoch' in locals() else None,
+                    'step': step if 'step' in locals() else None,
+                    'error': str(e)
+                }
+            )
             raise
         finally:
             progress_bar.close()
