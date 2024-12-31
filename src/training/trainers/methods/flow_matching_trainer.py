@@ -16,6 +16,7 @@ from src.data.config import Config
 from src.core.distributed import is_main_process
 from src.core.logging import WandbLogger
 from src.core.types import DataType, ModelWeightDtypes
+from src.models.sdxl import StableDiffusionXL
 
 logger = get_logger(__name__)
 
