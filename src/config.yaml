@@ -60,9 +60,9 @@ global_config:
 
   # Logging configuration
   logging:
-    use_wandb: false
+    use_wandb: true
     wandb_project: "sdxl-training"
-    wandb_entity: null  # Your wandb username or team name
+    wandb_entity: "izquierdoxander"  # Your wandb username or team name
     log_dir: "logs"
     filename: "training.log"
     console_level: "INFO"
