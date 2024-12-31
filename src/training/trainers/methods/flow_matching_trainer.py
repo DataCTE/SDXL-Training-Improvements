@@ -4,6 +4,7 @@ import torch.backends.cudnn
 import torch.nn.functional as F
 from typing import Dict, Optional, Any
 from torch import Tensor
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from collections import defaultdict
 import time
@@ -14,6 +15,7 @@ from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
 from src.core.distributed import is_main_process
 from src.core.logging import WandbLogger
+from src.core.types import DataType, ModelWeightDtypes
 
 logger = get_logger(__name__)
 
@@ -24,8 +26,8 @@ class FlowMatchingTrainer(SDXLTrainer):
 
     def __init__(
         self,
-        model,
-        optimizer,
+        model: StableDiffusionXL,
+        optimizer: torch.optim.Optimizer,
         train_dataloader: torch.utils.data.DataLoader,
         device: torch.device,
         wandb_logger: Optional[WandbLogger] = None,
@@ -41,9 +43,64 @@ class FlowMatchingTrainer(SDXLTrainer):
             config=config,
             **kwargs
         )
-        self.metrics_logger = MetricsLogger(window_size=100)
-        self._shape_logs = []
         
+        # Verify effective batch size with gradient accumulation
+        self.effective_batch_size = (
+            config.training.batch_size * 
+            self.gradient_accumulation_steps
+        )
+        logger.info(
+            f"Effective batch size: {self.effective_batch_size} "
+            f"(batch_size={config.training.batch_size} × "
+            f"gradient_accumulation_steps={self.gradient_accumulation_steps})"
+        )
+        
+        # Enable memory optimizations on individual components
+        if hasattr(self.model.unet, "enable_gradient_checkpointing"):
+            logger.info("Enabling gradient checkpointing for UNet")
+            self.model.unet.enable_gradient_checkpointing()
+        
+        if hasattr(self.model.vae, "enable_gradient_checkpointing"):
+            logger.info("Enabling gradient checkpointing for VAE")
+            self.model.vae.enable_gradient_checkpointing()
+        
+        # Enable xformers memory efficient attention if available
+        if config.training.enable_xformers:
+            logger.info("Enabling xformers memory efficient attention")
+            if hasattr(self.model.unet, "enable_xformers_memory_efficient_attention"):
+                self.model.unet.enable_xformers_memory_efficient_attention()
+                logger.info("Enabled xformers for UNet")
+            if hasattr(self.model.vae, "enable_xformers_memory_efficient_attention"):
+                self.model.vae.enable_xformers_memory_efficient_attention()
+                logger.info("Enabled xformers for VAE")
+        
+        # Move model to device
+        self.model.to(device)
+        
+        # Enable CPU offload if available
+        if hasattr(self.model, "enable_model_cpu_offload"):
+            logger.info("Enabling model CPU offload")
+            self.model.enable_model_cpu_offload()
+        
+        # Set up mixed precision training
+        self.mixed_precision = config.training.mixed_precision
+        if self.mixed_precision != "no":
+            self.scaler = GradScaler()
+        
+        # Handle optimizer-specific dtype conversions
+        if config.optimizer.optimizer_type == "adamw_bf16":
+            logger.info("Converting model to bfloat16 format for AdamWBF16 optimizer")
+            bfloat16_weights = ModelWeightDtypes.from_single_dtype(DataType.BFLOAT_16)
+            self.model.unet.to(bfloat16_weights.unet.to_torch_dtype())
+            self.model.vae.to(bfloat16_weights.vae.to_torch_dtype())
+            self.model.text_encoder_1.to(bfloat16_weights.text_encoder.to_torch_dtype())
+            self.model.text_encoder_2.to(bfloat16_weights.text_encoder_2.to_torch_dtype())
+            model_dtype = torch.bfloat16
+        else:
+            model_dtype = next(self.model.parameters()).dtype
+        
+        logger.info(f"Model components using dtype: {model_dtype}")
+
         # Try to compile loss computation if available
         if hasattr(torch, "compile"):
             self.logger.debug("Attempting to compile loss computation")
@@ -60,12 +117,6 @@ class FlowMatchingTrainer(SDXLTrainer):
                     exc_info=True,
                     extra={'error': str(e)}
                 )
-
-        # Use fixed gradient accumulation steps
-        self.effective_batch_size = (
-            config.training.batch_size * 
-            self.gradient_accumulation_steps  # Use fixed value
-        )
 
     def train(self, num_epochs: int):
         """Execute training loop for specified number of epochs."""
@@ -159,25 +210,25 @@ class FlowMatchingTrainer(SDXLTrainer):
         finally:
             progress_bar.close()
 
-    def _execute_training_step(self, batch):
-        """Execute single training step with proper error handling."""
+    def _execute_training_step(self, batch, accumulate: bool = False, is_last_accumulation_step: bool = True):
+        """Execute single training step with gradient accumulation support."""
         try:
-            self.optimizer.zero_grad()
+            # Don't zero gradients when accumulating
+            if not accumulate or is_last_accumulation_step:
+                self.optimizer.zero_grad()
+            
             step_output = self.compute_loss(self.model, batch)
             loss = step_output["loss"]
             metrics = step_output["metrics"]
             
+            # Scale loss by accumulation steps when accumulating
+            if accumulate:
+                loss = loss / self.config.training.gradient_accumulation_steps
+            
             loss.backward()
-            if self.config.training.max_grad_norm > 0:
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config.training.max_grad_norm
-                )
-                metrics['grad_norm'] = grad_norm.item()
             
-            self.optimizer.step()
-            
-            return loss, metrics
+            # Only return the unscaled loss for logging
+            return loss * self.config.training.gradient_accumulation_steps, metrics
             
         except Exception as e:
             logger.error("Flow Matching training step failed", exc_info=True)
