@@ -322,8 +322,11 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Use image path as cache key
-            latents = self.cache_manager.load_tensors(batch["image_path"])["pixel_values"].to(
+            # Generate cache key from image path
+            cache_key = self.cache_manager.get_cache_key(batch["image_path"])
+            
+            # Load cached latents
+            latents = self.cache_manager.load_tensors(cache_key)["model_input"].to(
                 device=self.device, 
                 dtype=model_dtype
             )
