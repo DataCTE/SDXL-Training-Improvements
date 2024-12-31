@@ -98,6 +98,15 @@ class DDPMTrainer(SDXLTrainer):
         
         logger.info(f"Model components using dtype: {model_dtype}")
         
+        # Initialize tag weighter
+        from src.data.preprocessing.tag_weighter import create_tag_weighter
+        self.tag_weighter = create_tag_weighter(
+            config=config,
+            captions=[batch["text"] for batch in train_dataloader.dataset],
+            cache_path=None  # Let it use default cache path
+        )
+        logger.info("Initialized tag-based loss weighting")
+        
     def train(self, num_epochs: int):
         """Execute training loop with proper gradient accumulation."""
         total_steps = len(self.train_dataloader) * num_epochs
@@ -303,7 +312,7 @@ class DDPMTrainer(SDXLTrainer):
                     }
                 ).sample
 
-                # Calculate loss with consistent dtype and scaling
+                # Calculate base loss with consistent dtype and scaling
                 if self.config.training.prediction_type == "epsilon":
                     target = noise
                 elif self.config.training.prediction_type == "v_prediction":
@@ -319,8 +328,20 @@ class DDPMTrainer(SDXLTrainer):
                 model_pred = torch.clamp(model_pred, -20000.0, 20000.0)
                 target = torch.clamp(target, -20000.0, 20000.0)
 
-                # Calculate loss with gradient clipping
-                loss = F.mse_loss(model_pred, target, reduction="mean")
+                # Calculate unweighted loss
+                base_loss = F.mse_loss(model_pred, target, reduction="none")  # Keep per-sample losses
+                
+                # Get tag weights for the batch
+                tag_weights = self.tag_weighter.get_batch_weights(batch["text"]).to(self.device)
+                
+                # Reshape weights to match loss dimensions if needed
+                tag_weights = tag_weights.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
+                
+                # Apply tag weights to loss
+                weighted_loss = base_loss * tag_weights
+                
+                # Reduce to scalar loss
+                loss = weighted_loss.mean()
                 
                 # Ensure loss is finite and properly scaled
                 if torch.isnan(loss) or torch.isinf(loss):
@@ -330,7 +351,7 @@ class DDPMTrainer(SDXLTrainer):
                     # Clip loss to prevent explosion
                     loss = torch.clamp(loss, max=1000.0)
 
-                # Log metrics with additional noise statistics
+                # Log metrics with additional noise and weight statistics
                 metrics = {
                     "loss": loss.detach().item(),
                     "lr": self.optimizer.param_groups[0]["lr"],
@@ -339,6 +360,12 @@ class DDPMTrainer(SDXLTrainer):
                     "target_max": target.abs().max().item(),
                     "noise_scale": noise.abs().mean().item(),
                     "latent_scale": latents.abs().mean().item(),
+                    "weight_mean": tag_weights.mean().item(),
+                    "weight_std": tag_weights.std().item(),
+                    "weight_min": tag_weights.min().item(),
+                    "weight_max": tag_weights.max().item(),
+                    "base_loss_mean": base_loss.mean().item(),
+                    "weighted_loss_mean": weighted_loss.mean().item(),
                 }
                 
                 # Only calculate std if batch size > 1 to avoid warning
