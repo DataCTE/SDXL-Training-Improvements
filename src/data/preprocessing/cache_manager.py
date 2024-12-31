@@ -4,7 +4,7 @@ import json
 import time
 import torch
 import threading
-from typing import Dict, Optional, Union, Any, List
+from typing import Dict, Optional, Union, Any, List, Tuple
 from src.core.logging import get_logger
 from src.data.utils.paths import convert_windows_path, is_windows_path
 import os
@@ -381,3 +381,43 @@ class CacheManager:
             return [r[0] for r in results]
         
         return asyncio.run(save_batch())
+
+    def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, torch.Tensor]]:
+        """Load cached tensors with safe loading enabled."""
+        try:
+            entry = self.cache_index["entries"].get(cache_key)
+            if not entry or not self._is_valid_cache(cache_key):
+                return None
+            
+            # Use weights_only=True for safer loading
+            tensors = torch.load(
+                entry["tensors_path"],
+                map_location=device,
+                weights_only=True  # Safe loading mode
+            )
+            
+            return tensors
+            
+        except Exception as e:
+            logger.warning(f"Failed to load cached tensors for {cache_key}: {str(e)}")
+            return None
+
+    def save_tensors(self, tensors: Dict[str, torch.Tensor], cache_key: str) -> Tuple[bool, str, str]:
+        """Save tensors with safe saving enabled."""
+        try:
+            # Generate paths
+            tensors_path = self.latents_dir / f"{cache_key}.pt"
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            
+            # Save tensors with weights_only=True
+            torch.save(
+                tensors,
+                tensors_path,
+                weights_only=True  # Safe saving mode
+            )
+            
+            return True, str(tensors_path), str(metadata_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to save tensors for {cache_key}: {str(e)}")
+            return False, "", ""

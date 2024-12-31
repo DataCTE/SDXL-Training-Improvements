@@ -49,7 +49,8 @@ class DDPMTrainer(SDXLTrainer):
             desc=f"Training DDPM ({self.config.training.prediction_type})",
             position=0,
             leave=True,
-            ncols=100
+            ncols=100,
+            dynamic_ncols=True  # Allow dynamic width adjustment
         )
         
         try:
@@ -104,6 +105,9 @@ class DDPMTrainer(SDXLTrainer):
                     current_step = epoch * num_steps + step + 1
                     
                     if is_main_process():
+                        # Move progress bar update before postfix update
+                        progress_bar.update(1)
+                        
                         # Update progress bar with more detailed stats
                         progress_bar.set_postfix(
                             {
@@ -114,9 +118,8 @@ class DDPMTrainer(SDXLTrainer):
                                 'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}",
                                 'pred_type': self.config.training.prediction_type
                             },
-                            refresh=True
+                            refresh=False  # Don't force refresh on every update
                         )
-                        progress_bar.update(1)
                         
                         # Log step metrics
                         if self.wandb_logger:
