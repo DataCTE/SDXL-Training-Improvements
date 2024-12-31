@@ -528,10 +528,7 @@ def main():
             
             # Log device information
             logger.info(f"Using device: {device}")
-            if torch.cuda.is_available():
-                logger.info(f"CUDA device count: {torch.cuda.device_count()}")
-                logger.info(f"CUDA current device: {torch.cuda.current_device()}")
-                logger.info(f"CUDA device name: {torch.cuda.get_device_name()}")
+           
             
             model = setup_model(config, device)
             
