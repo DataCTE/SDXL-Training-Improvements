@@ -319,8 +319,9 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Generate cache key from image path
-            cache_key = self.cache_manager.get_cache_key(batch["image_path"])
+            # Get cache key using the same method as CacheManager
+            path_str = str(batch["path"][0])  # Get first path from batch
+            cache_key = self.cache_manager.get_cache_key(path_str)
             
             # Load all cached data at once
             cached_data = self.cache_manager.load_tensors(cache_key)
