@@ -49,7 +49,12 @@ class DDPMTrainer(SDXLTrainer):
         # Enable xformers memory efficient attention if available
         if config.training.enable_xformers:
             logger.info("Enabling xformers memory efficient attention")
-            self.model.enable_xformers_memory_efficient_attention()
+            if hasattr(self.model.unet, "enable_xformers_memory_efficient_attention"):
+                self.model.unet.enable_xformers_memory_efficient_attention()
+                logger.info("Enabled xformers for UNet")
+            if hasattr(self.model.vae, "enable_xformers_memory_efficient_attention"):
+                self.model.vae.enable_xformers_memory_efficient_attention()
+                logger.info("Enabled xformers for VAE")
         
         # Move model to device
         self.model.to(device)
