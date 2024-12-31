@@ -37,35 +37,45 @@ class DDPMTrainer(SDXLTrainer):
             **kwargs
         )
         
-        # Enable memory optimizations
-        self.model.enable_gradient_checkpointing()
-        self.model.enable_xformers_memory_efficient_attention()
+        # Enable memory optimizations on individual components
+        if hasattr(self.model.unet, "enable_gradient_checkpointing"):
+            logger.info("Enabling gradient checkpointing for UNet")
+            self.model.unet.enable_gradient_checkpointing()
         
-        # Move model components to device and optimize memory
+        if hasattr(self.model.vae, "enable_gradient_checkpointing"):
+            logger.info("Enabling gradient checkpointing for VAE")
+            self.model.vae.enable_gradient_checkpointing()
+        
+        # Enable xformers memory efficient attention if available
+        if config.training.enable_xformers:
+            logger.info("Enabling xformers memory efficient attention")
+            self.model.enable_xformers_memory_efficient_attention()
+        
+        # Move model to device
         self.model.to(device)
+        
+        # Enable CPU offload if available
         if hasattr(self.model, "enable_model_cpu_offload"):
+            logger.info("Enabling model CPU offload")
             self.model.enable_model_cpu_offload()
         
-        # Set up automatic mixed precision
-        self.mixed_precision = config.training.get("mixed_precision", "no")
+        # Set up mixed precision training
+        self.mixed_precision = config.training.mixed_precision
         if self.mixed_precision != "no":
             self.scaler = torch.cuda.amp.GradScaler()
         
         self.noise_scheduler = model.noise_scheduler
         
-        # Check if using AdamWBF16 optimizer and convert model to bfloat16 if needed
+        # Handle optimizer-specific dtype conversions
         if config.optimizer.optimizer_type == "adamw_bf16":
             logger.info("Converting model to bfloat16 format for AdamWBF16 optimizer")
-            # Create bfloat16 weight configuration
             bfloat16_weights = ModelWeightDtypes.from_single_dtype(DataType.BFLOAT_16)
-            # Convert model components to bfloat16
             self.model.unet.to(bfloat16_weights.unet.to_torch_dtype())
             self.model.vae.to(bfloat16_weights.vae.to_torch_dtype())
             self.model.text_encoder_1.to(bfloat16_weights.text_encoder.to_torch_dtype())
             self.model.text_encoder_2.to(bfloat16_weights.text_encoder_2.to_torch_dtype())
             model_dtype = torch.bfloat16
         else:
-            # Get model dtype from parameters for other optimizers
             model_dtype = next(self.model.parameters()).dtype
         
         logger.info(f"Model components using dtype: {model_dtype}")
