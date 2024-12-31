@@ -502,14 +502,15 @@ def main():
         log_dir = Path(config.global_config.logging.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Setup enhanced logging with proper configuration
-        logger = create_enhanced_logger(
-            name="sdxl_training",
+        # Setup logging using the setup_logging function
+        logger, tensor_logger = setup_logging(
+            config=config.global_config.logging,
             log_dir=str(log_dir),
-            console_level=config.global_config.logging.console_level,
-            file_level=config.global_config.logging.file_level,
+            level=config.global_config.logging.file_level,
             filename=config.global_config.logging.filename,
-            capture_warnings=config.global_config.logging.capture_warnings
+            module_name="sdxl_training",
+            capture_warnings=config.global_config.logging.capture_warnings,
+            console_level=config.global_config.logging.console_level
         )
         
         # Verify logger was created successfully
