@@ -346,6 +346,9 @@ def setup_training(
                 entity=config.global_config.logging.wandb_entity,
                 config=config.to_dict()
             )
+            # Print wandb URL to console
+            if wandb_logger.run:
+                logger.info(f"\nWeights & Biases run: {wandb_logger.run.get_url()}\n")
 
         return train_dataloader, optimizer, wandb_logger
         
