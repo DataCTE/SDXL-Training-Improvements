@@ -436,10 +436,10 @@ def check_system_limits():
         # Try to increase soft limit to hard limit
         resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
         
-        logger.info(f"Increased file limit from {soft} to {hard}")
+        print(f"Increased file limit from {soft} to {hard}")  # Use print until logger is properly initialized
     except Exception as e:
-        logger.warning(f"Could not increase file limit: {e}")
-        logger.warning("You may need to increase system file limits (ulimit -n)")
+        print(f"Could not increase file limit: {e}")  # Use print until logger is properly initialized
+        print("You may need to increase system file limits (ulimit -n)")
 
 def worker_init_fn(
     worker_id: int, 
@@ -488,19 +488,25 @@ def main():
     print("Starting SDXL training script...")
     mp.set_start_method('spawn', force=True)
     
+    # Initialize these before try block so they're available in error handling
+    device = None
+    logger = None
+    
     try:
         # Parse args and load config first
         args = parse_args()
         config = Config.from_yaml(args.config)
         
-        # Setup logging - store the returned logger
-        global logger  # Update the global logger
+        # Setup logging - ensure we get a proper logger instance
         logger = setup_logging(config.global_config.logging)
+        if not hasattr(logger, 'info'):  # Verify logger is properly initialized
+            raise RuntimeError("Logger initialization failed")
         
-        # Check system limits
+        # Now that logger is initialized, we can use it
+        logger.info("Logger initialized successfully")
+        
+        # Check system limits (now using print to avoid logger issues)
         check_system_limits()
-        
-        device = None
         
         with setup_environment(args):
             device = setup_device_and_logging(config)
@@ -567,17 +573,22 @@ def main():
             'stack_trace': traceback.format_exc()
         }
         
-        # Use print for error logging if logger is not available
-        if isinstance(logger, tuple) or not hasattr(logger, 'error'):
-            print("ERROR: Training failed", file=sys.stderr)
-            print(f"Error context: {error_context}", file=sys.stderr)
-            print(traceback.format_exc(), file=sys.stderr)
-        else:
-            logger.error(
-                "Training failed",
-                exc_info=True,
-                extra=error_context
-            )
+        # Always use print for error logging to ensure output
+        print("ERROR: Training failed", file=sys.stderr)
+        print(f"Error context: {error_context}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        
+        # Try to use logger if available
+        if logger and hasattr(logger, 'error'):
+            try:
+                logger.error(
+                    "Training failed",
+                    exc_info=True,
+                    extra=error_context
+                )
+            except:
+                pass  # Ignore logger errors in error handling
+                
         sys.exit(1)
 
 if __name__ == "__main__":
