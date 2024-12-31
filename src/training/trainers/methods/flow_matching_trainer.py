@@ -159,7 +159,6 @@ class FlowMatchingTrainer(SDXLTrainer):
 
     def _compute_loss_impl(
         self,
-        model: torch.nn.Module,
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
