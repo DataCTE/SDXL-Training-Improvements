@@ -65,64 +65,91 @@ class FlowMatchingTrainer(SDXLTrainer):
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
-            desc="Training Flow Matching"
+            desc="Training Flow Matching",
+            position=0,  # Ensure it's at the top
+            leave=True,  # Keep the progress bar after completion
+            ncols=100    # Fixed width for better formatting
         )
         
-        for epoch in range(num_epochs):
-            self.model.train()
-            epoch_loss = 0.0
-            num_steps = len(self.train_dataloader)
-            
-            for step, batch in enumerate(self.train_dataloader):
-                # Zero gradients
-                self.optimizer.zero_grad()
+        try:
+            for epoch in range(num_epochs):
+                self.model.train()
+                epoch_loss = 0.0
+                num_steps = len(self.train_dataloader)
                 
-                # Compute loss
-                loss_output = self.compute_loss(self.model, batch)
-                loss = loss_output["loss"]
-                metrics = loss_output["metrics"]
-                
-                # Backward pass and optimization
-                loss.backward()
-                if self.config.training.max_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.config.training.max_grad_norm
-                    )
-                self.optimizer.step()
-                
-                # Update progress
-                epoch_loss += loss.item()
-                if is_main_process():
-                    progress_bar.update(1)
-                    progress_bar.set_postfix({
-                        'epoch': epoch + 1,
-                        'step': step + 1,
-                        'loss': loss.item(),
-                        'avg_loss': epoch_loss / (step + 1),
-                        'x0_norm': metrics['x0_norm'],
-                        'x1_norm': metrics['x1_norm']
-                    })
+                for step, batch in enumerate(self.train_dataloader):
+                    # Zero gradients
+                    self.optimizer.zero_grad()
                     
-                    # Log step metrics
+                    # Compute loss
+                    loss_output = self.compute_loss(self.model, batch)
+                    loss = loss_output["loss"]
+                    metrics = loss_output["metrics"]
+                    
+                    # Backward pass and optimization
+                    loss.backward()
+                    if self.config.training.max_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.config.training.max_grad_norm
+                        )
+                    self.optimizer.step()
+                    
+                    # Update progress
+                    epoch_loss += loss.item()
+                    current_step = epoch * num_steps + step + 1
+                    
+                    if is_main_process():
+                        # Update progress bar with more detailed stats
+                        progress_bar.set_postfix(
+                            {
+                                'epoch': f"{epoch + 1}/{num_epochs}",
+                                'step': f"{step + 1}/{num_steps}",
+                                'loss': f"{loss.item():.4f}",
+                                'avg_loss': f"{epoch_loss / (step + 1):.4f}",
+                                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}"
+                            },
+                            refresh=True
+                        )
+                        progress_bar.update(1)
+                        
+                        # Log step metrics
+                        if self.wandb_logger:
+                            self.wandb_logger.log_metrics({
+                                'epoch': epoch + 1,
+                                'step': current_step,
+                                'global_step': current_step,
+                                **metrics
+                            })
+                        
+                        # Print periodic updates to console
+                        if step % max(1, num_steps // 10) == 0:  # Log ~10 times per epoch
+                            logger.info(
+                                f"Epoch {epoch + 1}/{num_epochs} "
+                                f"[{step + 1}/{num_steps}] "
+                                f"Loss: {loss.item():.4f} "
+                                f"Avg Loss: {epoch_loss / (step + 1):.4f}"
+                            )
+                
+                # Log epoch metrics
+                avg_epoch_loss = epoch_loss / num_steps
+                if is_main_process():
+                    logger.info(
+                        f"\nEpoch {epoch + 1}/{num_epochs} completed - "
+                        f"Average Loss: {avg_epoch_loss:.6f}\n"
+                    )
                     if self.wandb_logger:
                         self.wandb_logger.log_metrics({
                             'epoch': epoch + 1,
-                            'step': step + 1,
-                            **metrics
+                            'epoch_loss': avg_epoch_loss,
+                            'learning_rate': self.optimizer.param_groups[0]['lr']
                         })
-            
-            # Log epoch metrics
-            avg_epoch_loss = epoch_loss / num_steps
-            if is_main_process():
-                logger.info(f"Epoch {epoch + 1}/{num_epochs} - Average Loss: {avg_epoch_loss:.6f}")
-                if self.wandb_logger:
-                    self.wandb_logger.log_metrics({
-                        'epoch': epoch + 1,
-                        'epoch_loss': avg_epoch_loss
-                    })
         
-        progress_bar.close()
+        except Exception as e:
+            logger.error("Training loop failed", exc_info=True)
+            raise
+        finally:
+            progress_bar.close()
 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, Tensor]:
         """Compute training loss."""
