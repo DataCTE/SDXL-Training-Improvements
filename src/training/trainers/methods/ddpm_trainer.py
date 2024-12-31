@@ -217,14 +217,6 @@ class DDPMTrainer(SDXLTrainer):
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Execute single training step with memory optimizations."""
         try:
-            # Verify batch size
-            actual_batch_size = batch["pixel_values"].shape[0]
-            if actual_batch_size != self.config.training.batch_size and is_main_process():
-                logger.warning(
-                    f"Received batch size {actual_batch_size} differs from "
-                    f"configured batch size {self.config.training.batch_size}"
-                )
-
             # Clear cache before forward pass
             torch.cuda.empty_cache()
             

@@ -34,14 +34,6 @@ class SDXLTrainer(BaseRouter):
         # Get gradient accumulation steps from config
         self.gradient_accumulation_steps = config.training.gradient_accumulation_steps
         
-        # Verify batch size matches config
-        if config and hasattr(train_dataloader, 'batch_size'):
-            if train_dataloader.batch_size != config.training.batch_size:
-                logger.warning(
-                    f"DataLoader batch size ({train_dataloader.batch_size}) "
-                    f"doesn't match config batch size ({config.training.batch_size})"
-                )
-        
     def train(self, num_epochs: int):
         """Delegate training to the specific trainer implementation."""
         if not hasattr(self, 'trainer'):
