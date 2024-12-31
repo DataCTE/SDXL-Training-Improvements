@@ -322,36 +322,21 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Move batch data to device efficiently
-            pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype, non_blocking=True)
+            # Load cached latents instead of encoding
+            latents = self.cache_manager.load_tensors(batch["cache_key"])["latents"].to(
+                device=self.device, 
+                dtype=model_dtype
+            )
+            
+            # Move other batch data to device efficiently
             prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
             
-            # Store image dimensions before processing
-            image_height, image_width = pixel_values.shape[-2:]
+            # Store image dimensions
+            image_height, image_width = batch["original_sizes"][0]  # Use original size from batch
             
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
-                # Convert images to latent space
-                with torch.no_grad():
-                    # First get the VAE output
-                    latents = self.model.vae.encode(pixel_values).latent_dist.sample()
-                    
-                    # Apply scaling factor first (usually 0.13025)
-                    latents = latents * self.model.vae.config.scaling_factor
-                    
-                    # Then clamp the scaled values
-                    latents = torch.clamp(latents, -20000.0, 20000.0)
-                    
-                    # Add check for latent values
-                    if torch.isnan(latents).any() or torch.isinf(latents).any():
-                        logger.warning("NaN/Inf values detected in latents")
-                        raise ValueError("Invalid latent values")
-                    
-                # Free up memory
-                del pixel_values
-                torch.cuda.empty_cache()
-                
                 # Prepare time embeddings for SDXL
                 batch_size = latents.shape[0]
                 time_ids = self._get_add_time_ids(
