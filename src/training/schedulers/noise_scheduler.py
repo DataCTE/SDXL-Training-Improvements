@@ -27,14 +27,14 @@ def configure_noise_scheduler(
         beta_start=config.training.method_config.scheduler.beta_start,
         beta_end=config.training.method_config.scheduler.beta_end,
         beta_schedule=config.training.method_config.scheduler.beta_schedule,
-        clip_sample=config.training.method_config.scheduler.clip_sample,
+        clip_sample=True,
         steps_offset=config.training.method_config.scheduler.steps_offset,
         prediction_type=config.model.prediction_type,
-        thresholding=config.training.method_config.scheduler.thresholding,
+        thresholding=True,
         dynamic_thresholding_ratio=config.training.method_config.scheduler.dynamic_thresholding_ratio,
-        sample_max_value=config.training.method_config.scheduler.sample_max_value,
+        sample_max_value=20000.0,
         timestep_spacing=config.training.method_config.scheduler.timestep_spacing,
-        rescale_betas_zero_snr=config.training.method_config.scheduler.rescale_betas_zero_snr
+        rescale_betas_zero_snr=True
     )
     
     # Ensure scheduler is initialized

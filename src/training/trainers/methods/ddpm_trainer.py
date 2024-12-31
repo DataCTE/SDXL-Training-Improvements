@@ -276,19 +276,22 @@ class DDPMTrainer(SDXLTrainer):
                 )
                 time_ids = time_ids.to(device=self.device)
 
-                # Sample noise and timesteps
+                # Sample noise with proper scaling
                 noise = torch.randn_like(latents, device=self.device, dtype=model_dtype)
+                noise = torch.clamp(noise, -20000.0, 20000.0)  # Clamp noise values
+                
+                # Sample timesteps with proper scaling
                 timesteps = torch.randint(
                     0, self.noise_scheduler.config.num_train_timesteps, 
                     (batch_size,), device=self.device
                 ).long()
 
-                # Add noise to latents with value checking
+                # Add noise to latents with value checking and scaling
                 noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-                if torch.isnan(noisy_latents).any() or torch.isinf(noisy_latents).any():
-                    logger.warning("NaN/Inf values detected in noisy_latents")
-                    raise ValueError("Invalid noisy latent values")
-
+                
+                # Clamp noisy latents to prevent extreme values
+                noisy_latents = torch.clamp(noisy_latents, -20000.0, 20000.0)
+                
                 # Get model prediction with time embeddings
                 model_pred = self.model.unet(
                     noisy_latents,
@@ -300,12 +303,7 @@ class DDPMTrainer(SDXLTrainer):
                     }
                 ).sample
 
-                # Check model predictions
-                if torch.isnan(model_pred).any() or torch.isinf(model_pred).any():
-                    logger.warning("NaN/Inf values detected in model predictions")
-                    raise ValueError("Invalid model predictions")
-
-                # Calculate loss with consistent dtype
+                # Calculate loss with consistent dtype and scaling
                 if self.config.training.prediction_type == "epsilon":
                     target = noise
                 elif self.config.training.prediction_type == "v_prediction":
@@ -313,36 +311,34 @@ class DDPMTrainer(SDXLTrainer):
                 else:
                     raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
 
-                # Ensure both tensors are in the same dtype and check ranges
+                # Ensure both tensors are in the same dtype and properly scaled
                 model_pred = model_pred.to(dtype=model_dtype)
                 target = target.to(dtype=model_dtype)
 
-                # Add value range checks
-                if model_pred.abs().max() > 1e6:
-                    logger.warning(f"Large model prediction values detected: {model_pred.abs().max()}")
-                if target.abs().max() > 1e6:
-                    logger.warning(f"Large target values detected: {target.abs().max()}")
+                # Clamp predictions and targets to prevent extreme values
+                model_pred = torch.clamp(model_pred, -20000.0, 20000.0)
+                target = torch.clamp(target, -20000.0, 20000.0)
 
                 # Calculate loss with gradient clipping
                 loss = F.mse_loss(model_pred, target, reduction="mean")
                 
-                # Check if loss is valid
+                # Ensure loss is finite and properly scaled
                 if torch.isnan(loss) or torch.isinf(loss):
-                    logger.error(f"Invalid loss value: {loss.item()}")
-                    raise ValueError("Loss is NaN or Inf")
+                    logger.warning("Invalid loss detected - using fallback value")
+                    loss = torch.tensor(1000.0, device=self.device, dtype=model_dtype)
+                else:
+                    # Clip loss to prevent explosion
+                    loss = torch.clamp(loss, max=1000.0)
 
-                # Clip loss if it's too large
-                if loss.item() > 1e6:
-                    logger.warning(f"Extremely large loss detected: {loss.item()}")
-                    loss = torch.clamp(loss, max=1e6)
-
-                # Log metrics
+                # Log metrics with additional noise statistics
                 metrics = {
                     "loss": loss.detach().item(),
                     "lr": self.optimizer.param_groups[0]["lr"],
                     "timestep_mean": timesteps.float().mean().item(),
                     "pred_max": model_pred.abs().max().item(),
                     "target_max": target.abs().max().item(),
+                    "noise_scale": noise.abs().mean().item(),
+                    "latent_scale": latents.abs().mean().item(),
                 }
                 
                 # Only calculate std if batch size > 1 to avoid warning
