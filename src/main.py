@@ -526,8 +526,7 @@ def main():
         with setup_environment(args):
             device = setup_device_and_logging(config)
             
-            # Log device information
-            logger.info(f"Using device: {device}")
+            
            
             
             model = setup_model(config, device)
