@@ -35,6 +35,10 @@ class DDPMTrainer(SDXLTrainer):
         )
         self.noise_scheduler = model.noise_scheduler
         
+        # Get model dtype from parameters and ensure VAE matches
+        model_dtype = next(self.model.parameters()).dtype
+        self.model.vae.to(dtype=model_dtype)
+        
     def train(self, num_epochs: int):
         """Execute training loop for specified number of epochs."""
         total_steps = len(self.train_dataloader) * num_epochs
