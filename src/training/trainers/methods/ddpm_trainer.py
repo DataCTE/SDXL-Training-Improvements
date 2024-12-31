@@ -281,14 +281,11 @@ class DDPMTrainer(SDXLTrainer):
                 else:
                     metrics["timestep_std"] = 0.0  # or None if you prefer
                 
-                if self.wandb_logger and is_main_process():
-                    self.wandb_logger.log_metrics(metrics)
-
-            return {
-                "loss": loss,
-                "metrics": metrics
-            }
-            
+                return {
+                    "loss": loss,
+                    "metrics": metrics
+                }
+                
         except Exception as e:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise
