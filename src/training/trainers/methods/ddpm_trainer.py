@@ -316,36 +316,35 @@ class DDPMTrainer(SDXLTrainer):
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Execute single training step with memory optimizations."""
         try:
-            # Clear cache before forward pass
-            torch.cuda.empty_cache()
-            
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
             # Generate cache key from image path
             cache_key = self.cache_manager.get_cache_key(batch["image_path"])
             
-            # Load cached latents
-            latents = self.cache_manager.load_tensors(cache_key)["model_input"].to(
-                device=self.device, 
-                dtype=model_dtype
-            )
+            # Load all cached data at once
+            cached_data = self.cache_manager.load_tensors(cache_key)
+            if cached_data is None:
+                raise ValueError(f"No cached data found for key: {cache_key}")
             
-            # Move other batch data to device efficiently
-            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
+            # Extract all cached tensors and move to device with correct dtype
+            latents = cached_data["model_input"].to(device=self.device, dtype=model_dtype)
+            prompt_embeds = cached_data["prompt_embeds"].to(device=self.device, dtype=model_dtype)
+            pooled_prompt_embeds = cached_data["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
+            metadata = cached_data.get("metadata", {})
             
-            # Store image dimensions
-            image_height, image_width = batch["original_sizes"][0]  # Use original size from batch
+            # Use cached metadata for dimensions and coordinates
+            original_size = metadata["original_size"]
+            bucket_size = metadata["bucket_size"]
             
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
-                # Prepare time embeddings for SDXL
+                # Prepare time embeddings using cached metadata
                 batch_size = latents.shape[0]
                 time_ids = self._get_add_time_ids(
-                    original_sizes=batch["original_sizes"],
-                    crops_coords_top_left=batch["crop_top_lefts"],
-                    target_size=(image_height, image_width),
+                    original_sizes=[original_size] * batch_size,  # Use cached original size
+                    crops_coords_top_left=[(0, 0)] * batch_size,  # Use cached crop coords if available
+                    target_size=bucket_size,  # Use cached bucket size
                     dtype=prompt_embeds.dtype,
                     batch_size=batch_size
                 )
