@@ -6,6 +6,7 @@ from typing import Dict, Optional, Any
 from torch import Tensor
 from tqdm import tqdm
 from collections import defaultdict
+import time
 
 from src.core.logging import get_logger, MetricsLogger
 from src.training.trainers.sdxl_trainer import SDXLTrainer
@@ -63,131 +64,107 @@ class FlowMatchingTrainer(SDXLTrainer):
     def train(self, num_epochs: int):
         """Execute training loop for specified number of epochs."""
         total_steps = len(self.train_dataloader) * num_epochs
+        logger.info(f"Starting Flow Matching training with {total_steps} total steps ({num_epochs} epochs)")
+        
+        # Initialize progress tracking
+        global_step = 0
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
             desc="Training Flow Matching",
             position=0,
             leave=True,
-            ncols=100
+            dynamic_ncols=True,
+            mininterval=0.1,
+            smoothing=0.1
         )
         
         try:
-            if is_main_process() and self.wandb_logger:
-                # Log initial model configuration
-                self.wandb_logger.log_model(
-                    model=self.model,
-                    optimizer=self.optimizer
-                )
-                
-                # Log training configuration
-                self.wandb_logger.log_hyperparams({
-                    'num_epochs': num_epochs,
-                    'total_steps': total_steps,
-                    'batch_size': self.config.training.batch_size,
-                    'learning_rate': self.config.optimizer.learning_rate,
-                    'method': 'flow_matching'
-                })
-            
             for epoch in range(num_epochs):
+                logger.info(f"Starting epoch {epoch + 1}/{num_epochs}")
                 self.model.train()
                 epoch_loss = 0.0
                 num_steps = len(self.train_dataloader)
-                epoch_metrics = defaultdict(float)
                 
                 for step, batch in enumerate(self.train_dataloader):
-                    # Zero gradients
-                    self.optimizer.zero_grad()
+                    step_start_time = time.time()
+                    global_step = epoch * num_steps + step
                     
-                    # Execute training step
-                    step_output = self.training_step(batch)
-                    loss = step_output["loss"]
-                    metrics = step_output["metrics"]
-                    
-                    # Update epoch metrics
-                    for k, v in metrics.items():
-                        epoch_metrics[k] += v
-                    
-                    # Backward pass and optimization
-                    loss.backward()
-                    if self.config.training.max_grad_norm > 0:
-                        grad_norm = torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(),
-                            self.config.training.max_grad_norm
-                        )
-                        metrics['grad_norm'] = grad_norm.item()
-                    self.optimizer.step()
-                    
-                    # Update progress
+                    # Training step
+                    loss, metrics = self._execute_training_step(batch)
                     epoch_loss += loss.item()
-                    current_step = epoch * num_steps + step + 1
+                    
+                    step_time = time.time() - step_start_time
                     
                     if is_main_process():
-                        # Update progress bar with more detailed stats
+                        # Log detailed step info periodically
+                        if step == 0 or step % 10 == 0:
+                            logger.info(
+                                f"E{epoch + 1}[{step}/{num_steps}] "
+                                f"Loss: {loss.item():.4f} "
+                                f"Time: {step_time:.2f}s "
+                                f"GPU: {torch.cuda.memory_allocated()/1024**2:.0f}MB"
+                            )
+                        
+                        # Update progress bar
+                        progress_bar.update(1)
                         progress_bar.set_postfix(
                             {
-                                'epoch': f"{epoch + 1}/{num_epochs}",
-                                'step': f"{step + 1}/{num_steps}",
-                                'loss': f"{loss.item():.4f}",
-                                'avg_loss': f"{epoch_loss / (step + 1):.4f}",
-                                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}"
+                                'E': f"{epoch + 1}/{num_epochs}",
+                                'S': f"{step + 1}/{num_steps}",
+                                'Loss': f"{loss.item():.4f}",
+                                'Time': f"{step_time:.1f}s"
                             },
                             refresh=True
                         )
-                        progress_bar.update(1)
                         
-                        # Log step metrics
+                        # Log metrics
                         if self.wandb_logger:
-                            self.wandb_logger.log_metrics({
-                                'epoch': epoch + 1,
-                                'step': current_step,
-                                'global_step': current_step,
-                                'learning_rate': self.optimizer.param_groups[0]['lr'],
-                                **metrics,
-                                'gpu_memory_allocated': torch.cuda.memory_allocated() / 1024**2,
-                                'gpu_memory_reserved': torch.cuda.memory_reserved() / 1024**2
-                            })
-                        
-                        # Print periodic updates to console
-                        if step % max(1, num_steps // 10) == 0:
-                            logger.info(
-                                f"Epoch {epoch + 1}/{num_epochs} "
-                                f"[{step + 1}/{num_steps}] "
-                                f"Loss: {loss.item():.4f} "
-                                f"Avg Loss: {epoch_loss / (step + 1):.4f} "
-                                f"LR: {self.optimizer.param_groups[0]['lr']:.2e}"
+                            self.wandb_logger.log_metrics(
+                                {
+                                    'epoch': epoch + 1,
+                                    'step': step + 1,
+                                    'global_step': global_step,
+                                    'loss': loss.item(),
+                                    'step_time': step_time,
+                                    **metrics
+                                },
+                                step=global_step
                             )
                 
-                # Log epoch metrics
+                # Log epoch summary
                 avg_epoch_loss = epoch_loss / num_steps
-                avg_epoch_metrics = {k: v / num_steps for k, v in epoch_metrics.items()}
+                logger.info(f"Epoch {epoch + 1} completed - Avg Loss: {avg_epoch_loss:.4f}")
                 
-                if is_main_process():
-                    logger.info(
-                        f"\nEpoch {epoch + 1}/{num_epochs} completed - "
-                        f"Average Loss: {avg_epoch_loss:.6f}\n"
-                    )
-                    if self.wandb_logger:
-                        self.wandb_logger.log_metrics({
-                            'epoch': epoch + 1,
-                            'epoch_loss': avg_epoch_loss,
-                            'epoch_learning_rate': self.optimizer.param_groups[0]['lr'],
-                            **{f"epoch_{k}": v for k, v in avg_epoch_metrics.items()}
-                        })
-        
         except Exception as e:
-            logger.error(
-                "Training loop failed",
-                exc_info=True,
-                extra={
-                    'epoch': epoch if 'epoch' in locals() else None,
-                    'step': step if 'step' in locals() else None,
-                    'error': str(e)
-                }
-            )
+            logger.error(f"Training failed at epoch {epoch + 1}, step {step + 1}", exc_info=True)
             raise
         finally:
             progress_bar.close()
+
+    def _execute_training_step(self, batch):
+        """Execute single training step with proper error handling."""
+        try:
+            self.optimizer.zero_grad()
+            step_output = self.compute_loss(self.model, batch)
+            loss = step_output["loss"]
+            metrics = step_output["metrics"]
+            
+            loss.backward()
+            if self.config.training.max_grad_norm > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config.training.max_grad_norm
+                )
+                metrics['grad_norm'] = grad_norm.item()
+            
+            self.optimizer.step()
+            
+            return loss, metrics
+            
+        except Exception as e:
+            logger.error("Flow Matching training step failed", exc_info=True)
+            raise
 
     def compute_loss(self, model, batch, generator=None) -> Dict[str, Tensor]:
         """Compute training loss."""
