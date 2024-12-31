@@ -334,10 +334,14 @@ class DDPMTrainer(SDXLTrainer):
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
                 # Convert images to latent space
                 with torch.no_grad():
+                    # First get the VAE output
                     latents = self.model.vae.encode(pixel_values).latent_dist.sample()
-                    # Clamp latents before scaling
-                    latents = torch.clamp(latents, -20000.0, 20000.0)
+                    
+                    # Apply scaling factor first (usually 0.13025)
                     latents = latents * self.model.vae.config.scaling_factor
+                    
+                    # Then clamp the scaled values
+                    latents = torch.clamp(latents, -20000.0, 20000.0)
                     
                     # Add check for latent values
                     if torch.isnan(latents).any() or torch.isinf(latents).any():
