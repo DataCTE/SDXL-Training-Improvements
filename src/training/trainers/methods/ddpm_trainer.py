@@ -205,6 +205,9 @@ class DDPMTrainer(SDXLTrainer):
             prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
             
+            # Store image dimensions before processing
+            image_height, image_width = pixel_values.shape[-2:]
+            
             # Use context manager for mixed precision
             with torch.cuda.amp.autocast(enabled=self.mixed_precision != "no"):
                 # Convert images to latent space
@@ -221,7 +224,7 @@ class DDPMTrainer(SDXLTrainer):
                 time_ids = self._get_add_time_ids(
                     original_sizes=batch["original_sizes"],
                     crops_coords_top_left=batch["crop_top_lefts"],
-                    target_size=(pixel_values.shape[-2], pixel_values.shape[-1]),  # Use original image dimensions
+                    target_size=(image_height, image_width),  # Use stored dimensions
                     dtype=prompt_embeds.dtype,
                     batch_size=batch_size
                 )
