@@ -319,33 +319,25 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Get cache key using the same method as CacheManager
-            path_str = str(batch["path"][0])  # Get first path from batch
-            cache_key = self.cache_manager.get_cache_key(path_str)
+            # Extract latents and embeddings directly from batch
+            # These should already be cached and loaded by the dataloader
+            latents = batch["latents"].to(device=self.device, dtype=model_dtype)
+            prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
-            # Load all cached data at once
-            cached_data = self.cache_manager.load_tensors(cache_key)
-            if cached_data is None:
-                raise ValueError(f"No cached data found for key: {cache_key}")
-            
-            # Extract all cached tensors and move to device with correct dtype
-            latents = cached_data["pixel_values"].to(device=self.device, dtype=model_dtype)
-            prompt_embeds = cached_data["prompt_embeds"].to(device=self.device, dtype=model_dtype)
-            pooled_prompt_embeds = cached_data["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
-            metadata = cached_data.get("metadata", {})
-            
-            # Use cached metadata for dimensions and coordinates
-            original_size = metadata["original_size"]
-            bucket_size = metadata["bucket_size"]
-            
+            # Get metadata from batch
+            original_size = batch["original_size"]
+            target_size = batch["target_size"]
+            crop_coords = batch.get("crop_coords", [(0, 0)] * latents.shape[0])
+
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
-                # Prepare time embeddings using cached metadata
+                # Prepare time embeddings using metadata
                 batch_size = latents.shape[0]
                 time_ids = self._get_add_time_ids(
-                    original_sizes=[original_size] * batch_size,  # Use cached original size
-                    crops_coords_top_left=[(0, 0)] * batch_size,  # Use cached crop coords if available
-                    target_size=bucket_size,  # Use cached bucket size
+                    original_sizes=original_size,  # Should be a list of tuples
+                    crops_coords_top_left=crop_coords,  # Should be a list of tuples
+                    target_size=target_size,  # Should be a tuple
                     dtype=prompt_embeds.dtype,
                     batch_size=batch_size
                 )

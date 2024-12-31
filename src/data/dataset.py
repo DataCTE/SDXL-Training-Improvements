@@ -115,68 +115,29 @@ class AspectBucketDataset(Dataset):
             logger.error("Failed to initialize dataset", exc_info=True)
             raise
 
-    def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
-        """Get a single item from the dataset with robust error handling."""
-        try:
-            image_path = self.image_paths[idx]
-            caption = self.captions[idx]
-
-            # Try cache first if enabled
-            if self.config.global_config.cache.use_cache:
-                cached_data = self.cache_manager.load_latents(
-                    image_path,
-                    device=self.preprocessing_pipeline.device  # Load directly to correct device
-                )
-                if cached_data is not None:
-                    return cached_data
-
-            # Process on GPU via pipeline
-            processed = self.preprocessing_pipeline._process_single_image(
-                image_path=image_path,
-                config=self.config
-            )
-            if processed is None:
-                return None
-
-            # Get text embeddings (already on GPU from pipeline)
-            encoded_text = self.preprocessing_pipeline.encode_prompt(
-                batch={"text": [caption]},
-                proportion_empty_prompts=0.0
-            )
-
-            # Everything stays on GPU until collation
-            result = {
-                "pixel_values": processed["pixel_values"],  # Already on GPU
-                "original_size": processed["original_size"],
-                "crop_coords": processed["crop_coords"],
-                "target_size": processed["target_size"],
-                "prompt_embeds": encoded_text["prompt_embeds"],
-                "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
-                "text": caption
-            }
-
-            # Cache if enabled (cache manager handles CPU conversion)
-            if self.config.global_config.cache.use_cache:
-                self.cache_manager.save_latents(
-                    tensors={
-                        "pixel_values": processed["pixel_values"],
-                        "prompt_embeds": encoded_text["prompt_embeds"],
-                        "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"]
-                    },
-                    original_path=image_path,
-                    metadata={
-                        "original_size": processed["original_size"],
-                        "crop_coords": processed["crop_coords"],
-                        "target_size": processed["target_size"],
-                        "text": caption
-                    }
-                )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error processing dataset item {idx}: {e}", exc_info=True)
-            return None
+    def __getitem__(self, idx):
+        # Get the item metadata
+        item = self.items[idx]
+        path = item["path"]
+        
+        # Get cache key
+        cache_key = self.cache_manager.get_cache_key(path)
+        
+        # Load cached tensors
+        cached_data = self.cache_manager.load_tensors(cache_key)
+        if cached_data is None:
+            raise ValueError(f"No cached data found for key: {cache_key}")
+        
+        # Return batch with all necessary components
+        return {
+            "latents": cached_data["pixel_values"],
+            "prompt_embeds": cached_data["prompt_embeds"],
+            "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
+            "text": item.get("text", ""),  # Original text prompt
+            "original_size": cached_data["metadata"]["original_size"],
+            "target_size": cached_data["metadata"]["target_size"],
+            "crop_coords": cached_data["metadata"].get("crop_coords", (0, 0))
+        }
 
     def _setup_image_config(self):
         """Set up image configuration parameters."""
