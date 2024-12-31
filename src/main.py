@@ -24,7 +24,7 @@ from src.core.logging import (
     WandbLogger,
     TensorLogger,
     create_enhanced_logger,
-    ColoredFormatter
+    EnhancedFormatter
 )
 from src.core.memory import (
     create_stream_context,
@@ -498,10 +498,10 @@ def main():
         # Clear any existing handlers
         root_logger.handlers.clear()
         
-        # Add console handler with colored formatting
+        # Add console handler with enhanced formatting
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(getattr(logging, config.global_config.logging.console_level))
-        console_handler.setFormatter(ColoredFormatter(
+        console_handler.setFormatter(EnhancedFormatter(
             '%(asctime)s | %(levelname)s | %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
