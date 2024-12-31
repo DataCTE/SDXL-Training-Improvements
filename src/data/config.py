@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 class ModelConfig:
     pretrained_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
     model_type: str = "sdxl"
-    prediction_type: str = "epsilon"  # or "v_prediction"
     num_timesteps: int = 1000
     sigma_min: float = 0.002
     sigma_max: float = 80.0
@@ -60,6 +59,7 @@ class TrainingConfig:
     num_epochs: int = 100
     save_every: int = 1
     method: str = "ddpm"  # or "flow_matching"
+    prediction_type: str = "epsilon" # epsilon, v_prediction
     num_workers: int = 4
     pin_memory: bool = True
     gradient_accumulation_steps: int = 1

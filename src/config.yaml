@@ -2,7 +2,6 @@
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
   model_type: "sdxl"
-  prediction_type: "v_prediction"
   num_timesteps: 1000
   sigma_min: 0.002
   sigma_max: 2000.0
@@ -25,6 +24,7 @@ training:
   num_epochs: 10
   save_every: 1
   method: "ddpm"  # Options: ddpm, flow_matching
+  prediction_type: "v_prediction"
   num_workers: 4
   pin_memory: true
   gradient_accumulation_steps: 1
@@ -32,6 +32,8 @@ training:
   enable_xformers: true
   clip_grad_norm: 1.0
   num_inference_steps: 50
+  debug_mode: false
+  save_final_model: true
   method_config:
     scheduler:
       rescale_betas_zero_snr: true  # Only expose this setting
