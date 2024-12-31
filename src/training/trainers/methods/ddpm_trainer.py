@@ -78,12 +78,12 @@ class DDPMTrainer(SDXLTrainer):
         # Verify effective batch size with fixed gradient accumulation
         self.effective_batch_size = (
             config.training.batch_size * 
-            self.gradient_accumulation_steps  # Use fixed value
+            config.training.gradient_accumulation_steps  # Use config value
         )
         logger.info(
             f"Effective batch size: {self.effective_batch_size} "
             f"(batch_size={config.training.batch_size} × "
-            f"gradient_accumulation_steps={self.gradient_accumulation_steps})"
+            f"gradient_accumulation_steps={config.training.gradient_accumulation_steps})"
         )
         
         # Enable memory optimizations on individual components
