@@ -169,9 +169,13 @@ class CacheManager:
             return None
         
         try:
-            # Load tensors directly to target device
+            # Load tensors directly to target device with safe loading
             device = device or self.device
-            tensors = torch.load(entry["tensors_path"], map_location=device)
+            tensors = torch.load(
+                entry["tensors_path"], 
+                map_location=device,
+                weights_only=True  # Enable safe loading
+            )
             
             # Load metadata with buffered IO
             with open(entry["metadata_path"]) as f:
@@ -335,11 +339,15 @@ class CacheManager:
                 key, tensor_path, metadata_path, metadata = entry_data
                 try:
                     with ThreadPoolExecutor() as pool:
-                        # Parallel file writes
+                        # Parallel file writes with safe saving
                         await asyncio.gather(
                             asyncio.get_event_loop().run_in_executor(
                                 pool,
-                                lambda: torch.save(tensors, tensor_path)
+                                lambda: torch.save(
+                                    tensors, 
+                                    tensor_path,
+                                    weights_only=True  # Enable safe saving
+                                )
                             ),
                             asyncio.get_event_loop().run_in_executor(
                                 pool,

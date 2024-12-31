@@ -50,7 +50,9 @@ class DDPMTrainer(SDXLTrainer):
             position=0,
             leave=True,
             ncols=100,
-            dynamic_ncols=True  # Allow dynamic width adjustment
+            dynamic_ncols=True,  # Allow dynamic width adjustment
+            mininterval=0.1,  # Update at most every 0.1 seconds
+            smoothing=0.1  # Smoother progress bar updates
         )
         
         try:
