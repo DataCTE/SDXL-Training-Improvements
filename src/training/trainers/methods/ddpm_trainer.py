@@ -2,6 +2,7 @@
 import torch
 from typing import Dict, Any, Optional
 import torch.nn.functional as F
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from collections import defaultdict
 import time
@@ -79,7 +80,7 @@ class DDPMTrainer(SDXLTrainer):
         # Set up mixed precision training
         self.mixed_precision = config.training.mixed_precision
         if self.mixed_precision != "no":
-            self.scaler = torch.cuda.amp.GradScaler()
+            self.scaler = GradScaler()
         
         self.noise_scheduler = model.noise_scheduler
         
@@ -239,7 +240,7 @@ class DDPMTrainer(SDXLTrainer):
             image_height, image_width = pixel_values.shape[-2:]
             
             # Use context manager for mixed precision
-            with torch.cuda.amp.autocast(enabled=self.mixed_precision != "no"):
+            with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
                 # Convert images to latent space
                 with torch.no_grad():
                     latents = self.model.vae.encode(pixel_values).latent_dist.sample()
