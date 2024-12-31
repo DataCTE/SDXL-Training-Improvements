@@ -105,6 +105,7 @@ class DDPMTrainer(SDXLTrainer):
         
         # Initialize progress tracking
         global_step = 0
+        current_loss = float('inf')  # Initialize loss tracking
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
@@ -118,7 +119,6 @@ class DDPMTrainer(SDXLTrainer):
                 logger.info(f"Starting epoch {epoch + 1}/{num_epochs}")
                 self.model.train()
                 
-                # Track accumulated loss
                 accumulated_loss = 0.0
                 accumulated_metrics = defaultdict(float)
                 
@@ -129,13 +129,17 @@ class DDPMTrainer(SDXLTrainer):
                     loss, metrics = self._execute_training_step(
                         batch, 
                         accumulate=True,
-                        is_last_accumulation_step=((step + 1) % self.config.training.gradient_accumulation_steps == 0)
+                        is_last_accumulation_step=((step + 1) % self.gradient_accumulation_steps == 0)
                     )
                     step_time = time.time() - step_start_time
                     
+                    # Update current loss tracking, handling NaN values
+                    if not torch.isnan(loss):
+                        current_loss = loss.item()
+                    
                     # Update progress bar
                     progress_bar.set_postfix(
-                        {'Loss': f"{loss.item():.4f}", 'Time': f"{step_time:.1f}s"},
+                        {'Loss': f"{current_loss:.4f}", 'Time': f"{step_time:.1f}s"},
                         refresh=True
                     )
                     
