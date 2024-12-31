@@ -39,6 +39,9 @@ class DDPMTrainer(SDXLTrainer):
             **kwargs
         )
         
+        # Initialize accumulation factor
+        self.current_accumulation_factor = 1.0
+        
         # Verify effective batch size with gradient accumulation
         self.effective_batch_size = (
             config.training.batch_size * 
@@ -219,13 +222,14 @@ class DDPMTrainer(SDXLTrainer):
         try:
             # Verify batch size
             actual_batch_size = batch["pixel_values"].shape[0]
-            if actual_batch_size != self.config.training.batch_size and is_main_process():
-                logger.warning(
-                    f"Received batch size {actual_batch_size} differs from "
-                    f"configured batch size {self.config.training.batch_size}"
-                )
-                # Adjust gradient accumulation steps for this batch
+            if actual_batch_size != self.config.training.batch_size:
                 self.current_accumulation_factor = self.config.training.batch_size / actual_batch_size
+                if is_main_process():
+                    logger.warning(
+                        f"Received batch size {actual_batch_size} differs from "
+                        f"configured batch size {self.config.training.batch_size}. "
+                        f"Adjusting accumulation factor to {self.current_accumulation_factor:.2f}"
+                    )
             else:
                 self.current_accumulation_factor = 1.0
 
