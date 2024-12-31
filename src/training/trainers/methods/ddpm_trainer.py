@@ -125,68 +125,82 @@ class DDPMTrainer(SDXLTrainer):
                 for step, batch in enumerate(self.train_dataloader):
                     step_start_time = time.time()
                     
-                    # Execute training step and accumulate gradients
-                    loss, metrics = self._execute_training_step(
-                        batch, 
-                        accumulate=True,
-                        is_last_accumulation_step=((step + 1) % self.gradient_accumulation_steps == 0)
-                    )
-                    step_time = time.time() - step_start_time
-                    
-                    # Update current loss tracking, handling NaN values
-                    if not torch.isnan(loss):
+                    try:
+                        # Execute training step and accumulate gradients
+                        loss, metrics = self._execute_training_step(
+                            batch, 
+                            accumulate=True,
+                            is_last_accumulation_step=((step + 1) % self.gradient_accumulation_steps == 0)
+                        )
+                        
+                        # Skip this batch if loss is invalid
+                        if torch.isnan(loss) or torch.isinf(loss):
+                            logger.warning(f"Skipping step {step} due to invalid loss")
+                            continue
+                            
+                        step_time = time.time() - step_start_time
+                        
+                        # Update current loss tracking
                         current_loss = loss.item()
-                    
-                    # Update progress bar
-                    progress_bar.set_postfix(
-                        {'Loss': f"{current_loss:.4f}", 'Time': f"{step_time:.1f}s"},
-                        refresh=True
-                    )
-                    
-                    # Accumulate loss and metrics
-                    accumulated_loss += loss.item()
-                    for k, v in metrics.items():
-                        accumulated_metrics[k] += v
-                    
-                    # Only update weights after accumulating enough gradients
-                    if (step + 1) % self.config.training.gradient_accumulation_steps == 0:
-                        # Scale loss and metrics by accumulation steps
-                        effective_loss = accumulated_loss / self.config.training.gradient_accumulation_steps
-                        effective_metrics = {
-                            k: v / self.config.training.gradient_accumulation_steps 
-                            for k, v in accumulated_metrics.items()
-                        }
                         
-                        # Update weights
-                        if self.config.training.clip_grad_norm > 0:
-                            grad_norm = torch.nn.utils.clip_grad_norm_(
-                                self.model.parameters(),
-                                self.config.training.clip_grad_norm
-                            )
-                            effective_metrics['grad_norm'] = grad_norm.item()
+                        # Update progress bar
+                        progress_bar.set_postfix(
+                            {'Loss': f"{current_loss:.4f}", 'Time': f"{step_time:.1f}s"},
+                            refresh=True
+                        )
                         
-                        self.optimizer.step()
-                        self.optimizer.zero_grad()
+                        # Accumulate loss and metrics
+                        accumulated_loss += loss.item()
+                        for k, v in metrics.items():
+                            accumulated_metrics[k] += v
                         
-                        # Reset accumulators
-                        accumulated_loss = 0.0
-                        accumulated_metrics.clear()
+                        # Only update weights after accumulating enough gradients
+                        if (step + 1) % self.config.training.gradient_accumulation_steps == 0:
+                            # Scale loss and metrics by accumulation steps
+                            effective_loss = accumulated_loss / self.config.training.gradient_accumulation_steps
+                            effective_metrics = {
+                                k: v / self.config.training.gradient_accumulation_steps 
+                                for k, v in accumulated_metrics.items()
+                            }
+                            
+                            # Update weights
+                            if self.config.training.clip_grad_norm > 0:
+                                grad_norm = torch.nn.utils.clip_grad_norm_(
+                                    self.model.parameters(),
+                                    self.config.training.clip_grad_norm
+                                )
+                                effective_metrics['grad_norm'] = grad_norm.item()
+                            
+                            self.optimizer.step()
+                            self.optimizer.zero_grad()
+                            
+                            # Reset accumulators
+                            accumulated_loss = 0.0
+                            accumulated_metrics.clear()
+                            
+                            # Log metrics
+                            if is_main_process() and self.wandb_logger:
+                                self.wandb_logger.log_metrics(
+                                    {
+                                        'epoch': epoch + 1,
+                                        'step': global_step,
+                                        'loss': effective_loss,
+                                        'step_time': step_time,
+                                        **effective_metrics
+                                    },
+                                    step=global_step
+                                )
                         
-                        # Log metrics
-                        if is_main_process() and self.wandb_logger:
-                            self.wandb_logger.log_metrics(
-                                {
-                                    'epoch': epoch + 1,
-                                    'step': global_step,
-                                    'loss': effective_loss,
-                                    'step_time': step_time,
-                                    **effective_metrics
-                                },
-                                step=global_step
-                            )
+                        global_step += 1
+                        progress_bar.update(1)
+                        
+                    except ValueError as e:
+                        logger.warning(f"Skipping batch due to error: {str(e)}")
+                        continue
                     
-                    global_step += 1
-                    progress_bar.update(1)
+                    except Exception as e:
+                        logger.error(f"Unexpected error during training step: {str(e)}")
+                        raise
                 
         except Exception as e:
             logger.error(f"Training failed at epoch {epoch + 1}, step {step + 1}", exc_info=True)
@@ -242,6 +256,11 @@ class DDPMTrainer(SDXLTrainer):
                     latents = self.model.vae.encode(pixel_values).latent_dist.sample()
                     latents = latents * self.model.vae.config.scaling_factor
                     
+                    # Add check for latent values
+                    if torch.isnan(latents).any() or torch.isinf(latents).any():
+                        logger.warning("NaN/Inf values detected in latents")
+                        raise ValueError("Invalid latent values")
+                    
                 # Free up memory
                 del pixel_values
                 torch.cuda.empty_cache()
@@ -251,7 +270,7 @@ class DDPMTrainer(SDXLTrainer):
                 time_ids = self._get_add_time_ids(
                     original_sizes=batch["original_sizes"],
                     crops_coords_top_left=batch["crop_top_lefts"],
-                    target_size=(image_height, image_width),  # Use stored dimensions
+                    target_size=(image_height, image_width),
                     dtype=prompt_embeds.dtype,
                     batch_size=batch_size
                 )
@@ -264,10 +283,11 @@ class DDPMTrainer(SDXLTrainer):
                     (batch_size,), device=self.device
                 ).long()
 
-                # Add noise to latents
-                noisy_latents = self.noise_scheduler.add_noise(
-                    latents, noise, timesteps
-                )
+                # Add noise to latents with value checking
+                noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+                if torch.isnan(noisy_latents).any() or torch.isinf(noisy_latents).any():
+                    logger.warning("NaN/Inf values detected in noisy_latents")
+                    raise ValueError("Invalid noisy latent values")
 
                 # Get model prediction with time embeddings
                 model_pred = self.model.unet(
@@ -280,6 +300,11 @@ class DDPMTrainer(SDXLTrainer):
                     }
                 ).sample
 
+                # Check model predictions
+                if torch.isnan(model_pred).any() or torch.isinf(model_pred).any():
+                    logger.warning("NaN/Inf values detected in model predictions")
+                    raise ValueError("Invalid model predictions")
+
                 # Calculate loss with consistent dtype
                 if self.config.training.prediction_type == "epsilon":
                     target = noise
@@ -288,25 +313,43 @@ class DDPMTrainer(SDXLTrainer):
                 else:
                     raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
 
-                # Ensure both tensors are in the same dtype for loss calculation
-                loss = F.mse_loss(
-                    model_pred.to(dtype=model_dtype),
-                    target.to(dtype=model_dtype),
-                    reduction="mean"
-                )
+                # Ensure both tensors are in the same dtype and check ranges
+                model_pred = model_pred.to(dtype=model_dtype)
+                target = target.to(dtype=model_dtype)
+
+                # Add value range checks
+                if model_pred.abs().max() > 1e6:
+                    logger.warning(f"Large model prediction values detected: {model_pred.abs().max()}")
+                if target.abs().max() > 1e6:
+                    logger.warning(f"Large target values detected: {target.abs().max()}")
+
+                # Calculate loss with gradient clipping
+                loss = F.mse_loss(model_pred, target, reduction="mean")
+                
+                # Check if loss is valid
+                if torch.isnan(loss) or torch.isinf(loss):
+                    logger.error(f"Invalid loss value: {loss.item()}")
+                    raise ValueError("Loss is NaN or Inf")
+
+                # Clip loss if it's too large
+                if loss.item() > 1e6:
+                    logger.warning(f"Extremely large loss detected: {loss.item()}")
+                    loss = torch.clamp(loss, max=1e6)
 
                 # Log metrics
                 metrics = {
                     "loss": loss.detach().item(),
                     "lr": self.optimizer.param_groups[0]["lr"],
                     "timestep_mean": timesteps.float().mean().item(),
+                    "pred_max": model_pred.abs().max().item(),
+                    "target_max": target.abs().max().item(),
                 }
                 
                 # Only calculate std if batch size > 1 to avoid warning
                 if batch_size > 1:
                     metrics["timestep_std"] = timesteps.float().std().item()
                 else:
-                    metrics["timestep_std"] = 0.0  # or None if you prefer
+                    metrics["timestep_std"] = 0.0
                 
                 return {
                     "loss": loss,
