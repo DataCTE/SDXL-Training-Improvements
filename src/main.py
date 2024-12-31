@@ -341,14 +341,29 @@ def setup_training(
         # Initialize wandb logger if enabled
         wandb_logger = None
         if config.global_config.logging.use_wandb and is_main_process():
+            # Create a descriptive run name
+            run_name = (
+                f"{config.model.model_type}"
+                f"-{config.training.method}"
+                f"-{config.optimizer.optimizer_type}"
+                f"-lr{config.optimizer.learning_rate:.2e}"
+                f"-bs{config.training.batch_size}"
+                f"-{time.strftime('%Y%m%d-%H%M%S')}"
+            )
+            
             wandb_logger = WandbLogger(
                 project=config.global_config.logging.wandb_project,
                 entity=config.global_config.logging.wandb_entity,
-                config=config.to_dict()
+                name=run_name,
+                config=config.to_dict(),
+                tags=[
+                    config.model.model_type,
+                    config.training.method,
+                    config.optimizer.optimizer_type,
+                    f"bs{config.training.batch_size}",
+                    config.training.mixed_precision
+                ]
             )
-            # Print wandb URL to console
-            if wandb_logger.run:
-                logger.info(f"\nWeights & Biases run: {wandb_logger.run.get_url()}\n")
 
         return train_dataloader, optimizer, wandb_logger
         

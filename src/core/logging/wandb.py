@@ -70,15 +70,11 @@ class WandbLogger:
                 notes=notes,
                 resume=resume
             )
-            logger.info(
-                "Initialized W&B logger",
-                extra={
-                    'project': project,
-                    'run_name': name,
-                    'tags': tags,
-                    'output_dir': str(dir)
-                }
-            )
+
+            # Print the run URL immediately after initialization
+            if self.run is not None:
+                print(f"\n🔗 Weights & Biases run: {self.run.get_url()}\n")
+                logger.info(f"Initialized W&B run: {self.run.get_url()}")
             
         except Exception as e:
             logger.error(
