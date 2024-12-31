@@ -23,7 +23,8 @@ from src.core.logging import (
     get_logger,
     WandbLogger,
     TensorLogger,
-    create_enhanced_logger
+    create_enhanced_logger,
+    ColoredFormatter
 )
 from src.core.memory import (
     create_stream_context,
@@ -101,7 +102,7 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     
     # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    
     return device
 
 def setup_model(config: Config, device: torch.device) -> StableDiffusionXL:
@@ -490,21 +491,44 @@ def main():
         log_dir = Path(config.global_config.logging.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Setup logging using the setup_logging function
-        logger, tensor_logger = setup_logging(
-            config=config.global_config.logging,
-            log_dir=str(log_dir),
-            level=config.global_config.logging.file_level,
-            filename=config.global_config.logging.filename,
-            module_name="sdxl_training",
-            capture_warnings=config.global_config.logging.capture_warnings,
-            console_level=config.global_config.logging.console_level
-        )
+        # Setup root logger first
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.DEBUG)  # Allow all messages through
         
-        # Verify logger was created successfully
-        if not logger or not hasattr(logger, 'info'):
-            raise RuntimeError("Failed to create logger")
-            
+        # Clear any existing handlers
+        root_logger.handlers.clear()
+        
+        # Add console handler with colored formatting
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(getattr(logging, config.global_config.logging.console_level))
+        console_handler.setFormatter(ColoredFormatter(
+            '%(asctime)s | %(levelname)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        root_logger.addHandler(console_handler)
+        
+        # Now setup the main logger
+        logger = get_logger("sdxl_training")
+        logger.setLevel(logging.DEBUG)
+        
+        # Add file handler if enabled
+        if config.global_config.logging.filename:
+            file_handler = logging.FileHandler(
+                log_dir / config.global_config.logging.filename,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(getattr(logging, config.global_config.logging.file_level))
+            file_handler.setFormatter(logging.Formatter(
+                '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
+                '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
+                '%(funcName)s |\n%(message)s\n',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ))
+            root_logger.addHandler(file_handler)
+        
+        # Configure warning capture
+        logging.captureWarnings(config.global_config.logging.capture_warnings)
+        
         logger.info("Logger initialized successfully")
         logger.info(f"Loaded configuration from {args.config}")
         
@@ -514,8 +538,11 @@ def main():
         with setup_environment(args):
             device = setup_device_and_logging(config)
             
-            
-           
+            if torch.cuda.is_available():
+                logger.info(f"Using CUDA device: {torch.cuda.get_device_name()}")
+                logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
+            else:
+                logger.info("Using CPU device")
             
             model = setup_model(config, device)
             
