@@ -493,7 +493,8 @@ def main():
         args = parse_args()
         config = Config.from_yaml(args.config)
         
-        # Setup logging
+        # Setup logging - store the returned logger
+        global logger  # Update the global logger
         logger = setup_logging(config.global_config.logging)
         
         # Check system limits
@@ -566,11 +567,17 @@ def main():
             'stack_trace': traceback.format_exc()
         }
         
-        logger.error(
-            "Training failed",
-            exc_info=True,
-            extra=error_context
-        )
+        # Use print for error logging if logger is not available
+        if isinstance(logger, tuple) or not hasattr(logger, 'error'):
+            print("ERROR: Training failed", file=sys.stderr)
+            print(f"Error context: {error_context}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
+        else:
+            logger.error(
+                "Training failed",
+                exc_info=True,
+                extra=error_context
+            )
         sys.exit(1)
 
 if __name__ == "__main__":
