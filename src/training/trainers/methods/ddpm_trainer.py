@@ -203,12 +203,12 @@ class DDPMTrainer(SDXLTrainer):
             
             # Scale loss by accumulation steps when accumulating
             if accumulate:
-                loss = loss / self.config.training.gradient_accumulation_steps
+                loss = loss / (self.config.training.gradient_accumulation_steps * self.current_accumulation_factor)
             
             loss.backward()
             
             # Only return the unscaled loss for logging
-            return loss * self.config.training.gradient_accumulation_steps, metrics
+            return loss * (self.config.training.gradient_accumulation_steps * self.current_accumulation_factor), metrics
             
         except Exception as e:
             logger.error("Training step failed", exc_info=True)
@@ -219,12 +219,16 @@ class DDPMTrainer(SDXLTrainer):
         try:
             # Verify batch size
             actual_batch_size = batch["pixel_values"].shape[0]
-            if actual_batch_size != self.config.training.batch_size:
+            if actual_batch_size != self.config.training.batch_size and is_main_process():
                 logger.warning(
                     f"Received batch size {actual_batch_size} differs from "
                     f"configured batch size {self.config.training.batch_size}"
                 )
-            
+                # Adjust gradient accumulation steps for this batch
+                self.current_accumulation_factor = self.config.training.batch_size / actual_batch_size
+            else:
+                self.current_accumulation_factor = 1.0
+
             # Clear cache before forward pass
             torch.cuda.empty_cache()
             
