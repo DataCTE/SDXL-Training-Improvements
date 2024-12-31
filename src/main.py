@@ -390,8 +390,9 @@ def setup_training(
             if config.training.method == "ddpm":
                 method_config.update({
                     "prediction_type": config.training.prediction_type,
-                    "num_train_timesteps": config.noise_scheduler.num_train_timesteps,
-                    "beta_schedule": config.noise_scheduler.beta_schedule
+                    "num_train_timesteps": config.training.method_config.scheduler.num_train_timesteps,
+                    "beta_schedule": config.training.method_config.scheduler.beta_schedule,
+                    "rescale_betas_zero_snr": config.training.method_config.scheduler.rescale_betas_zero_snr
                 })
             elif config.training.method == "flow_matching":
                 method_config.update({
