@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.distributed import init_process_group
 from torch.cuda.amp import autocast
+import wandb
 
 from src.core.logging import (
     setup_logging,
@@ -341,11 +342,25 @@ def setup_training(
         # Initialize wandb logger if enabled
         wandb_logger = None
         if config.global_config.logging.use_wandb and is_main_process():
+            # Initialize wandb first with config
+            if config.global_config.logging.wandb_entity:
+                wandb.init(
+                    project=config.global_config.logging.wandb_project,
+                    entity=config.global_config.logging.wandb_entity,
+                    config=config.to_dict()
+                )
+            else:
+                wandb.init(
+                    project=config.global_config.logging.wandb_project,
+                    config=config.to_dict()
+                )
+                
+            # Then create WandbLogger without entity parameter
             wandb_logger = WandbLogger(
                 project=config.global_config.logging.wandb_project,
-                entity=config.global_config.logging.wandb_entity,
                 config=config.to_dict()
             )
+            
             # Print wandb URL to console
             if wandb_logger.run:
                 logger.info(f"\nWeights & Biases run: {wandb_logger.run.get_url()}\n")
