@@ -4,6 +4,7 @@ from typing import Dict, Any
 import torch.nn.functional as F
 from tqdm import tqdm
 from collections import defaultdict
+import time
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
@@ -43,6 +44,8 @@ class DDPMTrainer(SDXLTrainer):
     def train(self, num_epochs: int):
         """Execute training loop for specified number of epochs."""
         total_steps = len(self.train_dataloader) * num_epochs
+        logger.info(f"Starting training with {total_steps} total steps ({num_epochs} epochs)")
+        
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
@@ -50,9 +53,9 @@ class DDPMTrainer(SDXLTrainer):
             position=0,
             leave=True,
             ncols=100,
-            dynamic_ncols=True,  # Allow dynamic width adjustment
-            mininterval=0.1,  # Update at most every 0.1 seconds
-            smoothing=0.1  # Smoother progress bar updates
+            dynamic_ncols=True,
+            mininterval=0.1,
+            smoothing=0.1
         )
         
         try:
@@ -74,12 +77,15 @@ class DDPMTrainer(SDXLTrainer):
                 })
             
             for epoch in range(num_epochs):
+                logger.info(f"Starting epoch {epoch + 1}/{num_epochs}")
                 self.model.train()
                 epoch_loss = 0.0
                 num_steps = len(self.train_dataloader)
                 epoch_metrics = defaultdict(float)
                 
                 for step, batch in enumerate(self.train_dataloader):
+                    step_start_time = time.time()
+                    
                     # Zero gradients
                     self.optimizer.zero_grad()
                     
@@ -87,10 +93,6 @@ class DDPMTrainer(SDXLTrainer):
                     step_output = self.training_step(batch)
                     loss = step_output["loss"]
                     metrics = step_output["metrics"]
-                    
-                    # Update epoch metrics
-                    for k, v in metrics.items():
-                        epoch_metrics[k] += v
                     
                     # Backward pass and optimization
                     loss.backward()
@@ -102,33 +104,34 @@ class DDPMTrainer(SDXLTrainer):
                         metrics['grad_norm'] = grad_norm.item()
                     self.optimizer.step()
                     
-                    # Update progress
-                    epoch_loss += loss.item()
-                    current_step = epoch * num_steps + step + 1
+                    step_time = time.time() - step_start_time
                     
                     if is_main_process():
-                        # Move progress bar update before postfix update
-                        progress_bar.update(1)
+                        if step == 0 or step % 10 == 0:  # Log first step and every 10th step
+                            logger.info(
+                                f"Step {step + 1}/{num_steps} completed in {step_time:.2f}s - "
+                                f"Loss: {loss.item():.4f} - "
+                                f"Memory: {torch.cuda.memory_allocated()/1024**2:.0f}MB"
+                            )
                         
-                        # Update progress bar with more detailed stats
+                        progress_bar.update(1)
                         progress_bar.set_postfix(
                             {
                                 'epoch': f"{epoch + 1}/{num_epochs}",
                                 'step': f"{step + 1}/{num_steps}",
                                 'loss': f"{loss.item():.4f}",
-                                'avg_loss': f"{epoch_loss / (step + 1):.4f}",
-                                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}",
-                                'pred_type': self.config.training.prediction_type
+                                'step_time': f"{step_time:.1f}s",
+                                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}"
                             },
-                            refresh=False  # Don't force refresh on every update
+                            refresh=False
                         )
                         
                         # Log step metrics
                         if self.wandb_logger:
                             self.wandb_logger.log_metrics({
                                 'epoch': epoch + 1,
-                                'step': current_step,
-                                'global_step': current_step,
+                                'step': step + 1,
+                                'global_step': epoch * len(self.train_dataloader) + step + 1,
                                 'learning_rate': self.optimizer.param_groups[0]['lr'],
                                 **metrics,
                                 'gpu_memory_allocated': torch.cuda.memory_allocated() / 1024**2,
