@@ -101,19 +101,6 @@ def setup_device_and_logging(config: Config) -> Tuple[torch.device, logging.Logg
     
     # Set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    if is_main_process():
-        logger.info(f"Using device: {device}")
-        if device.type == "cuda":
-            logger.info(f"CUDA Device: {torch.cuda.get_device_name(0)}")
-            logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-            
-            # Set mixed precision if enabled
-            if config.training.mixed_precision != "no":
-                logger.info(f"Using mixed precision: {config.training.mixed_precision}")
-                
-            if config.training.enable_xformers:
-                logger.info("xFormers optimization enabled")
 
     return device
 
