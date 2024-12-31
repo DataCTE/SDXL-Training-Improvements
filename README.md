@@ -5,6 +5,36 @@
 
 A research-focused SDXL training framework implementing cutting-edge advances in diffusion model training, with emphasis on image quality and training stability.
 
+## Adding New Training Methods
+
+The framework provides a template for easily implementing new training methods:
+
+```python
+# src/training/trainers/methods/example_method.py
+class ExampleMethodTrainer(SDXLTrainer):
+    name = "example_method"  # Your method's name
+
+    def compute_loss(self, batch: Dict[str, Tensor]) -> Dict[str, Any]:
+        """Implement your method's loss computation here."""
+        raise NotImplementedError()
+```
+
+To add a new method:
+1. Copy `example_method.py` template
+2. Implement the `compute_loss()` method with your training logic
+3. Register method in config.yaml:
+```yaml
+training:
+  method: "your_method_name"
+```
+
+The template handles all boilerplate code including:
+- Memory optimizations
+- Mixed precision training
+- Gradient accumulation
+- Progress tracking
+- Metric logging
+
 ## Training Methods
 
 ### Flow Matching with Logit-Normal Sampling [[4]](#references)
