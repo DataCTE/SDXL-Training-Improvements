@@ -116,28 +116,33 @@ class AspectBucketDataset(Dataset):
             raise
 
     def __getitem__(self, idx):
-        # Get the item metadata
-        item = self.items[idx]
-        path = item["path"]
-        
-        # Get cache key
-        cache_key = self.cache_manager.get_cache_key(path)
-        
-        # Load cached tensors
-        cached_data = self.cache_manager.load_tensors(cache_key)
-        if cached_data is None:
-            raise ValueError(f"No cached data found for key: {cache_key}")
-        
-        # Return batch with all necessary components
-        return {
-            "latents": cached_data["pixel_values"],
-            "prompt_embeds": cached_data["prompt_embeds"],
-            "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
-            "text": item.get("text", ""),  # Original text prompt
-            "original_size": cached_data["metadata"]["original_size"],
-            "target_size": cached_data["metadata"]["target_size"],
-            "crop_coords": cached_data["metadata"].get("crop_coords", (0, 0))
-        }
+        """Get a single item from the dataset."""
+        try:
+            # Get image path and caption
+            image_path = self.image_paths[idx]
+            caption = self.captions[idx]
+            
+            # Get cache key
+            cache_key = self.cache_manager.get_cache_key(image_path)
+            
+            # Load cached tensors
+            cached_data = self.cache_manager.load_tensors(cache_key)
+            if cached_data is None:
+                raise ValueError(f"No cached data found for key: {cache_key}")
+            
+            # Return batch with all necessary components
+            return {
+                "latents": cached_data["pixel_values"],
+                "prompt_embeds": cached_data["prompt_embeds"],
+                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
+                "text": caption,  # Use the actual caption
+                "original_size": cached_data["metadata"]["original_size"],
+                "target_size": cached_data["metadata"]["target_size"],
+                "crop_coords": cached_data["metadata"].get("crop_coords", (0, 0))
+            }
+        except Exception as e:
+            logger.error(f"Error getting dataset item {idx}: {str(e)}")
+            raise
 
     def _setup_image_config(self):
         """Set up image configuration parameters."""

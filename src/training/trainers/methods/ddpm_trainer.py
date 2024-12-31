@@ -186,7 +186,7 @@ class DDPMTrainer(SDXLTrainer):
         
         # Initialize progress tracking
         global_step = 0
-        current_loss = float('inf')  # Initialize loss tracking
+        current_loss = float('inf')
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
@@ -204,9 +204,9 @@ class DDPMTrainer(SDXLTrainer):
                 accumulated_metrics = defaultdict(float)
                 
                 for step, batch in enumerate(self.train_dataloader):
-                    step_start_time = time.time()
-                    
                     try:
+                        step_start_time = time.time()
+                        
                         # Execute training step and accumulate gradients
                         loss, metrics = self._execute_training_step(
                             batch, 
@@ -271,20 +271,17 @@ class DDPMTrainer(SDXLTrainer):
                                     },
                                     step=global_step
                                 )
-                        
-                        global_step += 1
-                        progress_bar.update(1)
-                        
-                    except ValueError as e:
-                        logger.warning(f"Skipping batch due to error: {str(e)}")
-                        continue
-                    
+                            
+                            global_step += 1
+                            progress_bar.update(1)
+                            
                     except Exception as e:
-                        logger.error(f"Unexpected error during training step: {str(e)}")
-                        raise
-                
+                        logger.warning(f"Error in training step {step}: {str(e)}")
+                        continue
+                        
+               
         except Exception as e:
-            logger.error(f"Training failed at epoch {epoch + 1}, step {step + 1}", exc_info=True)
+            logger.error(f"Training loop failed: {str(e)}", exc_info=True)
             raise
         finally:
             progress_bar.close()
