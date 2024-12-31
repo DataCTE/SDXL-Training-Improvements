@@ -73,68 +73,79 @@ class FlowMatchingTrainer(SDXLTrainer):
             disable=not is_main_process(),
             desc="Training Flow Matching",
             position=0,
-            leave=True,
-            dynamic_ncols=True,
-            mininterval=0.1,
-            smoothing=0.1
+            leave=True
         )
         
         try:
             for epoch in range(num_epochs):
                 logger.info(f"Starting epoch {epoch + 1}/{num_epochs}")
                 self.model.train()
-                epoch_loss = 0.0
-                num_steps = len(self.train_dataloader)
+                # Track accumulated loss
+                accumulated_loss = 0.0
+                accumulated_metrics = defaultdict(float)
                 
                 for step, batch in enumerate(self.train_dataloader):
                     step_start_time = time.time()
-                    global_step = epoch * num_steps + step
                     
                     # Training step
-                    loss, metrics = self._execute_training_step(batch)
-                    epoch_loss += loss.item()
+                    loss, metrics = self._execute_training_step(
+                        batch,
+                        accumulate=True,
+                        is_last_accumulation_step=((step + 1) % self.config.training.gradient_accumulation_steps == 0)
+                    )
                     
                     step_time = time.time() - step_start_time
                     
-                    if is_main_process():
-                        # Log detailed step info periodically
-                        if step == 0 or step % 10 == 0:
-                            logger.info(
-                                f"E{epoch + 1}[{step}/{num_steps}] "
-                                f"Loss: {loss.item():.4f} "
-                                f"Time: {step_time:.2f}s "
-                                f"GPU: {torch.cuda.memory_allocated()/1024**2:.0f}MB"
-                            )
+                    # Update progress bar
+                    progress_bar.set_postfix(
+                        {'Loss': f"{loss.item():.4f}", 'Time': f"{step_time:.1f}s"},
+                        refresh=True
+                    )
+                    
+                    # Accumulate loss and metrics
+                    accumulated_loss += loss.item()
+                    for k, v in metrics.items():
+                        accumulated_metrics[k] += v
                         
-                        # Update progress bar
-                        progress_bar.update(1)
-                        progress_bar.set_postfix(
-                            {
-                                'E': f"{epoch + 1}/{num_epochs}",
-                                'S': f"{step + 1}/{num_steps}",
-                                'Loss': f"{loss.item():.4f}",
-                                'Time': f"{step_time:.1f}s"
-                            },
-                            refresh=True
-                        )
+                    # Only update weights after accumulating enough gradients
+                    if (step + 1) % self.config.training.gradient_accumulation_steps == 0:
+                        # Scale loss and metrics by accumulation steps
+                        effective_loss = accumulated_loss / self.config.training.gradient_accumulation_steps
+                        effective_metrics = {
+                            k: v / self.config.training.gradient_accumulation_steps 
+                            for k, v in accumulated_metrics.items()
+                        }
+                        
+                        # Update weights
+                        if self.config.training.clip_grad_norm > 0:
+                            grad_norm = torch.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.config.training.clip_grad_norm
+                            )
+                            effective_metrics['grad_norm'] = grad_norm.item()
+                        
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+                        
+                        # Reset accumulators
+                        accumulated_loss = 0.0
+                        accumulated_metrics.clear()
                         
                         # Log metrics
-                        if self.wandb_logger:
+                        if is_main_process() and self.wandb_logger:
                             self.wandb_logger.log_metrics(
                                 {
                                     'epoch': epoch + 1,
-                                    'step': step + 1,
-                                    'global_step': global_step,
-                                    'loss': loss.item(),
+                                    'step': global_step,
+                                    'loss': effective_loss,
                                     'step_time': step_time,
-                                    **metrics
+                                    **effective_metrics
                                 },
                                 step=global_step
                             )
-                
-                # Log epoch summary
-                avg_epoch_loss = epoch_loss / num_steps
-                logger.info(f"Epoch {epoch + 1} completed - Avg Loss: {avg_epoch_loss:.4f}")
+                    
+                    global_step += 1
+                    progress_bar.update(1)
                 
         except Exception as e:
             logger.error(f"Training failed at epoch {epoch + 1}, step {step + 1}", exc_info=True)
