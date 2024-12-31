@@ -23,8 +23,7 @@ from src.core.logging import (
     get_logger,
     WandbLogger,
     TensorLogger,
-    create_enhanced_logger,
-    EnhancedFormatter
+    create_enhanced_logger
 )
 from src.core.memory import (
     create_stream_context,
@@ -491,44 +490,20 @@ def main():
         log_dir = Path(config.global_config.logging.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Setup root logger first
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.DEBUG)  # Allow all messages through
+        # Setup logging using the existing setup_logging function
+        logger, tensor_logger = setup_logging(
+            config=config.global_config.logging,
+            log_dir=str(log_dir),
+            level=config.global_config.logging.file_level,
+            filename=config.global_config.logging.filename,
+            module_name="sdxl_training",
+            capture_warnings=config.global_config.logging.capture_warnings,
+            console_level=config.global_config.logging.console_level
+        )
         
-        # Clear any existing handlers
-        root_logger.handlers.clear()
-        
-        # Add console handler with enhanced formatting
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, config.global_config.logging.console_level))
-        console_handler.setFormatter(EnhancedFormatter(
-            '%(asctime)s | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        ))
-        root_logger.addHandler(console_handler)
-        
-        # Now setup the main logger
-        logger = get_logger("sdxl_training")
-        logger.setLevel(logging.DEBUG)
-        
-        # Add file handler if enabled
-        if config.global_config.logging.filename:
-            file_handler = logging.FileHandler(
-                log_dir / config.global_config.logging.filename,
-                encoding='utf-8'
-            )
-            file_handler.setLevel(getattr(logging, config.global_config.logging.file_level))
-            file_handler.setFormatter(logging.Formatter(
-                '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
-                '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
-                '%(funcName)s |\n%(message)s\n',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            ))
-            root_logger.addHandler(file_handler)
-        
-        # Configure warning capture
-        logging.captureWarnings(config.global_config.logging.capture_warnings)
-        
+        if not logger:
+            raise RuntimeError("Failed to initialize logger")
+            
         logger.info("Logger initialized successfully")
         logger.info(f"Loaded configuration from {args.config}")
         
