@@ -61,6 +61,12 @@ class FlowMatchingTrainer(SDXLTrainer):
                     extra={'error': str(e)}
                 )
 
+        # Use fixed gradient accumulation steps
+        self.effective_batch_size = (
+            config.training.batch_size * 
+            self.gradient_accumulation_steps  # Use fixed value
+        )
+
     def train(self, num_epochs: int):
         """Execute training loop for specified number of epochs."""
         total_steps = len(self.train_dataloader) * num_epochs

@@ -27,7 +27,7 @@ training:
   prediction_type: "v_prediction"
   num_workers: 4
   pin_memory: true
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 4  # Fixed to 4 steps for stable training
   mixed_precision: "bf16"  # Options: fp16, bf16, no
   enable_xformers: true
   clip_grad_norm: 1.0

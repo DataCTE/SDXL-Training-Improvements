@@ -62,7 +62,7 @@ class TrainingConfig:
     prediction_type: str = "epsilon" # epsilon, v_prediction
     num_workers: int = 4
     pin_memory: bool = True
-    gradient_accumulation_steps: int = 1
+    gradient_accumulation_steps: int = 4  # Fixed to 4 steps for stable training
     mixed_precision: str = "fp16"  # or "bf16", "no"
     enable_xformers: bool = True
     clip_grad_norm: float = 1.0

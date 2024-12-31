@@ -31,6 +31,9 @@ class SDXLTrainer(BaseRouter):
             **kwargs
         )
         
+        # Get gradient accumulation steps from config
+        self.gradient_accumulation_steps = config.training.gradient_accumulation_steps
+        
         # Verify batch size matches config
         if config and hasattr(train_dataloader, 'batch_size'):
             if train_dataloader.batch_size != config.training.batch_size:

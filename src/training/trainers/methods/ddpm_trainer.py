@@ -39,18 +39,15 @@ class DDPMTrainer(SDXLTrainer):
             **kwargs
         )
         
-        # Initialize accumulation factor
-        self.current_accumulation_factor = 1.0
-        
-        # Verify effective batch size with gradient accumulation
+        # Verify effective batch size with fixed gradient accumulation
         self.effective_batch_size = (
             config.training.batch_size * 
-            config.training.gradient_accumulation_steps
+            self.gradient_accumulation_steps  # Use fixed value
         )
         logger.info(
             f"Effective batch size: {self.effective_batch_size} "
             f"(batch_size={config.training.batch_size} × "
-            f"gradient_accumulation_steps={config.training.gradient_accumulation_steps})"
+            f"gradient_accumulation_steps={self.gradient_accumulation_steps})"
         )
         
         # Enable memory optimizations on individual components
@@ -206,12 +203,12 @@ class DDPMTrainer(SDXLTrainer):
             
             # Scale loss by accumulation steps when accumulating
             if accumulate:
-                loss = loss / (self.config.training.gradient_accumulation_steps * self.current_accumulation_factor)
+                loss = loss / self.config.training.gradient_accumulation_steps
             
             loss.backward()
             
             # Only return the unscaled loss for logging
-            return loss * (self.config.training.gradient_accumulation_steps * self.current_accumulation_factor), metrics
+            return loss * self.config.training.gradient_accumulation_steps, metrics
             
         except Exception as e:
             logger.error("Training step failed", exc_info=True)
@@ -222,16 +219,11 @@ class DDPMTrainer(SDXLTrainer):
         try:
             # Verify batch size
             actual_batch_size = batch["pixel_values"].shape[0]
-            if actual_batch_size != self.config.training.batch_size:
-                self.current_accumulation_factor = self.config.training.batch_size / actual_batch_size
-                if is_main_process():
-                    logger.warning(
-                        f"Received batch size {actual_batch_size} differs from "
-                        f"configured batch size {self.config.training.batch_size}. "
-                        f"Adjusting accumulation factor to {self.current_accumulation_factor:.2f}"
-                    )
-            else:
-                self.current_accumulation_factor = 1.0
+            if actual_batch_size != self.config.training.batch_size and is_main_process():
+                logger.warning(
+                    f"Received batch size {actual_batch_size} differs from "
+                    f"configured batch size {self.config.training.batch_size}"
+                )
 
             # Clear cache before forward pass
             torch.cuda.empty_cache()
