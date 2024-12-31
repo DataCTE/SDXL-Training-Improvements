@@ -328,7 +328,7 @@ class DDPMTrainer(SDXLTrainer):
                 raise ValueError(f"No cached data found for key: {cache_key}")
             
             # Extract all cached tensors and move to device with correct dtype
-            latents = cached_data["model_input"].to(device=self.device, dtype=model_dtype)
+            latents = cached_data["pixel_values"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = cached_data["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = cached_data["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             metadata = cached_data.get("metadata", {})
