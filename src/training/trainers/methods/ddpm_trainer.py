@@ -1,11 +1,13 @@
 """DDPM trainer implementation with memory optimizations."""
 import torch
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import torch.nn.functional as F
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from collections import defaultdict
 import time
+import json
+from pathlib import Path
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
@@ -38,6 +40,28 @@ class DDPMTrainer(SDXLTrainer):
             config=config,
             **kwargs
         )
+        
+        # Initialize cache manager for tag weights
+        from src.data.preprocessing.cache_manager import CacheManager
+        self.cache_manager = CacheManager(
+            cache_dir=config.global_config.cache.cache_dir,
+            device=device
+        )
+        
+        # Load tag weights from cache
+        self.tag_weights_cache = {}
+        self.tag_index_path = Path(config.global_config.cache.cache_dir) / "tag_weights_index.json"
+        
+        if not self.tag_index_path.exists():
+            raise ValueError(f"Tag weights index not found at {self.tag_index_path}. Please run preprocessing first.")
+        
+        try:
+            with open(self.tag_index_path, 'r') as f:
+                self.tag_weights_data = json.load(f)
+                logger.info("Loaded tag weights from cache")
+        except Exception as e:
+            logger.error(f"Failed to load tag weights cache: {e}")
+            raise
         
         # Verify effective batch size with fixed gradient accumulation
         self.effective_batch_size = (
@@ -98,15 +122,30 @@ class DDPMTrainer(SDXLTrainer):
         
         logger.info(f"Model components using dtype: {model_dtype}")
         
-        # Initialize tag weighter
-        from src.data.preprocessing.tag_weighter import create_tag_weighter
-        self.tag_weighter = create_tag_weighter(
-            config=config,
-            captions=[batch["text"] for batch in train_dataloader.dataset],
-            cache_path=None  # Let it use default cache path
-        )
-        logger.info("Initialized tag-based loss weighting")
+    def get_tag_weights(self, texts: List[str]) -> torch.Tensor:
+        """Get cached tag weights for a batch of texts."""
+        weights = []
+        for text in texts:
+            # Look up weight in cached data
+            if text in self.tag_weights_cache:
+                weight = self.tag_weights_cache[text]
+            else:
+                # Get from loaded json if not in memory cache
+                image_data = next(
+                    (data for _, data in self.tag_weights_data["images"].items() 
+                     if data["caption"] == text),
+                    None
+                )
+                if image_data is None:
+                    logger.warning(f"No cached weight found for text: {text[:50]}...")
+                    weight = 1.0  # Default weight if not found
+                else:
+                    weight = float(image_data["total_weight"])
+                self.tag_weights_cache[text] = weight
+            weights.append(weight)
         
+        return torch.tensor(weights, dtype=torch.float32, device=self.device)
+
     def train(self, num_epochs: int):
         """Execute training loop with proper gradient accumulation."""
         total_steps = len(self.train_dataloader) * num_epochs
@@ -331,10 +370,10 @@ class DDPMTrainer(SDXLTrainer):
                 # Calculate unweighted loss
                 base_loss = F.mse_loss(model_pred, target, reduction="none")  # Keep per-sample losses
                 
-                # Get tag weights for the batch
-                tag_weights = self.tag_weighter.get_batch_weights(batch["text"]).to(self.device)
+                # Get tag weights from cache for the batch
+                tag_weights = self.get_tag_weights(batch["text"])
                 
-                # Reshape weights to match loss dimensions if needed
+                # Reshape weights to match loss dimensions
                 tag_weights = tag_weights.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
                 
                 # Apply tag weights to loss
