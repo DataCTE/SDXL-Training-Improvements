@@ -19,7 +19,6 @@ class SDXLTrainer(BaseRouter):
         device: torch.device,
         wandb_logger: Optional[WandbLogger] = None,
         config: Optional[Config] = None,
-        training_method: Optional[str] = None,
         **kwargs
     ):
         super().__init__(
@@ -32,37 +31,6 @@ class SDXLTrainer(BaseRouter):
             **kwargs
         )
         
-        # Initialize trainer directly based on class type
-        if self.__class__ == SDXLTrainer:
-            if not training_method:
-                raise ValueError("training_method must be specified for SDXLTrainer")
-                
-            # Import trainers here to avoid circular imports
-            from src.training.trainers.methods.ddpm_trainer import DDPMTrainer
-            from src.training.trainers.methods.flow_matching_trainer import FlowMatchingTrainer
-            
-            trainer_map = {
-                "ddpm": DDPMTrainer,
-                "flow_matching": FlowMatchingTrainer
-            }
-            
-            if training_method not in trainer_map:
-                raise ValueError(f"Unknown training method: {training_method}. Available methods: {list(trainer_map.keys())}")
-            
-            # Create trainer instance
-            trainer_cls = trainer_map[training_method]
-            self.trainer = trainer_cls(
-                model=model,
-                optimizer=optimizer,
-                train_dataloader=train_dataloader,
-                device=device,
-                wandb_logger=wandb_logger,
-                config=config,
-                **kwargs
-            )
-            
-            logger.info(f"Initialized {trainer_cls.__name__} for training method: {training_method}")
-
     def train(self, num_epochs: int):
         """Delegate training to the specific trainer implementation."""
         if not hasattr(self, 'trainer'):

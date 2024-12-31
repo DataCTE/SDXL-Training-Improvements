@@ -1,5 +1,5 @@
 from diffusers import DDPMScheduler
-from src.training.trainer import create_trainer
+from src.main import create_trainer
 from src.training.trainers.sdxl_trainer import SDXLTrainer, save_checkpoint
 from src.training.trainers.base_router import BaseRouter
 from src.training.trainers.methods.ddpm_trainer import DDPMTrainer

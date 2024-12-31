@@ -10,6 +10,7 @@ from src.core.logging import get_logger
 from src.models import StableDiffusionXL
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.core.distributed import is_main_process
+from src.core.types import DataType, ModelWeightDtypes
 
 logger = get_logger(__name__)
 
@@ -37,9 +38,22 @@ class DDPMTrainer(SDXLTrainer):
         )
         self.noise_scheduler = model.noise_scheduler
         
-        # Get model dtype from parameters and ensure VAE matches
-        model_dtype = next(self.model.parameters()).dtype
-        self.model.vae.to(dtype=model_dtype)
+        # Check if using AdamWBF16 optimizer and convert model to bfloat16 if needed
+        if config.optimizer.optimizer_type == "adamw_bf16":
+            logger.info("Converting model to bfloat16 format for AdamWBF16 optimizer")
+            # Create bfloat16 weight configuration
+            bfloat16_weights = ModelWeightDtypes.from_single_dtype(DataType.BFLOAT_16)
+            # Convert model components to bfloat16
+            self.model.unet.to(bfloat16_weights.unet.to_torch_dtype())
+            self.model.vae.to(bfloat16_weights.vae.to_torch_dtype())
+            self.model.text_encoder_1.to(bfloat16_weights.text_encoder.to_torch_dtype())
+            self.model.text_encoder_2.to(bfloat16_weights.text_encoder_2.to_torch_dtype())
+            model_dtype = torch.bfloat16
+        else:
+            # Get model dtype from parameters for other optimizers
+            model_dtype = next(self.model.parameters()).dtype
+        
+        logger.info(f"Model components using dtype: {model_dtype}")
         
     def train(self, num_epochs: int):
         """Execute training loop for specified number of epochs."""
@@ -132,10 +146,10 @@ class DDPMTrainer(SDXLTrainer):
             metrics = step_output["metrics"]
             
             loss.backward()
-            if self.config.training.max_grad_norm > 0:
+            if self.config.training.clip_grad_norm > 0:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(),
-                    self.config.training.max_grad_norm
+                    self.config.training.clip_grad_norm
                 )
                 metrics['grad_norm'] = grad_norm.item()
             
@@ -218,9 +232,14 @@ class DDPMTrainer(SDXLTrainer):
                 "loss": loss.detach().item(),
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "timestep_mean": timesteps.float().mean().item(),
-                "timestep_std": timesteps.float().std().item()
             }
-
+            
+            # Only calculate std if batch size > 1 to avoid warning
+            if batch_size > 1:
+                metrics["timestep_std"] = timesteps.float().std().item()
+            else:
+                metrics["timestep_std"] = 0.0  # or None if you prefer
+            
             if self.wandb_logger and is_main_process():
                 self.wandb_logger.log_metrics(metrics)
 
