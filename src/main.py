@@ -491,25 +491,47 @@ def main():
     # Initialize these before try block so they're available in error handling
     device = None
     logger = None
+    config = None
     
     try:
         # Parse args and load config first
         args = parse_args()
         config = Config.from_yaml(args.config)
         
-        # Setup logging - ensure we get a proper logger instance
-        logger = setup_logging(config.global_config.logging)
-        if not hasattr(logger, 'info'):  # Verify logger is properly initialized
-            raise RuntimeError("Logger initialization failed")
+        # Create log directory if it doesn't exist
+        log_dir = Path(config.global_config.logging.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Now that logger is initialized, we can use it
+        # Setup enhanced logging with proper configuration
+        logger = create_enhanced_logger(
+            name="sdxl_training",
+            log_dir=str(log_dir),
+            console_level=config.global_config.logging.console_level,
+            file_level=config.global_config.logging.file_level,
+            filename=config.global_config.logging.filename,
+            capture_warnings=config.global_config.logging.capture_warnings
+        )
+        
+        # Verify logger was created successfully
+        if not logger or not hasattr(logger, 'info'):
+            raise RuntimeError("Failed to create logger")
+            
         logger.info("Logger initialized successfully")
+        logger.info(f"Loaded configuration from {args.config}")
         
-        # Check system limits (now using print to avoid logger issues)
+        # Check system limits using print for reliability
         check_system_limits()
         
         with setup_environment(args):
             device = setup_device_and_logging(config)
+            
+            # Log device information
+            logger.info(f"Using device: {device}")
+            if torch.cuda.is_available():
+                logger.info(f"CUDA device count: {torch.cuda.device_count()}")
+                logger.info(f"CUDA current device: {torch.cuda.current_device()}")
+                logger.info(f"CUDA device name: {torch.cuda.get_device_name()}")
+            
             model = setup_model(config, device)
             
             if model is None:
@@ -526,7 +548,7 @@ def main():
                 image_paths=image_paths,
                 captions=captions
             )
-
+            
             # Create trainer through SDXLTrainer for proper delegation
             trainer = create_trainer(
                 config=config,
@@ -569,13 +591,16 @@ def main():
             'device': str(device) if device is not None else 'unknown',
             'cuda_available': torch.cuda.is_available(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            'config_file': args.config if 'args' in locals() else 'unknown',
+            'config': config.to_dict() if config else None,
             'error': str(e),
             'stack_trace': traceback.format_exc()
         }
         
         # Always use print for error logging to ensure output
-        print("ERROR: Training failed", file=sys.stderr)
+        print("\nERROR: Training failed", file=sys.stderr)
         print(f"Error context: {error_context}", file=sys.stderr)
+        print("\nFull traceback:", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
         
         # Try to use logger if available
