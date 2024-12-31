@@ -386,47 +386,6 @@ def check_system_limits():
         logger.warning(f"Could not increase file limit: {e}")
         logger.warning("You may need to increase system file limits (ulimit -n)")
 
-def worker_init_fn(
-    worker_id: int, 
-    config: Config,
-    device: torch.device
-) -> None:
-    """Initialize worker process."""
-    # Set different seed for each worker
-    worker_seed = torch.initial_seed() % 2**32
-    torch.manual_seed(worker_seed)
-    
-    # Disable TorchDynamo in worker processes
-    os.environ['TORCHDYNAMO_DISABLE'] = '1'
-    
-    # Set thread count for worker
-    torch.set_num_threads(1)
-    
-    try:
-        # Initialize cache manager
-        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-        cache_manager = CacheManager(
-            cache_dir=cache_dir,
-            max_cache_size=config.global_config.cache.max_cache_size,
-            device=device
-        )
-
-        # Get worker's dataset instance
-        worker_info = torch.utils.data.get_worker_info()
-        if worker_info is not None:
-            # Initialize model in worker
-            model = setup_model(config, device)
-            
-            # Initialize preprocessing pipeline in the worker
-            worker_info.dataset.preprocessing_pipeline.initialize_worker(
-                model=model,
-                cache_manager=cache_manager,
-                device=device
-            )
-            
-    except Exception as e:
-        logger.error(f"Failed to initialize worker {worker_id}: {str(e)}", exc_info=True)
-        raise
 
 def main():
     """Main training entry point."""
