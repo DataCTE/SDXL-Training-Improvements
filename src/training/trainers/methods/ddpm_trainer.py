@@ -36,6 +36,21 @@ class DDPMTrainer(SDXLTrainer):
             config=config,
             **kwargs
         )
+        
+        # Enable memory optimizations
+        self.model.enable_gradient_checkpointing()
+        self.model.enable_xformers_memory_efficient_attention()
+        
+        # Move model components to device and optimize memory
+        self.model.to(device)
+        if hasattr(self.model, "enable_model_cpu_offload"):
+            self.model.enable_model_cpu_offload()
+        
+        # Set up automatic mixed precision
+        self.mixed_precision = config.training.get("mixed_precision", "no")
+        if self.mixed_precision != "no":
+            self.scaler = torch.cuda.amp.GradScaler()
+        
         self.noise_scheduler = model.noise_scheduler
         
         # Check if using AdamWBF16 optimizer and convert model to bfloat16 if needed
@@ -162,92 +177,100 @@ class DDPMTrainer(SDXLTrainer):
             raise
 
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-        """Execute single training step."""
+        """Execute single training step with memory optimizations."""
         try:
+            # Clear cache before forward pass
+            torch.cuda.empty_cache()
+            
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
+            
+            # Move batch data to device efficiently
+            pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype, non_blocking=True)
+            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype, non_blocking=True)
+            
+            # Use context manager for mixed precision
+            with torch.cuda.amp.autocast(enabled=self.mixed_precision != "no"):
+                # Convert images to latent space
+                with torch.no_grad():
+                    latents = self.model.vae.encode(pixel_values).latent_dist.sample()
+                    latents = latents * self.model.vae.config.scaling_factor
+                    
+                # Free up memory
+                del pixel_values
+                torch.cuda.empty_cache()
+                
+                # Prepare time embeddings for SDXL
+                batch_size = latents.shape[0]
+                time_ids = self._get_add_time_ids(
+                    original_sizes=batch["original_sizes"],
+                    crops_coords_top_left=batch["crop_top_lefts"],
+                    target_size=(pixel_values.shape[-2], pixel_values.shape[-1]),  # Use original image dimensions
+                    dtype=prompt_embeds.dtype,
+                    batch_size=batch_size
+                )
+                time_ids = time_ids.to(device=self.device)
 
-            # Get batch data and ensure consistent dtype
-            pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype)
-            prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
-            original_sizes = batch["original_sizes"]
-            crop_top_lefts = batch["crop_top_lefts"]
+                # Sample noise and timesteps
+                noise = torch.randn_like(latents, device=self.device, dtype=model_dtype)
+                timesteps = torch.randint(
+                    0, self.noise_scheduler.config.num_train_timesteps, 
+                    (batch_size,), device=self.device
+                ).long()
 
-            # Convert images to latent space using VAE
-            latents = self.model.vae.encode(pixel_values).latent_dist.sample()
-            latents = latents * self.model.vae.config.scaling_factor
+                # Add noise to latents
+                noisy_latents = self.noise_scheduler.add_noise(
+                    latents, noise, timesteps
+                )
 
-            # Prepare time embeddings for SDXL
-            batch_size = latents.shape[0]
-            time_ids = self._get_add_time_ids(
-                original_sizes=original_sizes,
-                crops_coords_top_left=crop_top_lefts,
-                target_size=(pixel_values.shape[-2], pixel_values.shape[-1]),  # Use original image dimensions
-                dtype=prompt_embeds.dtype,
-                batch_size=batch_size
-            )
-            time_ids = time_ids.to(device=self.device)
+                # Get model prediction with time embeddings
+                model_pred = self.model.unet(
+                    noisy_latents,
+                    timesteps,
+                    prompt_embeds,
+                    added_cond_kwargs={
+                        "text_embeds": pooled_prompt_embeds,
+                        "time_ids": time_ids
+                    }
+                ).sample
 
-            # Sample noise and timesteps
-            noise = torch.randn_like(latents, device=self.device, dtype=model_dtype)
-            timesteps = torch.randint(
-                0, self.noise_scheduler.config.num_train_timesteps, 
-                (batch_size,), device=self.device
-            ).long()
+                # Calculate loss with consistent dtype
+                if self.config.training.prediction_type == "epsilon":
+                    target = noise
+                elif self.config.training.prediction_type == "v_prediction":
+                    target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
+                else:
+                    raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
 
-            # Add noise to latents
-            noisy_latents = self.noise_scheduler.add_noise(
-                latents, noise, timesteps
-            )
+                # Ensure both tensors are in the same dtype for loss calculation
+                loss = F.mse_loss(
+                    model_pred.to(dtype=model_dtype),
+                    target.to(dtype=model_dtype),
+                    reduction="mean"
+                )
 
-            # Get model prediction with time embeddings
-            model_pred = self.model.unet(
-                noisy_latents,
-                timesteps,
-                prompt_embeds,
-                added_cond_kwargs={
-                    "text_embeds": pooled_prompt_embeds,
-                    "time_ids": time_ids
+                # Log metrics
+                metrics = {
+                    "loss": loss.detach().item(),
+                    "lr": self.optimizer.param_groups[0]["lr"],
+                    "timestep_mean": timesteps.float().mean().item(),
                 }
-            ).sample
-
-            # Calculate loss with consistent dtype
-            if self.config.training.prediction_type == "epsilon":
-                target = noise
-            elif self.config.training.prediction_type == "v_prediction":
-                target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
-            else:
-                raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
-
-            # Ensure both tensors are in the same dtype for loss calculation
-            loss = F.mse_loss(
-                model_pred.to(dtype=model_dtype),
-                target.to(dtype=model_dtype),
-                reduction="mean"
-            )
-
-            # Log metrics
-            metrics = {
-                "loss": loss.detach().item(),
-                "lr": self.optimizer.param_groups[0]["lr"],
-                "timestep_mean": timesteps.float().mean().item(),
-            }
-            
-            # Only calculate std if batch size > 1 to avoid warning
-            if batch_size > 1:
-                metrics["timestep_std"] = timesteps.float().std().item()
-            else:
-                metrics["timestep_std"] = 0.0  # or None if you prefer
-            
-            if self.wandb_logger and is_main_process():
-                self.wandb_logger.log_metrics(metrics)
+                
+                # Only calculate std if batch size > 1 to avoid warning
+                if batch_size > 1:
+                    metrics["timestep_std"] = timesteps.float().std().item()
+                else:
+                    metrics["timestep_std"] = 0.0  # or None if you prefer
+                
+                if self.wandb_logger and is_main_process():
+                    self.wandb_logger.log_metrics(metrics)
 
             return {
                 "loss": loss,
                 "metrics": metrics
             }
-
+            
         except Exception as e:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise
