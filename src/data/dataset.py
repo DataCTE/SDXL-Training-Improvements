@@ -118,6 +118,9 @@ class AspectBucketDataset(Dataset):
             # Ensure all required keys are present
             return {
                 "vae_latents": cached_data["vae_latents"],
+                "prompt_embeds": cached_data["prompt_embeds"],
+                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
+                "time_ids": cached_data["time_ids"],
                 "metadata": {
                     "original_size": cached_data["metadata"]["original_size"],
                     "crop_coords": cached_data["metadata"]["crop_coords"],
@@ -404,11 +407,32 @@ class AspectBucketDataset(Dataset):
             for path in image_paths:
                 processed = self._process_single_image(path, config)
                 processed_images.append(processed)
-                
+            
+            # Batch encode text for all valid images
+            valid_captions = [
+                caption for img_data, caption in zip(processed_images, captions)
+                if img_data is not None
+            ]
+            
+            if valid_captions:
+                encoded_text = self.encode_prompt(
+                    batch={"text": valid_captions},
+                    proportion_empty_prompts=0.0
+                )
+            
             # Save results and prepare return values
             results = []
+            caption_idx = 0
+            
             for img_data, caption, path in zip(processed_images, captions, image_paths):
                 if img_data is not None:
+                    # Compute time ids
+                    time_ids = self._compute_time_ids(
+                        original_size=img_data["original_size"],
+                        crops_coords_top_left=img_data["crop_coords"],
+                        target_size=img_data["target_size"]
+                    )
+                    
                     # Add caption to processed data
                     result = {
                         **img_data,
@@ -419,6 +443,9 @@ class AspectBucketDataset(Dataset):
                     if self.config.global_config.cache.use_cache:
                         tensors = {
                             "vae_latents": img_data["vae_latents"],
+                            "prompt_embeds": encoded_text["prompt_embeds"][caption_idx],
+                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][caption_idx],
+                            "time_ids": time_ids
                         }
                         metadata = {
                             "original_size": img_data["original_size"],
@@ -426,12 +453,13 @@ class AspectBucketDataset(Dataset):
                             "target_size": img_data["target_size"],
                             "text": caption
                         }
-                        self.cache_manager.save_vae_latents(tensors, path, metadata)
+                        self.cache_manager.save_latents(tensors, path, metadata)
+                        caption_idx += 1
                     
                     results.append(result)
                 else:
                     results.append(None)
-                    
+                
             return results
             
         except Exception as e:
@@ -495,6 +523,30 @@ class AspectBucketDataset(Dataset):
     def get_aspect_buckets(self) -> List[Tuple[int, int]]:
         """Return cached buckets."""
         return self.buckets
+
+    def _compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
+        """Compute time embeddings for SDXL."""
+        # Ensure inputs are proper tuples
+        if not isinstance(original_size, (tuple, list)):
+            original_size = (original_size, original_size)
+        if not isinstance(crops_coords_top_left, (tuple, list)):
+            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
+        if not isinstance(target_size, (tuple, list)):
+            target_size = (target_size, target_size)
+        
+        # Combine all values into a single list
+        time_ids = [
+            original_size[0],    # Original height
+            original_size[1],    # Original width
+            crops_coords_top_left[0],  # Crop top
+            crops_coords_top_left[1],  # Crop left
+            target_size[0],     # Target height
+            target_size[1],     # Target width
+        ]
+        
+        # Create tensor with proper device and dtype
+        device = device or self.device
+        return torch.tensor([time_ids], device=device, dtype=dtype)
 
 def create_dataset(
     config: Config,

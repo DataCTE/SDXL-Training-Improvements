@@ -137,11 +137,11 @@ class CacheManager:
             logger.error(f"Failed to save tensors: {e}")
             return False
 
-    def save_vae_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
-        """Save VAE encoded latents to cache.
+    def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
+        """Save VAE encoded latents and other tensors to cache.
         
         Args:
-            tensors: Dict containing 'vae_latents' key with VAE encoded tensor
+            tensors: Dict containing tensors to save ('vae_latents', 'prompt_embeds', 'pooled_prompt_embeds', 'time_ids')
             original_path: Original image path
             metadata: Additional metadata to store
         """
@@ -150,9 +150,12 @@ class CacheManager:
         metadata_path = self.metadata_dir / f"{cache_key}.json"
         
         try:
-            # Only save VAE encoded latents
+            # Save all tensors to CPU
             tensors_to_save = {
-                "vae_latents": tensors["vae_latents"].cpu()  # Save VAE latents
+                "vae_latents": tensors["vae_latents"].cpu(),
+                "prompt_embeds": tensors["prompt_embeds"].cpu(),
+                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu(),
+                "time_ids": tensors["time_ids"].cpu()
             }
             
             if not self._save_tensor_file(tensors_to_save, tensors_path):
@@ -180,7 +183,7 @@ class CacheManager:
             return True
             
         except Exception as e:
-            logger.error(f"Failed to save VAE latents to cache: {e}")
+            logger.error(f"Failed to save tensors to cache: {e}")
             return False
 
     def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
@@ -270,7 +273,7 @@ class CacheManager:
 
             # Validate required keys
             required_keys = {
-                "tensors": {"vae_latents"},
+                "tensors": {"vae_latents", "prompt_embeds", "pooled_prompt_embeds", "time_ids"},
                 "metadata": {"original_size", "crop_coords", "target_size"}
             }
             
