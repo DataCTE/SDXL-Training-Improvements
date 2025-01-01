@@ -255,8 +255,6 @@ class FlowMatchingTrainer(SDXLTrainer):
             pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
-            original_sizes = batch["original_sizes"]
-            crop_top_lefts = batch["crop_top_lefts"]
 
             # Convert images to latent space using VAE
             latents = self.model.vae.encode(pixel_values).latent_dist.sample()
@@ -320,19 +318,7 @@ class FlowMatchingTrainer(SDXLTrainer):
             }
 
         except Exception as e:
-            logger.error(
-                "Error computing Flow Matching loss",
-                exc_info=True,
-                extra={
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'batch_keys': list(batch.keys()) if isinstance(batch, dict) else None,
-                    'device_info': {
-                        'x1_device': x1.device if 'x1' in locals() else None,
-                        'prompt_device': prompt_embeds.device if 'prompt_embeds' in locals() else None
-                    }
-                }
-            )
+            logger.error("Error computing Flow Matching loss", exc_info=True)
             raise
 
     def _log_tensor_shapes(self, tensors: Dict[str, Tensor], step: str):
