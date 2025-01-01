@@ -473,8 +473,18 @@ class PreprocessingPipeline:
             top = (new_h - target_h) // 2
             img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
         
+        # After resizing and cropping, encode with VAE
+        with torch.no_grad():
+            # Add batch dimension and encode
+            img_tensor = img_tensor.unsqueeze(0)
+            latents = self.model.vae.encode(img_tensor).latent_dist.sample()
+            # Scale latents
+            latents = latents * self.model.vae.config.scaling_factor
+            # Remove batch dimension
+            latents = latents.squeeze(0)
+
         return {
-            "pixel_values": img_tensor,  # Stays on GPU
+            "pixel_values": latents,  # Now this contains VAE latents
             "original_size": original_size,
             "target_size": (target_w, target_h),
             "bucket_index": bucket_idx,
