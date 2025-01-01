@@ -1,9 +1,8 @@
 """High-performance dataset implementation for SDXL training."""
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
-from contextlib import contextmanager
 
 import torch
 import torch.backends.cudnn
@@ -21,7 +20,6 @@ from src.data.preprocessing import (
     create_tag_weighter_with_index
 )
 from src.models.encoders import CLIPEncoder
-from src.core.memory.tensor import create_stream_context
 import torch.nn.functional as F
 
 logger = get_logger(__name__)
@@ -45,18 +43,8 @@ class AspectBucketDataset(Dataset):
         self.config = config
         self.is_train = is_train
         
-        # CUDA setup
-        if torch.cuda.is_available():
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.set_float32_matmul_precision('medium')
-            
-            self.device = device or torch.device('cuda')
-            self.device_id = device_id if device_id is not None else 0
-        else:
-            self.device = torch.device('cpu')
-            self.device_id = None
+        # Move CUDA setup to separate method
+        self._setup_device(device, device_id)
 
         # Core components
         self.model = model
@@ -98,6 +86,20 @@ class AspectBucketDataset(Dataset):
         # Precompute latents if caching enabled
         if config.global_config.cache.use_cache:
             self._precompute_latents()
+
+    def _setup_device(self, device: Optional[torch.device], device_id: Optional[int]):
+        """Setup CUDA device and optimizations."""
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+            
+            self.device = device or torch.device('cuda')
+            self.device_id = device_id if device_id is not None else 0
+        else:
+            self.device = torch.device('cpu')
+            self.device_id = None
 
     def __getitem__(self, idx):
         """Get a single item from the dataset."""
@@ -147,51 +149,52 @@ class AspectBucketDataset(Dataset):
             return None
 
     def _precompute_latents(self) -> None:
-        """Simplified precompute latents."""
-        cached_status = {
-            path: self.cache_manager.is_cached(path) 
-            for path in self.image_paths
-        }
-        
-        total_images = len(self)
-        already_cached = sum(cached_status.values())
-        remaining_images = total_images - already_cached
-        
-        if remaining_images == 0:
-            logger.info("All images already cached")
-            return
-        
-        batch_size = 8
-        pbar = tqdm(
-            total=remaining_images,
-            desc="Precomputing latents",
-            unit="img"
-        )
-
-        # Process uncached images
-        uncached_indices = [
-            i for i, path in enumerate(self.image_paths)
-            if not cached_status[path]
-        ]
-        
-        for start_idx in range(0, len(uncached_indices), batch_size):
-            end_idx = min(start_idx + batch_size, len(uncached_indices))
-            batch_indices = uncached_indices[start_idx:end_idx]
+        """Optimized precompute latents with batch processing."""
+        # Process in smaller chunks to avoid memory issues
+        chunk_size = 1000
+        for start_idx in range(0, len(self.image_paths), chunk_size):
+            end_idx = min(start_idx + chunk_size, len(self.image_paths))
+            chunk_paths = self.image_paths[start_idx:end_idx]
             
-            batch_paths = [self.image_paths[i] for i in batch_indices]
-            batch_captions = [self.captions[i] for i in batch_indices]
+            # Check cache status for current chunk only
+            cached_status = {
+                path: self.cache_manager.is_cached(path) 
+                for path in chunk_paths
+            }
             
-            processed_items = self.process_image_batch(
-                image_paths=batch_paths,
-                captions=batch_captions,
-                config=self.config
+            remaining_images = sum(1 for v in cached_status.values() if not v)
+            if remaining_images == 0:
+                continue
+                
+            # Process uncached images in batches
+            batch_size = 8
+            uncached_indices = [
+                i + start_idx for i, path in enumerate(chunk_paths)
+                if not cached_status[path]
+            ]
+            
+            pbar = tqdm(
+                total=remaining_images,
+                desc=f"Precomputing latents ({start_idx}-{end_idx})",
+                unit="img"
             )
+
+            for batch_start in range(0, len(uncached_indices), batch_size):
+                batch_end = min(batch_start + batch_size, len(uncached_indices))
+                batch_indices = uncached_indices[batch_start:batch_end]
+                
+                batch_paths = [self.image_paths[i] for i in batch_indices]
+                batch_captions = [self.captions[i] for i in batch_indices]
+                
+                processed_items = self.process_image_batch(
+                    image_paths=batch_paths,
+                    captions=batch_captions,
+                    config=self.config
+                )
+                
+                pbar.update(len(batch_indices))
             
-            # Update cache and progress
-            successful = sum(1 for item in processed_items if item is not None)
-            pbar.update(len(batch_indices))
-        
-        pbar.close()
+            pbar.close()
 
     def __len__(self) -> int:
         return len(self.image_paths)
