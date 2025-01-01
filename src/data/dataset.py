@@ -193,6 +193,15 @@ class AspectBucketDataset(Dataset):
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents with accurate progress tracking."""
+        # Cache status check once at the start
+        cached_status = {
+            path: self.cache_manager.is_cached(path) 
+            for path in self.image_paths
+        }
+        
+        # Store cache status for reuse
+        self._cached_status = cached_status
+        
         total_images = len(self)
         start_time = time.time()
         
@@ -269,16 +278,6 @@ class AspectBucketDataset(Dataset):
                 successful_items = [item for item in processed_items if item is not None]
                 failed_in_batch = batch_size_actual - len(successful_items)
                 
-                # Add batch VAE encoding
-                if successful_items:
-                    # Stack tensors and encode in batch mode
-                    batch_tensors = torch.stack([item["pixel_values"] for item in successful_items])
-                    batch_latents = self.encode_with_vae(batch_tensors, batch_mode=True)
-                    
-                    # Update items with encoded latents
-                    for idx, item in enumerate(successful_items):
-                        item["pixel_values"] = batch_latents[idx]
-
                 # Cache successful results
                 if self.config.global_config.cache.use_cache and successful_items:
                     batch_tensors = []
@@ -549,7 +548,7 @@ class AspectBucketDataset(Dataset):
         img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
         
         return {
-            "pixel_values": self.encode_with_vae(img_tensor),
+            "pixel_values": img_tensor,
             "original_size": original_size,
             "target_size": (target_w, target_h),
             "bucket_index": bucket_idx,
@@ -588,30 +587,36 @@ class AspectBucketDataset(Dataset):
                 processed = self._process_single_image(path, config)
                 processed_images.append(processed)
                 
-            # Process each caption individually to match training format
-            results = []
-            for img_data, caption in zip(processed_images, captions):
-                if img_data is not None:
-                    try:
-                        # Encode single prompt
-                        encoded_text = self.encode_prompt(
-                            batch={"text": [caption]},
-                            proportion_empty_prompts=0.0
-                        )
-                        
+            # Batch encode all captions at once
+            valid_captions = [
+                caption for img_data, caption in zip(processed_images, captions)
+                if img_data is not None
+            ]
+            
+            if valid_captions:
+                encoded_text = self.encode_prompt(
+                    batch={"text": valid_captions},
+                    proportion_empty_prompts=0.0
+                )
+                
+                # Match encoded text back to processed images
+                valid_idx = 0
+                results = []
+                for img_data, caption in zip(processed_images, captions):
+                    if img_data is not None:
                         results.append({
                             **img_data,
-                            "prompt_embeds": encoded_text["prompt_embeds"][0],
-                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][0],
+                            "prompt_embeds": encoded_text["prompt_embeds"][valid_idx],
+                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][valid_idx],
                             "text": caption
                         })
-                    except Exception as e:
-                        logger.error(f"Failed to process caption: {caption}", exc_info=True)
+                        valid_idx += 1
+                    else:
                         results.append(None)
-                else:
-                    results.append(None)
-                
-            return results
+                        
+                return results
+            
+            return [None] * len(image_paths)
             
         except Exception as e:
             logger.error("Batch processing failed", exc_info=True)
