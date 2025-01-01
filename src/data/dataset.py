@@ -40,20 +40,19 @@ class AspectBucketDataset(Dataset):
         """Initialize dataset with preprocessing capabilities."""
         super().__init__()
         
+        # Core configuration
         self.config = config
         self.is_train = is_train
-        
-        # Move CUDA setup to separate method
         self._setup_device(device, device_id)
 
-        # Core components
+        # Model components
         self.model = model
         if model:
             self.text_encoders = model.text_encoders
             self.tokenizers = model.tokenizers
             self.vae = model.vae
 
-        # Initialize cache manager
+        # Cache setup
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         self.cache_manager = CacheManager(
             cache_dir=cache_dir,
@@ -61,47 +60,28 @@ class AspectBucketDataset(Dataset):
             device=self.device
         )
 
-        # Initialize paths and captions
+        # Data initialization
         self.image_paths = [
             str(convert_windows_path(p) if is_windows_path(p) else Path(p))
             for p in image_paths
         ]
         self.captions = captions
 
-        # Generate and cache buckets once during initialization
+        # Bucket generation
         self.buckets = self._generate_dynamic_buckets(config)
         logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
         self.bucket_indices = []
 
-        # Initialize tag weighter if needed
-        if config.tag_weighting.enable_tag_weighting:
-            image_captions = dict(zip(self.image_paths, self.captions))
-            index_path = Path(cache_dir) / "tag_weights_index.json"
-            self.tag_weighter = create_tag_weighter_with_index(
-                config=config,
-                image_captions=image_captions,
-                index_output_path=index_path
-            )
-        else:
-            self.tag_weighter = None
+        # Tag weighting setup
+        self._setup_tag_weighting(config, cache_dir)
 
-        # Precompute latents if caching enabled
+        # Precompute latents if enabled
         if config.global_config.cache.use_cache:
             self._precompute_latents()
 
-    def _setup_device(self, device: Optional[torch.device], device_id: Optional[int]):
-        """Setup CUDA device and optimizations."""
-        if torch.cuda.is_available():
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.set_float32_matmul_precision('medium')
-            
-            self.device = device or torch.device('cuda')
-            self.device_id = device_id if device_id is not None else 0
-        else:
-            self.device = torch.device('cpu')
-            self.device_id = None
+    # Core Dataset Methods
+    def __len__(self) -> int:
+        return len(self.image_paths)
 
     def __getitem__(self, idx):
         """Get a single item from the dataset."""
@@ -132,6 +112,163 @@ class AspectBucketDataset(Dataset):
         except Exception as e:
             logger.error(f"Failed to get item {idx}: {str(e)}")
             return None
+
+    def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        """Collate batch of samples into training format."""
+        try:
+            batch = [b for b in batch if b is not None]
+            
+            if not batch:
+                raise ValueError("Empty batch after filtering")
+
+            # Group samples by VAE latent size
+            bucket_groups = {}
+            for example in batch:
+                vae_size = example["vae_latents"].shape[-2:]  # Get HxW dimensions of VAE latents
+                if vae_size not in bucket_groups:
+                    bucket_groups[vae_size] = []
+                bucket_groups[vae_size].append(example)
+
+            largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
+            valid_batch = bucket_groups[largest_size]
+
+            # Return collated batch
+            return {
+                "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
+                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
+                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
+                "time_ids": torch.stack([example["time_ids"] for example in valid_batch]),
+                "original_size": [example["metadata"]["original_size"] for example in valid_batch],
+                "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
+                "target_size": [example["metadata"]["target_size"] for example in valid_batch],
+                "text": [example["metadata"]["text"] for example in valid_batch]
+            }
+
+        except Exception as e:
+            logger.error("Failed to collate batch", exc_info=True)
+            raise RuntimeError(f"Collate failed: {str(e)}") from e
+
+    # Setup Methods
+    def _setup_device(self, device: Optional[torch.device], device_id: Optional[int]):
+        """Setup CUDA device and optimizations."""
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+            
+            self.device = device or torch.device('cuda')
+            self.device_id = device_id if device_id is not None else 0
+        else:
+            self.device = torch.device('cpu')
+            self.device_id = None
+
+    def _setup_tag_weighting(self, config: Config, cache_dir: Path):
+        """Setup tag weighting if enabled."""
+        if config.tag_weighting.enable_tag_weighting:
+            image_captions = dict(zip(self.image_paths, self.captions))
+            index_path = Path(cache_dir) / "tag_weights_index.json"
+            self.tag_weighter = create_tag_weighter_with_index(
+                config=config,
+                image_captions=image_captions,
+                index_output_path=index_path
+            )
+        else:
+            self.tag_weighter = None
+
+    # Processing Methods
+    def process_image_batch(self, image_paths: List[Union[str, Path]], captions: List[str], config: Config) -> List[Optional[Dict[str, Any]]]:
+        """Process a batch of images in parallel."""
+        try:
+            # Process images in parallel
+            processed_images = []
+            
+            for path in image_paths:
+                processed = self._process_single_image(path, config)
+                processed_images.append(processed)
+            
+            # Batch encode text for all valid images
+            valid_captions = [
+                caption for img_data, caption in zip(processed_images, captions)
+                if img_data is not None
+            ]
+            
+            if valid_captions:
+                encoded_text = self.encode_prompt(
+                    batch={"text": valid_captions},
+                    proportion_empty_prompts=0.0
+                )
+            
+            # Save results and prepare return values
+            results = []
+            caption_idx = 0
+            
+            for img_data, caption, path in zip(processed_images, captions, image_paths):
+                if img_data is not None:
+                    # Compute time ids
+                    time_ids = self._compute_time_ids(
+                        original_size=img_data["original_size"],
+                        crops_coords_top_left=img_data["crop_coords"],
+                        target_size=img_data["target_size"]
+                    )
+                    
+                    # Add caption to processed data
+                    result = {
+                        **img_data,
+                        "text": caption
+                    }
+                    
+                    # Save to cache if enabled
+                    if self.config.global_config.cache.use_cache:
+                        tensors = {
+                            "vae_latents": img_data["vae_latents"],
+                            "prompt_embeds": encoded_text["prompt_embeds"][caption_idx],
+                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][caption_idx],
+                            "time_ids": time_ids
+                        }
+                        metadata = {
+                            "original_size": img_data["original_size"],
+                            "crop_coords": img_data["crop_coords"],
+                            "target_size": img_data["target_size"],
+                            "text": caption
+                        }
+                        self.cache_manager.save_vae_latents(tensors, path, metadata)
+                        caption_idx += 1
+                    
+                    results.append(result)
+                else:
+                    results.append(None)
+                    
+            return results
+            
+        except Exception as e:
+            logger.error("Batch processing failed", exc_info=True)
+            return [None] * len(image_paths)
+
+    # Helper Methods
+    def _compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
+        """Compute time embeddings for SDXL."""
+        # Ensure inputs are proper tuples
+        if not isinstance(original_size, (tuple, list)):
+            original_size = (original_size, original_size)
+        if not isinstance(crops_coords_top_left, (tuple, list)):
+            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
+        if not isinstance(target_size, (tuple, list)):
+            target_size = (target_size, target_size)
+        
+        # Combine all values into a single list
+        time_ids = [
+            original_size[0],    # Original height
+            original_size[1],    # Original width
+            crops_coords_top_left[0],  # Crop top
+            crops_coords_top_left[1],  # Crop left
+            target_size[0],     # Target height
+            target_size[1],     # Target width
+        ]
+        
+        # Create tensor with proper device and dtype
+        device = device or self.device
+        return torch.tensor([time_ids], device=device, dtype=dtype)
 
     def _precompute_latents(self) -> None:
         """Process entire dataset in chunks of 1000 images, with progress tracking."""
@@ -243,74 +380,6 @@ class AspectBucketDataset(Dataset):
                 f.write('\n'.join(failed_images))
             logger.info(f"Failed image paths logged to: {failed_log}")
 
-    def __len__(self) -> int:
-        return len(self.image_paths)
-
-    def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        """Collate batch of samples into training format."""
-        try:
-            batch = [b for b in batch if b is not None]
-            
-            if not batch:
-                raise ValueError("Empty batch after filtering")
-
-            # Group samples by VAE latent size
-            bucket_groups = {}
-            for example in batch:
-                vae_size = example["vae_latents"].shape[-2:]  # Get HxW dimensions of VAE latents
-                if vae_size not in bucket_groups:
-                    bucket_groups[vae_size] = []
-                bucket_groups[vae_size].append(example)
-
-            largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
-            valid_batch = bucket_groups[largest_size]
-
-            # Return collated batch
-            return {
-                "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
-                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
-                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
-                "time_ids": torch.stack([example["time_ids"] for example in valid_batch]),
-                "original_size": [example["metadata"]["original_size"] for example in valid_batch],
-                "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
-                "target_size": [example["metadata"]["target_size"] for example in valid_batch],
-                "text": [example["metadata"]["text"] for example in valid_batch]
-            }
-
-        except Exception as e:
-            logger.error("Failed to collate batch", exc_info=True)
-            raise RuntimeError(f"Collate failed: {str(e)}") from e
-
-    def encode_prompt(
-        self,
-        batch: Dict[str, List[str]],
-        proportion_empty_prompts: float = 0.0
-    ) -> Dict[str, torch.Tensor]:
-        """Encode prompts using CLIP encoders directly."""
-        try:
-            encoded_output = CLIPEncoder.encode_prompt(
-                batch=batch,
-                text_encoders=self.text_encoders,
-                tokenizers=self.tokenizers,
-                proportion_empty_prompts=proportion_empty_prompts,
-                is_train=self.is_train
-            )
-            
-            return {
-                "prompt_embeds": encoded_output["prompt_embeds"],
-                "pooled_prompt_embeds": encoded_output["pooled_prompt_embeds"],
-                "metadata": {
-                    "num_prompts": len(batch[next(iter(batch))]),
-                    "device": str(self.device),
-                    "dtype": str(encoded_output["prompt_embeds"].dtype),
-                    "timestamp": time.time()
-                }
-            }
-        except Exception as e:
-            logger.error("Failed to encode prompts", 
-                        extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
-            raise
-
     def _process_image_tensor(
         self, 
         img_tensor: torch.Tensor,
@@ -387,78 +456,35 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Failed to process image {image_path}: {e}")
             return None
 
-    def process_image_batch(
+    def encode_prompt(
         self,
-        image_paths: List[Union[str, Path]],
-        captions: List[str],
-        config: Config
-    ) -> List[Optional[Dict[str, Any]]]:
-        """Process a batch of images in parallel."""
+        batch: Dict[str, List[str]],
+        proportion_empty_prompts: float = 0.0
+    ) -> Dict[str, torch.Tensor]:
+        """Encode prompts using CLIP encoders directly."""
         try:
-            # Process images in parallel
-            processed_images = []
+            encoded_output = CLIPEncoder.encode_prompt(
+                batch=batch,
+                text_encoders=self.text_encoders,
+                tokenizers=self.tokenizers,
+                proportion_empty_prompts=proportion_empty_prompts,
+                is_train=self.is_train
+            )
             
-            for path in image_paths:
-                processed = self._process_single_image(path, config)
-                processed_images.append(processed)
-            
-            # Batch encode text for all valid images
-            valid_captions = [
-                caption for img_data, caption in zip(processed_images, captions)
-                if img_data is not None
-            ]
-            
-            if valid_captions:
-                encoded_text = self.encode_prompt(
-                    batch={"text": valid_captions},
-                    proportion_empty_prompts=0.0
-                )
-            
-            # Save results and prepare return values
-            results = []
-            caption_idx = 0
-            
-            for img_data, caption, path in zip(processed_images, captions, image_paths):
-                if img_data is not None:
-                    # Compute time ids
-                    time_ids = self._compute_time_ids(
-                        original_size=img_data["original_size"],
-                        crops_coords_top_left=img_data["crop_coords"],
-                        target_size=img_data["target_size"]
-                    )
-                    
-                    # Add caption to processed data
-                    result = {
-                        **img_data,
-                        "text": caption
-                    }
-                    
-                    # Save to cache if enabled
-                    if self.config.global_config.cache.use_cache:
-                        tensors = {
-                            "vae_latents": img_data["vae_latents"],
-                            "prompt_embeds": encoded_text["prompt_embeds"][caption_idx],
-                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][caption_idx],
-                            "time_ids": time_ids
-                        }
-                        metadata = {
-                            "original_size": img_data["original_size"],
-                            "crop_coords": img_data["crop_coords"],
-                            "target_size": img_data["target_size"],
-                            "text": caption
-                        }
-                        self.cache_manager.save_latents(tensors, path, metadata)
-                        caption_idx += 1
-                    
-                    results.append(result)
-                else:
-                    results.append(None)
-                
-            return results
-            
+            return {
+                "prompt_embeds": encoded_output["prompt_embeds"],
+                "pooled_prompt_embeds": encoded_output["pooled_prompt_embeds"],
+                "metadata": {
+                    "num_prompts": len(batch[next(iter(batch))]),
+                    "device": str(self.device),
+                    "dtype": str(encoded_output["prompt_embeds"].dtype),
+                    "timestamp": time.time()
+                }
+            }
         except Exception as e:
-            logger.error("Batch processing failed", exc_info=True)
-            return [None] * len(image_paths)
+            logger.error("Failed to encode prompts", 
+                        extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
+            raise
 
     def _generate_dynamic_buckets(self, config: Config) -> List[Tuple[int, int]]:
         """Generate dynamic buckets based on actual image dimensions."""
@@ -517,30 +543,6 @@ class AspectBucketDataset(Dataset):
     def get_aspect_buckets(self) -> List[Tuple[int, int]]:
         """Return cached buckets."""
         return self.buckets
-
-    def _compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
-        """Compute time embeddings for SDXL."""
-        # Ensure inputs are proper tuples
-        if not isinstance(original_size, (tuple, list)):
-            original_size = (original_size, original_size)
-        if not isinstance(crops_coords_top_left, (tuple, list)):
-            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
-        if not isinstance(target_size, (tuple, list)):
-            target_size = (target_size, target_size)
-        
-        # Combine all values into a single list
-        time_ids = [
-            original_size[0],    # Original height
-            original_size[1],    # Original width
-            crops_coords_top_left[0],  # Crop top
-            crops_coords_top_left[1],  # Crop left
-            target_size[0],     # Target height
-            target_size[1],     # Target width
-        ]
-        
-        # Create tensor with proper device and dtype
-        device = device or self.device
-        return torch.tensor([time_ids], device=device, dtype=dtype)
 
 def create_dataset(
     config: Config,
