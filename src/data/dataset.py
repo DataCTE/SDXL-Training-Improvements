@@ -265,22 +265,16 @@ class AspectBucketDataset(Dataset):
             largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
             valid_batch = bucket_groups[largest_size]
 
-            # Batch encode text
-            captions = [example["metadata"]["text"] for example in valid_batch]
-            encoded_text = self.encode_prompt(
-                batch={"text": captions},
-                proportion_empty_prompts=0.0
-            )
-
             # Return collated batch
             return {
                 "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
-                "prompt_embeds": encoded_text["prompt_embeds"],
-                "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
+                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
+                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
+                "time_ids": torch.stack([example["time_ids"] for example in valid_batch]),
                 "original_size": [example["metadata"]["original_size"] for example in valid_batch],
                 "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
                 "target_size": [example["metadata"]["target_size"] for example in valid_batch],
-                "text": captions
+                "text": [example["metadata"]["text"] for example in valid_batch]
             }
 
         except Exception as e:
