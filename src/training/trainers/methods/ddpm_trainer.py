@@ -322,9 +322,9 @@ class DDPMTrainer(SDXLTrainer):
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
-            # Get metadata from batch
-            original_size = batch["original_size"]
-            target_size = batch["target_size"]
+            # Get metadata from batch and ensure proper types
+            original_sizes = batch["original_size"]  # List of (H,W) tuples
+            target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]  # Single (H,W) tuple
             crop_coords = batch.get("crop_coords", [(0, 0)] * latents.shape[0])
 
             # Use context manager for mixed precision
@@ -332,9 +332,9 @@ class DDPMTrainer(SDXLTrainer):
                 # Prepare time embeddings using metadata
                 batch_size = latents.shape[0]
                 time_ids = self._get_add_time_ids(
-                    original_sizes=original_size,  # Should be a list of tuples
-                    crops_coords_top_left=crop_coords,  # Should be a list of tuples
-                    target_size=target_size,  # Should be a tuple
+                    original_sizes=original_sizes,  # List of (H,W) tuples
+                    crops_coords_top_left=crop_coords,  # List of (H,W) tuples
+                    target_size=target_size,  # Single (H,W) tuple
                     dtype=prompt_embeds.dtype,
                     batch_size=batch_size
                 )
@@ -452,14 +452,19 @@ class DDPMTrainer(SDXLTrainer):
             original_size = original_sizes[i]
             crop_coords = crops_coords_top_left[i]
             
+            # Ensure all inputs are proper tuples/lists before creating tensor
+            orig_size = tuple(map(int, original_sizes[i]))  # Convert to ints
+            crop_coord = tuple(map(int, crop_coords[i]))    # Convert to ints
+            tgt_size = tuple(map(int, target_size))        # Convert to ints
+            
             add_time_id = torch.tensor([
-                original_size[0],  # Original image height
-                original_size[1],  # Original image width
-                crop_coords[0],    # Top coordinate of crop
-                crop_coords[1],    # Left coordinate of crop
-                target_size[0],    # Target image height
-                target_size[1],    # Target image width
-            ])
+                orig_size[0],    # Original image height
+                orig_size[1],    # Original image width
+                crop_coord[0],   # Top coordinate of crop
+                crop_coord[1],   # Left coordinate of crop
+                tgt_size[0],     # Target image height
+                tgt_size[1],     # Target image width
+            ], dtype=torch.long)  # Ensure integer tensor
             add_time_ids.append(add_time_id)
         
         return torch.stack(add_time_ids).to(dtype=dtype) 
