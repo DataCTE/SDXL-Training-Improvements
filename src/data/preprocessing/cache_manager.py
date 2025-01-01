@@ -126,34 +126,36 @@ class CacheManager:
         # Join with underscore using string concatenation
         return f"{dir_name}_{file_name}"
 
-    def save_latents(
-        self,
-        tensors: Dict[str, torch.Tensor],
-        original_path: Union[str, Path],
-        metadata: Dict[str, Any]
-    ) -> bool:
-        """Optimized save latents with minimal IO operations."""
+    def _save_tensor_file(self, tensors: Dict[str, torch.Tensor], path: Path) -> bool:
+        """Common tensor saving logic."""
+        try:
+            torch.save(tensors, path, weights_only=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save tensors: {e}")
+            return False
+
+    def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
+        """Unified saving method using common logic."""
         cache_key = self.get_cache_key(original_path)
         tensors_path = self.latents_dir / f"{cache_key}.pt"
         metadata_path = self.metadata_dir / f"{cache_key}.json"
         
         try:
-            # Pre-process tensors before IO
             tensors_cpu = {k: v.cpu() for k, v in tensors.items()}
             
-            # Prepare metadata once
+            if not self._save_tensor_file(tensors_cpu, tensors_path):
+                return False
+                
             full_metadata = {
                 "original_path": str(original_path),
                 "created_at": time.time(),
                 **metadata
             }
             
-            # Batch IO operations
-            torch.save(tensors_cpu, tensors_path)
             with open(metadata_path, 'w') as f:
                 json.dump(full_metadata, f)
             
-            # Single lock acquisition for index update
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
                     "tensors_path": str(tensors_path),
@@ -162,8 +164,6 @@ class CacheManager:
                     "is_valid": True,
                     "last_checked": time.time()
                 }
-                
-                # Batch stats update
                 self._update_stats()
                 
             return True
@@ -171,7 +171,7 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to save to cache: {e}")
             return False
-            
+
     def load_latents(
         self,
         path: Union[str, Path],
@@ -318,98 +318,6 @@ class CacheManager:
             "last_cleanup": self.cache_index["stats"]["last_cleanup"]
         }
 
-    def save_latents_batch(
-        self,
-        batch_tensors: List[Dict[str, torch.Tensor]],
-        original_paths: List[Union[str, Path]],
-        batch_metadata: List[Dict[str, Any]]
-    ) -> List[bool]:
-        """Highly optimized batch save using parallel processing."""
-        from concurrent.futures import ThreadPoolExecutor
-        import asyncio
-        
-        async def save_batch():
-            # Pre-process all tensors to CPU in parallel
-            with ThreadPoolExecutor() as pool:
-                cpu_tensors = list(await asyncio.gather(*[
-                    asyncio.get_event_loop().run_in_executor(
-                        pool,
-                        lambda t=t: {k: v.cpu() for k, v in t.items()}
-                    )
-                    for t in batch_tensors
-                ]))
-            
-            # Prepare all paths and metadata
-            cache_entries = [
-                (
-                    self.get_cache_key(path),
-                    self.latents_dir / f"{self.get_cache_key(path)}.pt",
-                    self.metadata_dir / f"{self.get_cache_key(path)}.json",
-                    {
-                        "original_path": str(path),
-                        "created_at": time.time(),
-                        **metadata
-                    }
-                )
-                for path, metadata in zip(original_paths, batch_metadata)
-            ]
-            
-            # Parallel save operations
-            async def save_entry(tensors, entry_data, idx):
-                key, tensor_path, metadata_path, metadata = entry_data
-                try:
-                    with ThreadPoolExecutor() as pool:
-                        # Parallel file writes with safe saving
-                        await asyncio.gather(
-                            asyncio.get_event_loop().run_in_executor(
-                                pool,
-                                lambda: torch.save(
-                                    tensors, 
-                                    tensor_path,
-                                    weights_only=True  # Enable safe saving
-                                )
-                            ),
-                            asyncio.get_event_loop().run_in_executor(
-                                pool,
-                                lambda: json.dump(metadata, open(metadata_path, 'w'))
-                            )
-                        )
-                    
-                    return True, key, tensor_path, metadata_path
-                except Exception as e:
-                    logger.error(f"Failed to save batch entry {idx}: {e}")
-                    return False, key, None, None
-            
-            # Process all entries in parallel
-            results = await asyncio.gather(*[
-                save_entry(t, e, i)
-                for i, (t, e) in enumerate(zip(cpu_tensors, cache_entries))
-            ])
-            
-            # Batch update index
-            success_entries = [
-                (key, str(tp), str(mp))
-                for success, key, tp, mp in results
-                if success
-            ]
-            
-            if success_entries:
-                with self._lock:
-                    for key, tensor_path, metadata_path in success_entries:
-                        self.cache_index["entries"][key] = {
-                            "tensors_path": tensor_path,
-                            "metadata_path": metadata_path,
-                            "created_at": time.time(),
-                            "is_valid": True,
-                            "last_checked": time.time()
-                        }
-                    self._update_stats()
-                    self._save_index()
-            
-            return [r[0] for r in results]
-        
-        return asyncio.run(save_batch())
-
     def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
         """Load cached tensors with improved validation and error handling."""
         try:
@@ -482,19 +390,3 @@ class CacheManager:
                 # Remove from index
                 del self.cache_index["entries"][cache_key]
                 self._save_index()
-
-    def save_tensors(self, tensors: Dict[str, torch.Tensor], cache_key: str) -> Tuple[bool, str, str]:
-        """Save tensors with safe saving enabled."""
-        try:
-            # Generate paths
-            tensors_path = self.latents_dir / f"{cache_key}.pt"
-            metadata_path = self.metadata_dir / f"{cache_key}.json"
-            
-            # Save tensors without weights_only parameter
-            torch.save(tensors, tensors_path)
-            
-            return True, str(tensors_path), str(metadata_path)
-            
-        except Exception as e:
-            logger.error(f"Failed to save tensors for {cache_key}: {str(e)}")
-            return False, "", ""
