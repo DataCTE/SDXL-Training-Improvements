@@ -29,7 +29,12 @@ class CacheManager:
             max_cache_size: Maximum number of entries to keep
             device: Default device for loading tensors
         """
-        # Convert and create cache directory
+        # Core setup
+        self.max_cache_size = max_cache_size
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._lock = threading.Lock()
+        
+        # Directory setup
         self.cache_dir = convert_windows_path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
@@ -39,14 +44,11 @@ class CacheManager:
         self.latents_dir.mkdir(exist_ok=True)
         self.metadata_dir.mkdir(exist_ok=True)
         
-        self.max_cache_size = max_cache_size
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._lock = threading.Lock()
-        
-        # Initialize cache index
+        # Initialize cache state
         self._initialize_cache()
         logger.info(f"Cache initialized at {self.cache_dir}")
-        
+
+    # Cache Initialization Methods
     def _initialize_cache(self):
         """Initialize or load cache state."""
         self.index_path = self.cache_dir / "cache_index.json"
@@ -60,7 +62,7 @@ class CacheManager:
                 self._create_new_index()
         else:
             self._create_new_index()
-            
+
     def _create_new_index(self):
         """Create new cache index structure."""
         self.cache_index = {
@@ -75,76 +77,10 @@ class CacheManager:
             }
         }
         self._save_index()
-        
-    def _save_index(self) -> None:
-        """Save cache index to disk with proper error handling."""
-        try:
-            # Create temporary file
-            temp_path = self.index_path.with_suffix('.tmp')
-            
-            # Write to temporary file first
-            with open(temp_path, 'w') as f:
-                json.dump({
-                    "version": self.cache_index["version"],
-                    "created_at": self.cache_index["created_at"],
-                    "last_updated": time.time(),
-                    "entries": self.cache_index["entries"],
-                    "stats": self.cache_index["stats"]
-                }, f, indent=2)
-            
-            # Atomic rename to actual index file
-            temp_path.replace(self.index_path)
-            
-        except Exception as e:
-            logger.error(f"Failed to save cache index: {e}")
-            if temp_path.exists():
-                temp_path.unlink()  # Clean up temp file if it exists
-            raise
 
-    def get_cache_key(self, path: Union[str, Path]) -> str:
-        """Generate cache key from path using ultra-fast string operations."""
-        # Convert to string only once
-        path_str = str(path)
-        
-        # Find last directory separator
-        last_sep = max(path_str.rfind('/'), path_str.rfind('\\'))
-        if last_sep == -1:
-            # No directory separator found, use whole path
-            second_last_sep = -1
-        else:
-            # Find second-to-last separator
-            second_last_sep = max(
-                path_str.rfind('/', 0, last_sep),
-                path_str.rfind('\\', 0, last_sep)
-            )
-        
-        # Find extension dot
-        dot_pos = path_str.rfind('.')
-        
-        # Extract parts directly using string slicing
-        dir_name = path_str[second_last_sep + 1:last_sep]
-        file_name = path_str[last_sep + 1:dot_pos]
-        
-        # Join with underscore using string concatenation
-        return f"{dir_name}_{file_name}"
-
-    def _save_tensor_file(self, tensors: Dict[str, torch.Tensor], path: Path) -> bool:
-        """Common tensor saving logic."""
-        try:
-            torch.save(tensors, path, weights_only=True)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save tensors: {e}")
-            return False
-
+    # Core Cache Operations
     def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
-        """Save VAE encoded latents and other tensors to cache.
-        
-        Args:
-            tensors: Dict containing tensors to save ('vae_latents', 'prompt_embeds', 'pooled_prompt_embeds', 'time_ids')
-            original_path: Original image path
-            metadata: Additional metadata to store
-        """
+        """Save VAE encoded latents and other tensors to cache."""
         cache_key = self.get_cache_key(original_path)
         tensors_path = self.latents_dir / f"{cache_key}.pt"
         metadata_path = self.metadata_dir / f"{cache_key}.json"
@@ -186,68 +122,8 @@ class CacheManager:
             logger.error(f"Failed to save tensors to cache: {e}")
             return False
 
-    def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
-        """Common tensor loading logic."""
-        try:
-            return torch.load(path, map_location=device, weights_only=True)
-        except Exception as e:
-            logger.error(f"Failed to load tensors: {e}")
-            return None
-
-    def _validate_and_clean_cache_entry(self, tensor_path: Path, metadata_path: Path, cache_key: str) -> bool:
-        """Validate cache files and clean up if invalid."""
-        if not tensor_path.exists() or not metadata_path.exists():
-            with self._lock:
-                if cache_key in self.cache_index["entries"]:
-                    try:
-                        tensor_path.unlink(missing_ok=True)
-                        metadata_path.unlink(missing_ok=True)
-                        del self.cache_index["entries"][cache_key]
-                        self._save_index()
-                    except Exception as e:
-                        logger.error(f"Failed to clean cache entry {cache_key}: {e}")
-            return False
-        return True
-
-    def _get_cache_size(self) -> int:
-        """Get total size of cached files."""
-        return sum(os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt"))
-
-    def load_image_to_tensor(self, image_path: Union[str, Path], device: Optional[torch.device] = None) -> Tuple[torch.Tensor, Tuple[int, int]]:
-        """Load and convert image to tensor with proper device placement.
-        
-        Args:
-            image_path: Path to image file
-            device: Target device for tensor
-            
-        Returns:
-            Tuple of (tensor, (width, height))
-        """
-        try:
-            device = device or self.device
-            img = Image.open(image_path).convert('RGB')
-            w, h = img.size
-            
-            # Convert to tensor efficiently
-            img_tensor = torch.from_numpy(np.array(img)).float().to(device) / 255.0
-            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
-            
-            return img_tensor, (w, h)
-            
-        except Exception as e:
-            logger.error(f"Failed to load image {image_path}: {e}")
-            return None
-
     def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
-        """Load cached tensors with validation.
-        
-        Args:
-            cache_key: Cache key for the entry
-            device: Target device for tensors
-            
-        Returns:
-            Dict containing tensors and metadata or None if invalid
-        """
+        """Load cached tensors with validation."""
         try:
             entry = self.cache_index["entries"].get(cache_key)
             if not entry or not entry.get("is_valid", False):
@@ -288,6 +164,102 @@ class CacheManager:
             logger.error(f"Unexpected error loading cache for {cache_key}: {str(e)}")
             return None
 
+    # Helper Methods
+    def get_cache_key(self, path: Union[str, Path]) -> str:
+        """Generate cache key from path using ultra-fast string operations."""
+        path_str = str(path)
+        
+        # Find last directory separator
+        last_sep = max(path_str.rfind('/'), path_str.rfind('\\'))
+        if last_sep == -1:
+            second_last_sep = -1
+        else:
+            second_last_sep = max(
+                path_str.rfind('/', 0, last_sep),
+                path_str.rfind('\\', 0, last_sep)
+            )
+        
+        # Find extension dot
+        dot_pos = path_str.rfind('.')
+        
+        # Extract parts directly using string slicing
+        dir_name = path_str[second_last_sep + 1:last_sep]
+        file_name = path_str[last_sep + 1:dot_pos]
+        
+        return f"{dir_name}_{file_name}"
+
+    def load_image_to_tensor(self, image_path: Union[str, Path], device: Optional[torch.device] = None) -> Tuple[torch.Tensor, Tuple[int, int]]:
+        """Load and convert image to tensor with proper device placement."""
+        try:
+            device = device or self.device
+            img = Image.open(image_path).convert('RGB')
+            w, h = img.size
+            
+            # Convert to tensor efficiently
+            img_tensor = torch.from_numpy(np.array(img)).float().to(device) / 255.0
+            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
+            
+            return img_tensor, (w, h)
+            
+        except Exception as e:
+            logger.error(f"Failed to load image {image_path}: {e}")
+            return None
+
+    # File Operations
+    def _save_tensor_file(self, tensors: Dict[str, torch.Tensor], path: Path) -> bool:
+        """Common tensor saving logic."""
+        try:
+            torch.save(tensors, path, weights_only=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save tensors: {e}")
+            return False
+
+    def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
+        """Common tensor loading logic."""
+        try:
+            return torch.load(path, map_location=device, weights_only=True)
+        except Exception as e:
+            logger.error(f"Failed to load tensors: {e}")
+            return None
+
+    # Cache Management
+    def _save_index(self) -> None:
+        """Save cache index to disk with proper error handling."""
+        try:
+            temp_path = self.index_path.with_suffix('.tmp')
+            
+            with open(temp_path, 'w') as f:
+                json.dump({
+                    "version": self.cache_index["version"],
+                    "created_at": self.cache_index["created_at"],
+                    "last_updated": time.time(),
+                    "entries": self.cache_index["entries"],
+                    "stats": self.cache_index["stats"]
+                }, f, indent=2)
+            
+            temp_path.replace(self.index_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to save cache index: {e}")
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+
+    def _update_stats(self):
+        """Update cache statistics."""
+        cache_size = self._get_cache_size()
+        stats = {
+            "total_entries": len(self.cache_index["entries"]),
+            "latents_size": cache_size,
+            "last_updated": time.time()
+        }
+        self.cache_index["stats"].update(stats)
+
+    def _get_cache_size(self) -> int:
+        """Get total size of cached files."""
+        return sum(os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt"))
+
     def cleanup(self, max_age: Optional[float] = None):
         """Optimized cleanup with batch processing."""
         try:
@@ -323,25 +295,6 @@ class CacheManager:
                 
         except Exception as e:
             logger.error(f"Cache cleanup failed: {e}")
-
-    def _update_stats(self):
-        """Update cache statistics."""
-        cache_size = self._get_cache_size()
-        stats = {
-            "total_entries": len(self.cache_index["entries"]),
-            "latents_size": cache_size,
-            "last_updated": time.time()
-        }
-        self.cache_index["stats"].update(stats)
-
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get current cache statistics."""
-        return {
-            "total_entries": len(self.cache_index["entries"]),
-            "cache_size_bytes": self._get_cache_size(),
-            "last_updated": self.cache_index["last_updated"],
-            "last_cleanup": self.cache_index["stats"]["last_cleanup"]
-        }
 
     def __enter__(self):
         return self
