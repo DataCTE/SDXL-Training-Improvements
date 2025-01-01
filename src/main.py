@@ -285,30 +285,15 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components."""
     try:
-        # Create cache manager
-        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-        cache_manager = CacheManager(
-            cache_dir=cache_dir,
-            max_cache_size=config.global_config.cache.max_cache_size,
-            device=device
-        )
-
-        # Create preprocessing pipeline
-        preprocessing_pipeline = PreprocessingPipeline(
-            config=config,
-            model=model,
-            cache_manager=cache_manager,
-            is_train=True,
-            enable_memory_tracking=True
-        )
-
-        # Create dataset
+        # Create dataset directly with model
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            preprocessing_pipeline=preprocessing_pipeline,
-            enable_memory_tracking=True
+            model=model,
+            enable_memory_tracking=True,
+            max_memory_usage=0.8,
+            device=device  # Pass device to dataset
         )
 
         # Create data loader
