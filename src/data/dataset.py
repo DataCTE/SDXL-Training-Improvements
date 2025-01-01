@@ -149,14 +149,29 @@ class AspectBucketDataset(Dataset):
             return None
 
     def _precompute_latents(self) -> None:
-        """Optimized precompute latents with batch processing."""
-        # Process in smaller chunks to avoid memory issues
+        """Process entire dataset in chunks of 1000 images, with progress tracking."""
+        total_images = len(self.image_paths)
         chunk_size = 1000
-        for start_idx in range(0, len(self.image_paths), chunk_size):
-            end_idx = min(start_idx + chunk_size, len(self.image_paths))
+        total_chunks = (total_images + chunk_size - 1) // chunk_size  # Ceiling division
+        
+        # Create overall progress bar for chunks
+        chunk_pbar = tqdm(
+            total=total_chunks,
+            desc="Processing dataset chunks",
+            unit="chunk",
+            position=0,
+            leave=True
+        )
+        
+        processed_count = 0
+        failed_images = []
+        
+        for chunk_idx in range(total_chunks):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, total_images)
             chunk_paths = self.image_paths[start_idx:end_idx]
             
-            # Check cache status for current chunk only
+            # Check cache status for current chunk
             cached_status = {
                 path: self.cache_manager.is_cached(path) 
                 for path in chunk_paths
@@ -164,21 +179,26 @@ class AspectBucketDataset(Dataset):
             
             remaining_images = sum(1 for v in cached_status.values() if not v)
             if remaining_images == 0:
+                chunk_pbar.update(1)
+                processed_count += len(chunk_paths)
                 continue
-                
-            # Process uncached images in batches
+            
+            # Process uncached images in smaller batches
             batch_size = 8
             uncached_indices = [
                 i + start_idx for i, path in enumerate(chunk_paths)
                 if not cached_status[path]
             ]
             
-            pbar = tqdm(
+            # Create progress bar for current chunk
+            batch_pbar = tqdm(
                 total=remaining_images,
-                desc=f"Precomputing latents ({start_idx}-{end_idx})",
-                unit="img"
+                desc=f"Chunk {chunk_idx + 1}/{total_chunks}",
+                unit="img",
+                position=1,
+                leave=False
             )
-
+            
             for batch_start in range(0, len(uncached_indices), batch_size):
                 batch_end = min(batch_start + batch_size, len(uncached_indices))
                 batch_indices = uncached_indices[batch_start:batch_end]
@@ -192,14 +212,51 @@ class AspectBucketDataset(Dataset):
                     config=self.config
                 )
                 
-                # Check successful processing
-                successful = sum(1 for item in processed_items if item is not None)
-                if successful < len(batch_indices):
-                    logger.warning(f"Failed to process {len(batch_indices) - successful} images in batch")
-                    
-                pbar.update(len(batch_indices))
+                # Track successful and failed processing
+                for item, path in zip(processed_items, batch_paths):
+                    if item is not None:
+                        processed_count += 1
+                    else:
+                        failed_images.append(path)
+                
+                batch_pbar.update(len(batch_indices))
+                
+                # Clear CUDA cache periodically
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
-            pbar.close()
+            batch_pbar.close()
+            chunk_pbar.update(1)
+            
+            # Log progress after each chunk
+            logger.info(
+                f"Processed {processed_count}/{total_images} images "
+                f"({len(failed_images)} failures)"
+            )
+        
+        chunk_pbar.close()
+        
+        # Final summary
+        success_rate = (processed_count / total_images) * 100
+        logger.info(
+            f"\nPrecomputing complete:\n"
+            f"- Total images: {total_images}\n"
+            f"- Successfully processed: {processed_count}\n"
+            f"- Failed: {len(failed_images)}\n"
+            f"- Success rate: {success_rate:.2f}%"
+        )
+        
+        if failed_images:
+            logger.warning(
+                f"Failed to process {len(failed_images)} images. "
+                "These will be skipped during training."
+            )
+            # Optionally log failed images to file
+            log_dir = Path(self.config.global_config.logging.log_dir)
+            failed_log = log_dir / "failed_images.txt"
+            with open(failed_log, 'w') as f:
+                f.write('\n'.join(failed_images))
+            logger.info(f"Failed image paths logged to: {failed_log}")
 
     def __len__(self) -> int:
         return len(self.image_paths)
