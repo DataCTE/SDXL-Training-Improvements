@@ -1,6 +1,6 @@
 """High-performance dataset implementation for SDXL training."""
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
 from contextlib import contextmanager
@@ -28,12 +28,22 @@ logger = get_logger(__name__)
 
 @dataclass
 class ProcessingStats:
-    """Simplified processing statistics."""
+    """Unified processing statistics."""
     total_processed: int = 0
     successful: int = 0
     failed: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
+    operation_times: Dict[str, List[float]] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+
+    def log_operation(self, operation: str, duration: float):
+        if operation not in self.operation_times:
+            self.operation_times[operation] = []
+        self.operation_times[operation].append(duration)
+
+    def log_error(self, error: str):
+        self.errors.append(error)
 
 class ProcessingError(Exception):
     """Exception raised when image processing fails."""
@@ -186,9 +196,6 @@ class AspectBucketDataset(Dataset):
             for path in self.image_paths
         }
         
-        # Store cache status for reuse
-        self._cached_status = cached_status
-        
         total_images = len(self)
         start_time = time.time()
         
@@ -274,13 +281,12 @@ class AspectBucketDataset(Dataset):
                     for processed, caption, path in zip(processed_items, batch_captions, batch_paths):
                         if processed is not None:
                             batch_tensors.append({
-                                "pixel_values": processed["pixel_values"],
+                                "pixel_values": processed["pixel_values"]
                             })
                             batch_metadata.append({
                                 "original_size": processed["original_size"],
                                 "crop_coords": processed["crop_coords"],
-                                "target_size": processed["target_size"],
-                                "text": caption
+                                "target_size": processed["target_size"]
                             })
                             valid_paths.append(path)
                     
@@ -433,31 +439,20 @@ class AspectBucketDataset(Dataset):
                         extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
             raise
 
-    def _get_stream(self):
-        """Get a CUDA stream for the current thread."""
-        import threading
-        thread_id = threading.get_ident()
-        if thread_id not in self._streams and torch.cuda.is_available():
-            self._streams[thread_id] = torch.cuda.Stream()
-        return self._streams.get(thread_id)
-
     def _process_on_gpu(self, func, **kwargs):
-        """Process on GPU with memory management."""
+        """Process on GPU with simplified memory management."""
         try:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
             with torch.cuda.device(self.device_id):
-                with torch.cuda.stream(torch.cuda.Stream()):
-                    result = func(**kwargs)
-                    torch.cuda.current_stream().synchronize()
-                    return result
+                result = func(**kwargs)
+                return result
             
         except Exception as e:
             logger.error(f"GPU processing error: {str(e)}")
             raise ProcessingError("GPU processing failed", {
                 'device_id': self.device_id,
-                'cuda_memory': torch.cuda.memory_allocated(self.device_id),
                 'error': str(e)
             })
 
