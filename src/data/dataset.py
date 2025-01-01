@@ -12,13 +12,6 @@ from tqdm.auto import tqdm
 from PIL import Image
 import numpy as np
 
-
-# Force speed optimizations
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
-
 from src.core.logging import get_logger
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.data.config import Config
@@ -141,26 +134,19 @@ class AspectBucketDataset(Dataset):
     def __getitem__(self, idx):
         """Get a single item from the dataset."""
         try:
-            # Get image path and caption
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
             
-            # Get cache key
             cache_key = self.cache_manager.get_cache_key(image_path)
-            
-            # Load cached tensors with better error handling
             cached_data = self.cache_manager.load_tensors(cache_key)
+            
             if cached_data is None:
-                # If cache is invalid or missing, try to reprocess the image
-                processed = self._process_single_image(
-                    image_path=image_path,
-                    config=self.config
-                )
+                processed = self._process_single_image(image_path=image_path, config=self.config)
                 
                 if processed is None:
                     raise ValueError(f"Failed to process image: {image_path}")
                     
-                # Encode the caption
+                # Only encode if not cached
                 encoded_text = self.encode_prompt(
                     batch={"text": [caption]},
                     proportion_empty_prompts=0.0
@@ -172,7 +158,6 @@ class AspectBucketDataset(Dataset):
                     "text": caption
                 })
                     
-                # Cache the newly processed data
                 if self.config.global_config.cache.use_cache:
                     tensors = {
                         "pixel_values": processed["pixel_values"],
@@ -186,14 +171,8 @@ class AspectBucketDataset(Dataset):
                         "text": caption
                     }
                     self.cache_manager.save_latents(tensors, image_path, metadata)
-                    
-                    # Structure the data consistently with cache format
-                    cached_data = {
-                        **tensors,
-                        "metadata": metadata
-                    }
+                    cached_data = {**tensors, "metadata": metadata}
                 else:
-                    # If not caching, use processed data directly
                     cached_data = {
                         "pixel_values": processed["pixel_values"],
                         "prompt_embeds": processed["prompt_embeds"],
@@ -206,7 +185,6 @@ class AspectBucketDataset(Dataset):
                         }
                     }
             
-            # Return data with consistent structure
             return cached_data
 
         except Exception as e:
@@ -466,27 +444,22 @@ class AspectBucketDataset(Dataset):
 
     @contextmanager
     def track_memory_usage(self, operation: str):
-        """Simplified memory tracking."""
+        """Track memory usage for operations."""
         if not self.enable_memory_tracking:
             yield
             return
         
+        start_time = time.time()
+        start_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+        
         try:
-            start_time = time.time()
-            if torch.cuda.is_available():
-                start_memory = torch.cuda.memory_allocated()
-            
             yield
-            
         finally:
-            if self.enable_memory_tracking:
-                duration = time.time() - start_time
-                if torch.cuda.is_available():
-                    end_memory = torch.cuda.memory_allocated()
-                    self._log_action(operation, {
-                        'duration': duration,
-                        'memory_change': end_memory - start_memory
-                    })
+            if self.enable_memory_tracking and torch.cuda.is_available():
+                self._log_action(operation, {
+                    'duration': time.time() - start_time,
+                    'memory_change': torch.cuda.memory_allocated() - start_memory
+                })
 
     def _get_stream(self):
         """Get a CUDA stream for the current thread."""
@@ -547,28 +520,21 @@ class AspectBucketDataset(Dataset):
         w, h = original_size
         aspect_ratio = w / h
         
-        # Check aspect ratio
-        if aspect_ratio > config.global_config.image.max_aspect_ratio or \
-           aspect_ratio < (1 / config.global_config.image.max_aspect_ratio):
+        # Early return if aspect ratio is invalid
+        max_ratio = config.global_config.image.max_aspect_ratio
+        if not (1/max_ratio <= aspect_ratio <= max_ratio):
             return None
         
-        # Find best bucket and resize/crop
-        target_w, target_h = self.get_aspect_buckets(config)[0]
-        min_diff = float('inf')
-        bucket_idx = 0
+        # Find best matching bucket
+        buckets = self.get_aspect_buckets(config)
+        bucket_ratios = [(bw/bh, idx, (bw,bh)) for idx, (bw,bh) in enumerate(buckets)]
+        _, bucket_idx, (target_w, target_h) = min(
+            [(abs(aspect_ratio - ratio), idx, dims) for ratio, idx, dims in bucket_ratios]
+        )
         
-        for idx, (bucket_w, bucket_h) in enumerate(self.get_aspect_buckets(config)):
-            bucket_ratio = bucket_w / bucket_h
-            diff = abs(aspect_ratio - bucket_ratio)
-            if diff < min_diff:
-                min_diff = diff
-                target_w, target_h = bucket_w, bucket_h
-                bucket_idx = idx
-        
-        # Resize on GPU
+        # Resize and crop in one step if possible
         scale = min(target_w / w, target_h / h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
+        new_w, new_h = int(w * scale), int(h * scale)
         
         img_tensor = F.interpolate(
             img_tensor.unsqueeze(0),
@@ -577,17 +543,13 @@ class AspectBucketDataset(Dataset):
             align_corners=False
         ).squeeze(0)
         
-        # Center crop on GPU
-        if new_w != target_w or new_h != target_h:
-            left = (new_w - target_w) // 2
-            top = (new_h - target_h) // 2
-            img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
+        # Center crop
+        left = (new_w - target_w) // 2
+        top = (new_h - target_h) // 2
+        img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
         
-        # VAE encoding (no need for unsqueeze)
-        latents = self.encode_with_vae(img_tensor)
-
         return {
-            "pixel_values": latents,
+            "pixel_values": self.encode_with_vae(img_tensor),
             "original_size": original_size,
             "target_size": (target_w, target_h),
             "bucket_index": bucket_idx,
