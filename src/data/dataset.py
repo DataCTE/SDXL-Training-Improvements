@@ -76,13 +76,6 @@ class AspectBucketDataset(Dataset):
         self.stream_timeout = stream_timeout
         self.stats = ProcessingStats()
         
-        # Performance tracking
-        self.performance_stats = {
-            'operation_times': {},
-            'errors': []
-        }
-        self.action_history = {}
-        
         # CUDA setup
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
@@ -156,7 +149,7 @@ class AspectBucketDataset(Dataset):
                 if processed is None:
                     raise ValueError(f"Failed to process image: {image_path}")
                     
-                # Remove individual text encoding here - it will be handled in batch
+                # Store only the caption text, no encoding here
                 processed.update({"text": caption})
                     
                 if self.config.global_config.cache.use_cache:
@@ -547,46 +540,22 @@ class AspectBucketDataset(Dataset):
                 processed = self._process_single_image(path, config)
                 processed_images.append(processed)
                 
-            # Batch encode all captions at once
-            valid_captions = [
-                caption for img_data, caption in zip(processed_images, captions)
-                if img_data is not None
-            ]
-            
-            if valid_captions:
-                encoded_text = self.encode_prompt(
-                    batch={"text": valid_captions},
-                    proportion_empty_prompts=0.0
-                )
-                
-                # Match encoded text back to processed images
-                valid_idx = 0
-                results = []
-                for img_data, caption in zip(processed_images, captions):
-                    if img_data is not None:
-                        results.append({
-                            **img_data,
-                            "prompt_embeds": encoded_text["prompt_embeds"][valid_idx],
-                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][valid_idx],
-                            "text": caption
-                        })
-                        valid_idx += 1
-                    else:
-                        results.append(None)
-                        
-                return results
-            
-            return [None] * len(image_paths)
+            # Don't encode text here - let collate_fn handle it
+            results = []
+            for img_data, caption in zip(processed_images, captions):
+                if img_data is not None:
+                    results.append({
+                        **img_data,
+                        "text": caption
+                    })
+                else:
+                    results.append(None)
+                    
+            return results
             
         except Exception as e:
             logger.error("Batch processing failed", exc_info=True)
             return [None] * len(image_paths)
-
-    def _log_action(self, operation: str, stats: Dict[str, Any]):
-        """Log operation statistics."""
-        if operation not in self.performance_stats['operation_times']:
-            self.performance_stats['operation_times'][operation] = []
-        self.performance_stats['operation_times'][operation].append(stats)
 
     def _get_cached_status(self, image_paths: List[str]) -> Dict[str, bool]:
         """Get cache status for each image path."""
