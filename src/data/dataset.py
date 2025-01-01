@@ -34,25 +34,13 @@ import torch.nn.functional as F
 logger = get_logger(__name__)
 
 @dataclass
-class DatasetStats:
-    total_images: int = 0
-    processed_images: int = 0
-    failed_images: int = 0
-    cache_hits: int = 0
-    cache_misses: int = 0
-    memory_allocated: int = 0
-    peak_memory: int = 0
-
-@dataclass
 class ProcessingStats:
+    """Simplified processing statistics."""
     total_processed: int = 0
     successful: int = 0
     failed: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
-    gpu_oom_events: int = 0
-    stream_sync_failures: int = 0
-    dtype_conversion_errors: int = 0
 
 class ProcessingError(Exception):
     """Exception raised when image processing fails."""
@@ -88,7 +76,6 @@ class AspectBucketDataset(Dataset):
         # Performance tracking
         self.performance_stats = {
             'operation_times': {},
-            'memory_usage': {},
             'errors': []
         }
         self.action_history = {}
@@ -225,18 +212,6 @@ class AspectBucketDataset(Dataset):
         except Exception as e:
             logger.error(f"Failed to get item {idx}: {str(e)}")
             return None
-
-    def _setup_image_config(self):
-        """Set up image configuration parameters."""
-        self.target_size = tuple(map(int, self.config.global_config.image.target_size))
-        self.max_size = tuple(map(int, self.config.global_config.image.max_size))
-        self.min_size = tuple(map(int, self.config.global_config.image.min_size))
-        self.bucket_step = int(self.config.global_config.image.bucket_step)
-        self.max_aspect_ratio = float(self.config.global_config.image.max_aspect_ratio)
-
-        # Get buckets from pipeline
-        self.buckets = self.preprocessing_pipeline.get_aspect_buckets(self.config)
-        self.bucket_indices = self.preprocessing_pipeline._assign_bucket_indices(self.image_paths)
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents with accurate progress tracking."""
@@ -491,33 +466,27 @@ class AspectBucketDataset(Dataset):
 
     @contextmanager
     def track_memory_usage(self, operation: str):
-        """Context manager for tracking memory usage during operations."""
+        """Simplified memory tracking."""
+        if not self.enable_memory_tracking:
+            yield
+            return
+        
         try:
             start_time = time.time()
             if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
                 start_memory = torch.cuda.memory_allocated()
             
             yield
             
         finally:
-            duration = time.time() - start_time
-            memory_stats = {}
-            
-            if torch.cuda.is_available():
-                end_memory = torch.cuda.memory_allocated()
-                peak_memory = torch.cuda.max_memory_allocated()
-                memory_stats.update({
-                    'start_memory': start_memory,
-                    'end_memory': end_memory,
-                    'peak_memory': peak_memory,
-                    'memory_change': end_memory - start_memory
-                })
-                
-            self._log_action(operation, {
-                'duration': duration,
-                'memory_stats': memory_stats
-            })
+            if self.enable_memory_tracking:
+                duration = time.time() - start_time
+                if torch.cuda.is_available():
+                    end_memory = torch.cuda.memory_allocated()
+                    self._log_action(operation, {
+                        'duration': duration,
+                        'memory_change': end_memory - start_memory
+                    })
 
     def _get_stream(self):
         """Get a CUDA stream for the current thread."""
