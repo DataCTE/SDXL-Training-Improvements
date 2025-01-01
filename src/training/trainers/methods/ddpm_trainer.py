@@ -331,14 +331,16 @@ class DDPMTrainer(SDXLTrainer):
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
                 # Prepare time embeddings using metadata
                 batch_size = latents.shape[0]
-                time_ids = self._get_add_time_ids(
-                    original_sizes=original_sizes,  # List of (H,W) tuples
-                    crops_coords_top_left=crop_coords,  # List of (H,W) tuples
-                    target_size=target_size,  # Single (H,W) tuple
-                    dtype=prompt_embeds.dtype,
-                    batch_size=batch_size
-                )
-                time_ids = time_ids.to(device=self.device)
+                add_time_ids = torch.cat([
+                    self.compute_time_ids(
+                        original_size=orig_size,
+                        crops_coords_top_left=crop_coords,
+                        target_size=target_size,
+                        device=self.device,
+                        dtype=model_dtype
+                    ) for orig_size, crop_coords in zip(batch["original_sizes"], batch["crop_top_lefts"])
+                ])
+                add_time_ids = add_time_ids.to(device=self.device)
 
                 # Sample noise with proper scaling
                 noise = torch.randn_like(latents, device=self.device, dtype=model_dtype)
@@ -363,7 +365,7 @@ class DDPMTrainer(SDXLTrainer):
                     prompt_embeds,
                     added_cond_kwargs={
                         "text_embeds": pooled_prompt_embeds,
-                        "time_ids": time_ids
+                        "time_ids": add_time_ids
                     }
                 ).sample
 
@@ -438,45 +440,36 @@ class DDPMTrainer(SDXLTrainer):
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise
 
-    def _get_add_time_ids(
-        self,
-        original_sizes,
-        crops_coords_top_left,
-        target_size,
-        dtype,
-        batch_size: int
-    ) -> torch.Tensor:
-        """Create time embeddings for SDXL."""
-        add_time_ids = []
-        for i in range(batch_size):
-            original_size = original_sizes[i]
-            crop_coords = crops_coords_top_left[i]
-            
-            # Get values ensuring they are proper tuples/integers
-            orig_size = original_sizes[i]
-            crop_coord = crops_coords_top_left[i]
-            tgt_size = target_size if isinstance(target_size, tuple) else tuple(target_size)
-            
-            # Handle crop coordinates whether they come as tuple or separate values
-            if isinstance(crop_coord, (tuple, list)):
-                crop_top, crop_left = crop_coord
-            elif isinstance(crop_coord, int):
-                # Single integer value - use as both coordinates
-                crop_top = crop_left = crop_coord
-            else:
-                # Default to 0,0 if invalid
-                logger.warning(f"Invalid crop coordinate format: {type(crop_coord)}, using (0,0)")
-                crop_top = crop_left = 0
-            
-            # Create tensor with integer values
-            add_time_id = torch.tensor([
-                orig_size[0],    # Original image height
-                orig_size[1],    # Original image width
-                crop_top,        # Top coordinate of crop
-                crop_left,       # Left coordinate of crop
-                tgt_size[0],     # Target image height
-                tgt_size[1],     # Target image width
-            ], dtype=torch.long)  # Ensure integer tensor
-            add_time_ids.append(add_time_id)
+    def compute_time_ids(original_size, crops_coords_top_left, target_size, device=None, dtype=None):
+        """Compute time embeddings for SDXL.
         
-        return torch.stack(add_time_ids).to(dtype=dtype) 
+        Args:
+            original_size (tuple): Original image size (height, width)
+            crops_coords_top_left (tuple): Crop coordinates (top, left)
+            target_size (tuple): Target image size (height, width)
+            device (torch.device, optional): Device to place tensor on
+            dtype (torch.dtype, optional): Dtype for the tensor
+        
+        Returns:
+            torch.Tensor: Time embeddings tensor of shape [1, 6]
+        """
+        # Ensure inputs are proper tuples
+        if not isinstance(original_size, (tuple, list)):
+            original_size = (original_size, original_size)
+        if not isinstance(crops_coords_top_left, (tuple, list)):
+            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
+        if not isinstance(target_size, (tuple, list)):
+            target_size = (target_size, target_size)
+        
+        # Combine all values into a single list
+        time_ids = [
+            original_size[0],    # Original height
+            original_size[1],    # Original width
+            crops_coords_top_left[0],  # Crop top
+            crops_coords_top_left[1],  # Crop left
+            target_size[0],     # Target height
+            target_size[1],     # Target width
+        ]
+        
+        # Create tensor with proper device and dtype
+        return torch.tensor([time_ids], device=device, dtype=dtype)
