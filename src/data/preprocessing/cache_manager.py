@@ -440,14 +440,24 @@ class CacheManager:
                     metadata = json.load(f)
                     
                 # Validate required tensor keys
-                required_keys = {"pixel_values", "prompt_embeds", "pooled_prompt_embeds"}
-                if not all(key in tensors for key in required_keys):
+                required_tensor_keys = {"pixel_values", "prompt_embeds", "pooled_prompt_embeds"}
+                required_metadata_keys = {"original_size", "crop_coords", "target_size"}
+                
+                if not all(key in tensors for key in required_tensor_keys):
                     logger.warning(f"Cache entry {cache_key} missing required tensor keys")
                     self._invalidate_cache_entry(cache_key)
                     return None
                     
-                tensors["metadata"] = metadata
-                return tensors
+                if not all(key in metadata for key in required_metadata_keys):
+                    logger.warning(f"Cache entry {cache_key} missing required metadata keys")
+                    self._invalidate_cache_entry(cache_key)
+                    return None
+                    
+                # Return combined dictionary with both tensors and metadata
+                return {
+                    **tensors,
+                    "metadata": metadata
+                }
                 
             except (RuntimeError, json.JSONDecodeError) as e:
                 logger.warning(f"Failed to load cache entry {cache_key}: {str(e)}")

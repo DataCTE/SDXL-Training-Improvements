@@ -152,20 +152,29 @@ class AspectBucketDataset(Dataset):
                         "text": caption
                     }
                     self.cache_manager.save_latents(tensors, image_path, metadata)
-                
-                cached_data = tensors
-                
-            # Return batch with all necessary components
-            return {
-                "pixel_values": cached_data["pixel_values"],
-                "prompt_embeds": cached_data["prompt_embeds"],
-                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
-                "text": caption,
-                "original_size": processed["original_size"] if 'processed' in locals() else cached_data["metadata"]["original_size"],
-                "target_size": processed["target_size"] if 'processed' in locals() else cached_data["metadata"]["target_size"],
-                "crop_coords": processed["crop_coords"] if 'processed' in locals() else cached_data["metadata"].get("crop_coords", (0, 0))
-            }
+                    
+                    # Structure the data consistently with cache format
+                    cached_data = {
+                        **tensors,
+                        "metadata": metadata
+                    }
+                else:
+                    # If not caching, use processed data directly
+                    cached_data = {
+                        "pixel_values": processed["pixel_values"],
+                        "prompt_embeds": processed["prompt_embeds"],
+                        "pooled_prompt_embeds": processed["pooled_prompt_embeds"],
+                        "metadata": {
+                            "original_size": processed["original_size"],
+                            "crop_coords": processed["crop_coords"],
+                            "target_size": processed["target_size"],
+                            "text": caption
+                        }
+                    }
             
+            # Return data with consistent structure
+            return cached_data
+
         except Exception as e:
             logger.error(f"Error getting dataset item {idx} for image {self.image_paths[idx]}: {str(e)}")
             # Return None to allow the collate_fn to filter out failed items
@@ -354,13 +363,15 @@ class AspectBucketDataset(Dataset):
             largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
             valid_batch = bucket_groups[largest_size]
 
+            # Ensure consistent key names
             return {
                 "pixel_values": torch.stack([example["pixel_values"] for example in valid_batch]),
                 "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
                 "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
-                "original_sizes": [example["original_size"] for example in valid_batch],
-                "crop_top_lefts": [example["crop_coords"] for example in valid_batch],
-                "text": [example["text"] for example in valid_batch] if "text" in valid_batch[0] else None
+                "original_size": [example["metadata"]["original_size"] for example in valid_batch],
+                "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
+                "target_size": [example["metadata"]["target_size"] for example in valid_batch],
+                "text": [example["metadata"]["text"] for example in valid_batch] if "text" in valid_batch[0]["metadata"] else None
             }
 
         except Exception as e:
