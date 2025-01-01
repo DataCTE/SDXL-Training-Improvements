@@ -133,58 +133,6 @@ class PreprocessingPipeline:
             logger.error(f"Bucket assignment failed: {str(e)}")
             raise
 
-    def _process_image(self, img_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
-        """Process single image using VAE encoder directly."""
-        try:
-            # Convert Windows path if needed
-            img_path = convert_windows_path(img_path) if is_windows_path(img_path) else Path(img_path)
-            img = Image.open(img_path).convert('RGB')
-            
-            if not self.validate_image_size(img.size):
-                logger.warning(f"Image {img_path} failed size validation")
-                return None
-
-            resized_img, bucket_idx = self.resize_to_bucket(img)
-            
-            tensor = torch.from_numpy(np.array(resized_img)).permute(2, 0, 1).float() / 255.0
-            tensor = tensor.unsqueeze(0).to(device=self.device, dtype=torch.float32)
-            tensor = tensor.contiguous(memory_format=torch.channels_last)
-            
-            with torch.cuda.amp.autocast():
-                with self.track_memory_usage("vae_encoding"):
-                    # Direct VAE encoding implementation
-                    with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
-                        model_input = self.model.vae_encoder.vae.encode(tensor).latent_dist.sample()
-                        model_input = model_input * self.model.vae_encoder.vae.config.scaling_factor
-                        model_input = model_input.cpu()
-                    
-                    metadata = {
-                        "original_size": img.size,
-                        "bucket_size": self.buckets[bucket_idx],
-                        "bucket_index": bucket_idx,
-                        "path": str(img_path),
-                        "timestamp": time.time(),
-                        "scaling_factor": self.model.vae_encoder.vae.config.scaling_factor,
-                        "input_shape": tuple(tensor.shape),
-                        "output_shape": tuple(model_input.shape)
-                    }
-                    
-                    return {
-                        "model_input": model_input,
-                        "metadata": metadata
-                    }
-
-        except Exception as e:
-            self.stats.failed += 1
-            logger.error(f"Failed to process {img_path}: {str(e)}")
-            self.performance_stats['errors'].append({
-                'path': str(img_path),
-                'error_type': type(e).__name__,
-                'error_message': str(e),
-                'timestamp': time.time()
-            })
-            return None
-
     def encode_prompt(
         self,
         batch: Dict[str, List[str]],
@@ -442,7 +390,7 @@ class PreprocessingPipeline:
            aspect_ratio < (1 / config.global_config.image.max_aspect_ratio):
             return None
         
-        # Find best bucket (this is CPU operation but lightweight)
+        # Find best bucket and resize/crop
         target_w, target_h = self.get_aspect_buckets(config)[0]
         min_diff = float('inf')
         bucket_idx = 0
@@ -474,14 +422,11 @@ class PreprocessingPipeline:
             img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
         
         # After resizing and cropping, encode with VAE
-        with torch.no_grad():
-            # Add batch dimension and encode
+        with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
             img_tensor = img_tensor.unsqueeze(0)
             latents = self.model.vae.encode(img_tensor).latent_dist.sample()
-            # Scale latents
             latents = latents * self.model.vae.config.scaling_factor
-            # Remove batch dimension
-            latents = latents.squeeze(0)
+            latents = latents.cpu()
 
         return {
             "pixel_values": latents,  # Now this contains VAE latents
