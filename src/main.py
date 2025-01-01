@@ -285,14 +285,14 @@ def setup_training(
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
     """Setup training components with VAE latent caching."""
     try:
-        # Initialize cache manager for VAE latents
+        # Initialize cache manager
         cache_manager = CacheManager(
             cache_dir=config.global_config.cache.cache_dir,
             max_cache_size=config.global_config.cache.max_cache_size,
             device=device
         )
 
-        # Create dataset with VAE and cache manager
+        # Create dataset 
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
