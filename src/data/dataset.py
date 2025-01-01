@@ -269,17 +269,6 @@ class AspectBucketDataset(Dataset):
                         extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
             raise
 
-    def _process_on_gpu(self, func, **kwargs):
-        """Simplified GPU processing."""
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            with torch.cuda.device(self.device_id):
-                return func(**kwargs)
-        except Exception as e:
-            logger.error(f"GPU processing error: {str(e)}")
-            raise
-
     def _load_image_to_tensor(self, image_path: Union[str, Path]) -> Tuple[torch.Tensor, Tuple[int, int]]:
         """Load image and convert to tensor.
         
@@ -344,9 +333,11 @@ class AspectBucketDataset(Dataset):
     def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
         """Process a single image with aspect ratio bucketing."""
         try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             img_tensor, original_size = self._load_image_to_tensor(image_path)
-            return self._process_on_gpu(
-                self._process_image_tensor,
+            return self._process_image_tensor(
                 img_tensor=img_tensor,
                 original_size=original_size,
                 config=config,
@@ -388,16 +379,6 @@ class AspectBucketDataset(Dataset):
             logger.error("Batch processing failed", exc_info=True)
             return [None] * len(image_paths)
 
-    def _get_cached_status(self, image_paths: List[str]) -> Dict[str, bool]:
-        """Get cache status for each image path."""
-        if not self.cache_manager:
-            return {path: False for path in image_paths}
-        
-        return {
-            path: self.cache_manager.is_cached(path)
-            for path in image_paths
-        }
-
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
         """Get supported image dimensions for aspect ratio bucketing."""
         return config.global_config.image.supported_dims
@@ -407,15 +388,11 @@ def create_dataset(
     image_paths: List[str],
     captions: List[str],
     model: Optional[StableDiffusionXL] = None,
-    enable_memory_tracking: bool = True,
-    max_memory_usage: float = 0.8
 ) -> AspectBucketDataset:
     """Create and initialize dataset instance."""
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
-        model=model,
-        enable_memory_tracking=enable_memory_tracking,
-        max_memory_usage=max_memory_usage
+        model=model
     )
