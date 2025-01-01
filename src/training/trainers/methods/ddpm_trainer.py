@@ -452,11 +452,12 @@ class DDPMTrainer(SDXLTrainer):
             original_size = original_sizes[i]
             crop_coords = crops_coords_top_left[i]
             
-            # Ensure all inputs are proper tuples/lists before creating tensor
-            orig_size = tuple(map(int, original_sizes[i]))  # Convert to ints
-            crop_coord = tuple(map(int, crop_coords[i]))    # Convert to ints
-            tgt_size = tuple(map(int, target_size))        # Convert to ints
+            # Get values ensuring they are proper tuples/integers
+            orig_size = original_sizes[i]
+            crop_coord = crop_coords[i]
+            tgt_size = target_size if isinstance(target_size, tuple) else tuple(target_size)
             
+            # Create tensor with integer values
             add_time_id = torch.tensor([
                 orig_size[0],    # Original image height
                 orig_size[1],    # Original image width
