@@ -26,29 +26,6 @@ import torch.nn.functional as F
 
 logger = get_logger(__name__)
 
-@dataclass
-class ProcessingStats:
-    """Unified processing statistics."""
-    total_processed: int = 0
-    successful: int = 0
-    failed: int = 0
-    cache_hits: int = 0
-    cache_misses: int = 0
-    operation_times: Dict[str, List[float]] = field(default_factory=dict)
-    errors: List[str] = field(default_factory=list)
-
-    def log_operation(self, operation: str, duration: float):
-        if operation not in self.operation_times:
-            self.operation_times[operation] = []
-        self.operation_times[operation].append(duration)
-
-    def log_error(self, error: str):
-        self.errors.append(error)
-
-class ProcessingError(Exception):
-    """Exception raised when image processing fails."""
-    pass
-
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""
     
@@ -59,22 +36,14 @@ class AspectBucketDataset(Dataset):
         captions: List[str],
         model: Optional[StableDiffusionXL] = None,
         is_train: bool = True,
-        enable_memory_tracking: bool = True,
-        max_memory_usage: float = 0.8,
-        stream_timeout: float = 10.0,
         device: Optional[torch.device] = None,
         device_id: Optional[int] = None
     ):
         """Initialize dataset with preprocessing capabilities."""
         super().__init__()
         
-        # Move initialization code from pipeline here
         self.config = config
         self.is_train = is_train
-        self.enable_memory_tracking = enable_memory_tracking
-        self.max_memory_usage = max_memory_usage
-        self.stream_timeout = stream_timeout
-        self.stats = ProcessingStats()
         
         # CUDA setup
         if torch.cuda.is_available():
@@ -92,13 +61,9 @@ class AspectBucketDataset(Dataset):
         # Core components
         self.model = model
         if model:
-            self.vae_encoder = model.vae_encoder
             self.text_encoders = model.text_encoders
             self.tokenizers = model.tokenizers
-        
-        # Stream management
-        self._streams = {}
-        
+
         # Initialize cache manager
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         self.cache_manager = CacheManager(
@@ -182,161 +147,51 @@ class AspectBucketDataset(Dataset):
             return None
 
     def _precompute_latents(self) -> None:
-        """Precompute and cache latents with accurate progress tracking."""
-        # Cache status check once at the start
+        """Simplified precompute latents."""
         cached_status = {
             path: self.cache_manager.is_cached(path) 
             for path in self.image_paths
         }
         
         total_images = len(self)
-        start_time = time.time()
-        
-        # Get cache status for all images
-        cached_status = self._get_cached_status(self.image_paths)
-        already_cached = sum(1 for is_cached in cached_status.values() if is_cached)
-        
+        already_cached = sum(cached_status.values())
         remaining_images = total_images - already_cached
-        failed_images = 0
-        processed_images = already_cached
+        
+        if remaining_images == 0:
+            logger.info("All images already cached")
+            return
+        
         batch_size = 8
-        min_batch_size = 1
-        
-        # Speed tracking with moving window
-        processing_times = []
-        window_size = 50  # Number of images for moving average
-        
-        # Create progress bar with detailed stats
         pbar = tqdm(
-            total=total_images,
+            total=remaining_images,
             desc="Precomputing latents",
-            unit="img",
-            initial=already_cached,
-            dynamic_ncols=True,  # Better terminal handling
+            unit="img"
         )
-        
-        def update_progress_stats():
-            """Calculate and update progress statistics."""
-            if processing_times:
-                window = processing_times[-window_size:]
-                current_speed = len(window) / sum(window) if window else 0
-                
-                # Use remaining_images here
-                eta_seconds = remaining_images / current_speed if current_speed > 0 else 0
-                
-                # Calculate success rate
-                success_rate = (processed_images / (processed_images + failed_images)) * 100 if (processed_images + failed_images) > 0 else 100
-                
-                return {
-                    'processed': processed_images,
-                    'failed': failed_images,
-                    'cached': already_cached,
-                    'remaining': remaining_images,
-                    'speed': f'{current_speed:.2f} img/s',
-                    'eta': time.strftime('%H:%M:%S', time.gmtime(eta_seconds)),
-                    'success': f'{success_rate:.1f}%'
-                }
-            return {}
 
-        # Process only uncached images
+        # Process uncached images
         uncached_indices = [
             i for i, path in enumerate(self.image_paths)
             if not cached_status[path]
         ]
         
         for start_idx in range(0, len(uncached_indices), batch_size):
-            batch_start_time = time.time()
-            try:
-                end_idx = min(start_idx + batch_size, len(uncached_indices))
-                batch_indices = uncached_indices[start_idx:end_idx]
-                batch_size_actual = len(batch_indices)
-                
-                # Process batch
-                batch_paths = [self.image_paths[i] for i in batch_indices]
-                batch_captions = [self.captions[i] for i in batch_indices]
-                
-                processed_items = self.process_image_batch(
-                    image_paths=batch_paths,
-                    captions=batch_captions,
-                    config=self.config
-                )
-                
-                # Track successful and failed items
-                successful_items = [item for item in processed_items if item is not None]
-                failed_in_batch = batch_size_actual - len(successful_items)
-                
-                # Cache successful results
-                if self.config.global_config.cache.use_cache and successful_items:
-                    batch_tensors = []
-                    batch_metadata = []
-                    valid_paths = []
-                    
-                    for processed, caption, path in zip(processed_items, batch_captions, batch_paths):
-                        if processed is not None:
-                            batch_tensors.append({
-                                "pixel_values": processed["pixel_values"]
-                            })
-                            batch_metadata.append({
-                                "original_size": processed["original_size"],
-                                "crop_coords": processed["crop_coords"],
-                                "target_size": processed["target_size"]
-                            })
-                            valid_paths.append(path)
-                    
-                    # Batch save
-                    if batch_tensors:
-                        cache_results = self.cache_manager.save_latents_batch(
-                            batch_tensors=batch_tensors,
-                            original_paths=valid_paths,
-                            batch_metadata=batch_metadata
-                        )
-                        
-                        # Update counters
-                        successful_saves = sum(1 for r in cache_results if r)
-                        failed_saves = sum(1 for r in cache_results if not r)
-                        
-                        processed_images += successful_saves
-                        failed_images += failed_saves + failed_in_batch
-                        
-                        # Track processing time for successful items
-                        if successful_saves > 0:
-                            batch_time = time.time() - batch_start_time
-                            processing_times.extend([batch_time / successful_saves] * successful_saves)
-                
-                # Update progress bar
-                pbar.update(batch_size_actual)
-                pbar.set_postfix(update_progress_stats())
-                
-            except Exception as e:
-                logger.error(f"Failed to process batch at index {start_idx}", exc_info=True)
-                failed_images += batch_size_actual
-                
-                # Reduce batch size on failure
-                batch_size = max(batch_size // 2, min_batch_size)
-                logger.info(f"Reducing batch size to {batch_size}")
-                
-                pbar.update(batch_size_actual)
-                continue
+            end_idx = min(start_idx + batch_size, len(uncached_indices))
+            batch_indices = uncached_indices[start_idx:end_idx]
+            
+            batch_paths = [self.image_paths[i] for i in batch_indices]
+            batch_captions = [self.captions[i] for i in batch_indices]
+            
+            processed_items = self.process_image_batch(
+                image_paths=batch_paths,
+                captions=batch_captions,
+                config=self.config
+            )
+            
+            # Update cache and progress
+            successful = sum(1 for item in processed_items if item is not None)
+            pbar.update(len(batch_indices))
         
         pbar.close()
-        
-        # Final statistics
-        total_time = time.time() - start_time
-        avg_speed = processed_images / total_time if total_time > 0 else 0
-        success_rate = (processed_images / total_images) * 100 if total_images > 0 else 0
-        cache_stats = self.cache_manager.get_cache_stats()
-        
-        logger.info(
-            f"Latent computation complete:\n"
-            f"- Total images: {total_images}\n"
-            f"- Successfully processed: {processed_images}\n"
-            f"- Previously cached: {already_cached}\n"
-            f"- Failed: {failed_images}\n"
-            f"- Total time: {time.strftime('%H:%M:%S', time.gmtime(total_time))}\n"
-            f"- Average speed: {avg_speed:.2f} img/s\n"
-            f"- Success rate: {success_rate:.1f}%\n"
-            f"- Final cache size: {cache_stats['cache_size_bytes'] / 1024**2:.2f} MB"
-        )
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -384,24 +239,6 @@ class AspectBucketDataset(Dataset):
             logger.error("Failed to collate batch", exc_info=True)
             raise RuntimeError(f"Collate failed: {str(e)}") from e
 
-    def encode_with_vae(
-        self, 
-        img_tensor: torch.Tensor, 
-        batch_mode: bool = False,
-        device: Optional[torch.device] = None
-    ) -> torch.Tensor:
-        """Encode image tensor(s) with VAE to get latents."""
-        device = device or self.device
-        img_tensor = img_tensor.to(device)
-        
-        if not batch_mode:
-            img_tensor = img_tensor.unsqueeze(0)
-        
-        with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
-            latents = self.model.vae.encode(img_tensor).latent_dist.sample()
-            latents = latents * self.model.vae.config.scaling_factor
-        return latents.cpu()
-
     def encode_prompt(
         self,
         batch: Dict[str, List[str]],
@@ -433,21 +270,15 @@ class AspectBucketDataset(Dataset):
             raise
 
     def _process_on_gpu(self, func, **kwargs):
-        """Process on GPU with simplified memory management."""
+        """Simplified GPU processing."""
         try:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            
             with torch.cuda.device(self.device_id):
-                result = func(**kwargs)
-                return result
-            
+                return func(**kwargs)
         except Exception as e:
             logger.error(f"GPU processing error: {str(e)}")
-            raise ProcessingError("GPU processing failed", {
-                'device_id': self.device_id,
-                'error': str(e)
-            })
+            raise
 
     def _load_image_to_tensor(self, image_path: Union[str, Path]) -> Tuple[torch.Tensor, Tuple[int, int]]:
         """Load image and convert to tensor.
