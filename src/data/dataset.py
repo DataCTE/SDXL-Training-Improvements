@@ -339,15 +339,9 @@ class AspectBucketDataset(Dataset):
         config: Config,
         image_path: Union[str, Path]
     ) -> Dict[str, Any]:
-        """Process image tensor on GPU."""
+        """Process image tensor by finding exact bucket match."""
         w, h = original_size
         aspect_ratio = w / h
-        
-        # Add minimum size check
-        MIN_DIMENSION = 32  # Minimum size to safely handle 3x3 kernels
-        if w < MIN_DIMENSION or h < MIN_DIMENSION:
-            logger.warning(f"Image {image_path} too small (dimensions: {w}x{h}). Skipping.")
-            return None
         
         # Early return if aspect ratio is invalid
         max_ratio = config.global_config.image.max_aspect_ratio
@@ -355,7 +349,7 @@ class AspectBucketDataset(Dataset):
             logger.warning(f"Image {image_path} has invalid aspect ratio ({aspect_ratio:.2f}). Skipping.")
             return None
         
-        # Find best matching bucket
+        # Find matching bucket
         buckets = self.get_aspect_buckets(config)
         bucket_ratios = [(bw/bh, idx, (bw,bh)) for idx, (bw,bh) in enumerate(buckets)]
         _, bucket_idx, (target_w, target_h) = min(
@@ -363,26 +357,13 @@ class AspectBucketDataset(Dataset):
         )
         
         try:
-            # Resize and crop in one step if possible
-            scale = min(target_w / w, target_h / h)
-            new_w, new_h = int(w * scale), int(h * scale)
-            
+            # Resize directly to target bucket size
             img_tensor = F.interpolate(
                 img_tensor.unsqueeze(0),
-                size=(new_h, new_w),
+                size=(target_h, target_w),
                 mode='bilinear',
                 align_corners=False
             ).squeeze(0)
-            
-            # Center crop
-            left = (new_w - target_w) // 2
-            top = (new_h - target_h) // 2
-            img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
-            
-            # Verify final tensor dimensions
-            if img_tensor.shape[1] < MIN_DIMENSION or img_tensor.shape[2] < MIN_DIMENSION:
-                logger.warning(f"Processed image {image_path} too small after resizing. Skipping.")
-                return None
             
             return {
                 "pixel_values": img_tensor,
@@ -391,7 +372,7 @@ class AspectBucketDataset(Dataset):
                 "bucket_index": bucket_idx,
                 "path": str(image_path),
                 "timestamp": time.time(),
-                "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
+                "crop_coords": (0, 0)  # No cropping needed with dynamic buckets
             }
             
         except Exception as e:
@@ -467,8 +448,46 @@ class AspectBucketDataset(Dataset):
             return [None] * len(image_paths)
 
     def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        """Get supported image dimensions for aspect ratio bucketing."""
-        return config.global_config.image.supported_dims
+        """Generate dynamic buckets around default buckets to accommodate all images."""
+        base_buckets = config.global_config.image.supported_dims
+        bucket_step = config.global_config.image.bucket_step
+        max_ratio = config.global_config.image.max_aspect_ratio
+        
+        # Convert base buckets to set for faster lookup
+        buckets = set((w, h) for w, h in base_buckets)
+        
+        # First pass: collect all image aspect ratios
+        aspect_ratios = []
+        for path in self.image_paths:
+            loaded = self.cache_manager.load_image_to_tensor(path, self.device)
+            if loaded:
+                _, (w, h) = loaded
+                if 1/max_ratio <= w/h <= max_ratio:
+                    aspect_ratios.append(w/h)
+        
+        # Generate dynamic buckets for uncovered aspect ratios
+        for ratio in aspect_ratios:
+            # Find closest base bucket
+            closest = min(base_buckets, key=lambda x: abs(x[0]/x[1] - ratio))
+            base_w, base_h = closest
+            
+            # Generate buckets up/down from base maintaining aspect ratio
+            for scale in [0.75, 0.875, 1.0, 1.125, 1.25]:
+                w = int(base_w * scale / bucket_step) * bucket_step
+                h = int(base_h * scale / bucket_step) * bucket_step
+                
+                # Ensure dimensions are within bounds
+                if (w >= config.global_config.image.min_size[0] and 
+                    h >= config.global_config.image.min_size[1] and
+                    w <= config.global_config.image.max_size[0] and
+                    h <= config.global_config.image.max_size[1]):
+                    buckets.add((w, h))
+        
+        # Sort buckets by area for consistent ordering
+        sorted_buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]/x[1]))
+        
+        logger.info(f"Generated {len(sorted_buckets)} dynamic buckets")
+        return sorted_buckets
 
 def create_dataset(
     config: Config,
