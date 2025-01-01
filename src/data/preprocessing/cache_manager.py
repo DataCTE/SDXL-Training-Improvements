@@ -490,12 +490,8 @@ class CacheManager:
             tensors_path = self.latents_dir / f"{cache_key}.pt"
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             
-            # Save tensors with weights_only=True
-            torch.save(
-                tensors,
-                tensors_path,
-                weights_only=True  # Safe saving mode
-            )
+            # Save tensors without weights_only parameter
+            torch.save(tensors, tensors_path)
             
             return True, str(tensors_path), str(metadata_path)
             

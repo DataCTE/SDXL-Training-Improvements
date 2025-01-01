@@ -206,16 +206,17 @@ class PreprocessingPipeline:
             self._streams[thread_id] = torch.cuda.Stream()
         return self._streams.get(thread_id)
 
-    def _process_on_gpu(self, func, *args, **kwargs):
-        """Execute function on GPU with proper stream management."""
-        if not torch.cuda.is_available():
-            return func(*args, **kwargs)
-            
+    def _process_on_gpu(self, func, **kwargs):
+        """Process on GPU with memory management."""
         try:
+            # Clear cache before processing
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             with torch.cuda.device(self.device_id):
                 stream = self._get_stream()
                 with create_stream_context(stream):
-                    result = func(*args, **kwargs)
+                    result = func(**kwargs)
                     if stream:
                         # Add timeout to stream synchronization
                         start_time = time.time()
@@ -224,6 +225,7 @@ class PreprocessingPipeline:
                                 raise TimeoutError("Stream synchronization timeout")
                             time.sleep(0.001)
                     return result
+            
         except Exception as e:
             logger.error(f"GPU processing error: {str(e)}")
             raise ProcessingError("GPU processing failed", {

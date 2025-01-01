@@ -211,6 +211,7 @@ class AspectBucketDataset(Dataset):
         failed_images = 0
         processed_images = already_cached
         batch_size = 64
+        min_batch_size = 8
         
         # Speed tracking with moving window
         processing_times = []
@@ -312,8 +313,9 @@ class AspectBucketDataset(Dataset):
                         failed_images += failed_saves + failed_in_batch
                         
                         # Track processing time for successful items
-                        batch_time = time.time() - batch_start_time
-                        processing_times.extend([batch_time / successful_saves] * successful_saves)
+                        if successful_saves > 0:
+                            batch_time = time.time() - batch_start_time
+                            processing_times.extend([batch_time / successful_saves] * successful_saves)
                 
                 # Update progress bar
                 pbar.update(batch_size_actual)
@@ -322,6 +324,11 @@ class AspectBucketDataset(Dataset):
             except Exception as e:
                 logger.error(f"Failed to process batch at index {start_idx}", exc_info=True)
                 failed_images += batch_size_actual
+                
+                # Reduce batch size on failure
+                batch_size = max(batch_size // 2, min_batch_size)
+                logger.info(f"Reducing batch size to {batch_size}")
+                
                 pbar.update(batch_size_actual)
                 continue
         
