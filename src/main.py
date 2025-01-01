@@ -298,8 +298,6 @@ def setup_training(
             image_paths=image_paths,
             captions=captions,
             model=model,  # Model contains VAE
-            device=device,
-            cache_manager=cache_manager  # Pass cache manager directly
         )
 
         # Create data loader with proper memory settings
