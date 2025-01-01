@@ -447,32 +447,16 @@ class AspectBucketDataset(Dataset):
         batch_mode: bool = False,
         device: Optional[torch.device] = None
     ) -> torch.Tensor:
-        """Encode image tensor(s) with VAE to get latents.
-        
-        Args:
-            img_tensor: Image tensor in range [0, 1] of shape:
-                - (C, H, W) for single image
-                - (B, C, H, W) for batch mode
-            batch_mode: If True, input is already batched. If False, add batch dimension.
-            device: Optional device to use. Defaults to self.device.
-            
-        Returns:
-            VAE latents tensor of shape (B, 4, H/8, W/8)
-        """
+        """Encode image tensor(s) with VAE to get latents."""
         device = device or self.device
-        
-        # Move to correct device
         img_tensor = img_tensor.to(device)
         
-        # Add batch dimension if needed
         if not batch_mode:
             img_tensor = img_tensor.unsqueeze(0)
         
-        # Encode with VAE
         with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
             latents = self.model.vae.encode(img_tensor).latent_dist.sample()
             latents = latents * self.model.vae.config.scaling_factor
-            
         return latents.cpu()
 
     def encode_prompt(
@@ -571,6 +555,18 @@ class AspectBucketDataset(Dataset):
                 'error': str(e)
             })
 
+    def _load_image_to_tensor(self, image_path: Union[str, Path]) -> Tuple[torch.Tensor, Tuple[int, int]]:
+        """Load image and convert to tensor.
+        
+        Returns:
+            Tuple of (tensor, (width, height))
+        """
+        img = Image.open(image_path).convert('RGB')
+        w, h = img.size
+        img_tensor = torch.from_numpy(np.array(img)).float().to(self.device) / 255.0
+        img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
+        return img_tensor, (w, h)
+
     def _process_image_tensor(
         self, 
         img_tensor: torch.Tensor,
@@ -618,7 +614,7 @@ class AspectBucketDataset(Dataset):
             top = (new_h - target_h) // 2
             img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
         
-        # VAE encoding - no need to unsqueeze, handled by encode_with_vae
+        # VAE encoding (no need for unsqueeze)
         latents = self.encode_with_vae(img_tensor)
 
         return {
@@ -634,23 +630,14 @@ class AspectBucketDataset(Dataset):
     def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
         """Process a single image with aspect ratio bucketing."""
         try:
-            # Load and validate image
-            img = Image.open(image_path).convert('RGB')
-            w, h = img.size
-            
-            # Early conversion to tensor and move to GPU
-            img_tensor = torch.from_numpy(np.array(img)).float().to(self.device) / 255.0
-            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
-            
-            # Process on GPU
+            img_tensor, original_size = self._load_image_to_tensor(image_path)
             return self._process_on_gpu(
                 self._process_image_tensor,
                 img_tensor=img_tensor,
-                original_size=(w, h),
+                original_size=original_size,
                 config=config,
                 image_path=image_path
             )
-        
         except Exception as e:
             logger.error(f"Failed to process image {image_path}: {e}")
             return None
