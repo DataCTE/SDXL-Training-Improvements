@@ -323,7 +323,7 @@ class DDPMTrainer(SDXLTrainer):
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
             # Get metadata from batch and ensure proper types
-            original_sizes = batch["original_size"]  # List of (H,W) tuples
+            original_sizes = batch["original_sizes"]  # List of (H,W) tuples
             target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]  # Single (H,W) tuple
             crop_coords = batch.get("crop_coords", [(0, 0)] * latents.shape[0])
 
@@ -333,12 +333,12 @@ class DDPMTrainer(SDXLTrainer):
                 batch_size = latents.shape[0]
                 add_time_ids = torch.cat([
                     self.compute_time_ids(
-                        original_size=orig_size,
-                        crops_coords_top_left=crop_coords,
+                        original_size=original_size,
+                        crops_coords_top_left=crop_coord,
                         target_size=target_size,
                         device=self.device,
                         dtype=model_dtype
-                    ) for orig_size, crop_coords in zip(batch["original_sizes"], batch["crop_top_lefts"])
+                    ) for original_size, crop_coord in zip(original_sizes, crop_coords)
                 ])
                 add_time_ids = add_time_ids.to(device=self.device)
 
@@ -440,7 +440,7 @@ class DDPMTrainer(SDXLTrainer):
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise
 
-    def compute_time_ids(original_size, crops_coords_top_left, target_size, device=None, dtype=None):
+    def compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
         """Compute time embeddings for SDXL.
         
         Args:
