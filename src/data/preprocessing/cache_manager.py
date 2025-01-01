@@ -8,6 +8,8 @@ from typing import Dict, Optional, Union, Any, List, Tuple
 from src.core.logging import get_logger
 from src.data.utils.paths import convert_windows_path, is_windows_path
 import os
+from PIL import Image
+import numpy as np
 
 logger = get_logger(__name__)
 
@@ -135,16 +137,25 @@ class CacheManager:
             logger.error(f"Failed to save tensors: {e}")
             return False
 
-    def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
-        """Unified saving method using common logic."""
+    def save_vae_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
+        """Save VAE encoded latents to cache.
+        
+        Args:
+            tensors: Dict containing 'vae_latents' key with VAE encoded tensor
+            original_path: Original image path
+            metadata: Additional metadata to store
+        """
         cache_key = self.get_cache_key(original_path)
         tensors_path = self.latents_dir / f"{cache_key}.pt"
         metadata_path = self.metadata_dir / f"{cache_key}.json"
         
         try:
-            tensors_cpu = {k: v.cpu() for k, v in tensors.items()}
+            # Only save VAE encoded latents
+            tensors_to_save = {
+                "vae_latents": tensors["vae_latents"].cpu()  # Save VAE latents
+            }
             
-            if not self._save_tensor_file(tensors_cpu, tensors_path):
+            if not self._save_tensor_file(tensors_to_save, tensors_path):
                 return False
                 
             full_metadata = {
@@ -169,7 +180,7 @@ class CacheManager:
             return True
             
         except Exception as e:
-            logger.error(f"Failed to save to cache: {e}")
+            logger.error(f"Failed to save VAE latents to cache: {e}")
             return False
 
     def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
@@ -180,11 +191,18 @@ class CacheManager:
             logger.error(f"Failed to load tensors: {e}")
             return None
 
-    def _validate_cache_files(self, tensor_path: Path, metadata_path: Path, cache_key: str) -> bool:
-        """Common validation logic for cache files."""
+    def _validate_and_clean_cache_entry(self, tensor_path: Path, metadata_path: Path, cache_key: str) -> bool:
+        """Validate cache files and clean up if invalid."""
         if not tensor_path.exists() or not metadata_path.exists():
-            logger.debug(f"Cache files missing for key: {cache_key}")
-            self._invalidate_cache_entry(cache_key)
+            with self._lock:
+                if cache_key in self.cache_index["entries"]:
+                    try:
+                        tensor_path.unlink(missing_ok=True)
+                        metadata_path.unlink(missing_ok=True)
+                        del self.cache_index["entries"][cache_key]
+                        self._save_index()
+                    except Exception as e:
+                        logger.error(f"Failed to clean cache entry {cache_key}: {e}")
             return False
         return True
 
@@ -192,8 +210,41 @@ class CacheManager:
         """Get total size of cached files."""
         return sum(os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt"))
 
+    def load_image_to_tensor(self, image_path: Union[str, Path], device: Optional[torch.device] = None) -> Tuple[torch.Tensor, Tuple[int, int]]:
+        """Load and convert image to tensor with proper device placement.
+        
+        Args:
+            image_path: Path to image file
+            device: Target device for tensor
+            
+        Returns:
+            Tuple of (tensor, (width, height))
+        """
+        try:
+            device = device or self.device
+            img = Image.open(image_path).convert('RGB')
+            w, h = img.size
+            
+            # Convert to tensor efficiently
+            img_tensor = torch.from_numpy(np.array(img)).float().to(device) / 255.0
+            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
+            
+            return img_tensor, (w, h)
+            
+        except Exception as e:
+            logger.error(f"Failed to load image {image_path}: {e}")
+            return None
+
     def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
-        """Unified tensor loading with validation."""
+        """Load cached tensors with validation.
+        
+        Args:
+            cache_key: Cache key for the entry
+            device: Target device for tensors
+            
+        Returns:
+            Dict containing tensors and metadata or None if invalid
+        """
         try:
             entry = self.cache_index["entries"].get(cache_key)
             if not entry or not entry.get("is_valid", False):
@@ -202,7 +253,7 @@ class CacheManager:
             tensor_path = Path(entry["tensors_path"])
             metadata_path = Path(entry["metadata_path"])
             
-            if not self._validate_cache_files(tensor_path, metadata_path, cache_key):
+            if not self._validate_and_clean_cache_entry(tensor_path, metadata_path, cache_key):
                 return None
 
             device = device or self.device
@@ -219,7 +270,7 @@ class CacheManager:
 
             # Validate required keys
             required_keys = {
-                "tensors": {"pixel_values", "prompt_embeds", "pooled_prompt_embeds"},
+                "tensors": {"vae_latents"},
                 "metadata": {"original_size", "crop_coords", "target_size"}
             }
             

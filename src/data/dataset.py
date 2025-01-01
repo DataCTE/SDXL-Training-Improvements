@@ -51,6 +51,7 @@ class AspectBucketDataset(Dataset):
         if model:
             self.text_encoders = model.text_encoders
             self.tokenizers = model.tokenizers
+            self.vae = model.vae
 
         # Initialize cache manager
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
@@ -116,12 +117,11 @@ class AspectBucketDataset(Dataset):
                 if processed is None:
                     raise ValueError(f"Failed to process image: {image_path}")
                     
-                # Store only the caption text, no encoding here
                 processed.update({"text": caption})
                     
                 if self.config.global_config.cache.use_cache:
                     tensors = {
-                        "pixel_values": processed["pixel_values"],
+                        "vae_latents": processed["vae_latents"],
                     }
                     metadata = {
                         "original_size": processed["original_size"],
@@ -129,11 +129,11 @@ class AspectBucketDataset(Dataset):
                         "target_size": processed["target_size"],
                         "text": caption
                     }
-                    self.cache_manager.save_latents(tensors, image_path, metadata)
+                    self.cache_manager.save_vae_latents(tensors, image_path, metadata)
                     cached_data = {**tensors, "metadata": metadata}
                 else:
                     cached_data = {
-                        "pixel_values": processed["pixel_values"],
+                        "vae_latents": processed["vae_latents"],
                         "metadata": {
                             "original_size": processed["original_size"],
                             "crop_coords": processed["crop_coords"],
@@ -207,34 +207,32 @@ class AspectBucketDataset(Dataset):
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format."""
         try:
-            # Filter out None values from failed processing
             batch = [b for b in batch if b is not None]
             
             if not batch:
                 raise ValueError("Empty batch after filtering")
 
-            # Group samples by bucket size
+            # Group samples by VAE latent size
             bucket_groups = {}
             for example in batch:
-                size = example["pixel_values"].shape[-2:]  # Get HxW dimensions
-                if size not in bucket_groups:
-                    bucket_groups[size] = []
-                bucket_groups[size].append(example)
+                vae_size = example["vae_latents"].shape[-2:]  # Get HxW dimensions of VAE latents
+                if vae_size not in bucket_groups:
+                    bucket_groups[vae_size] = []
+                bucket_groups[vae_size].append(example)
 
-            # Take the largest group
             largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
             valid_batch = bucket_groups[largest_size]
 
-            # Batch encode text here
+            # Batch encode text
             captions = [example["metadata"]["text"] for example in valid_batch]
             encoded_text = self.encode_prompt(
                 batch={"text": captions},
                 proportion_empty_prompts=0.0
             )
 
-            # Return collated batch with encoded text
+            # Return collated batch
             return {
-                "pixel_values": torch.stack([example["pixel_values"] for example in valid_batch]),
+                "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
                 "prompt_embeds": encoded_text["prompt_embeds"],
                 "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
                 "original_size": [example["metadata"]["original_size"] for example in valid_batch],
@@ -276,18 +274,6 @@ class AspectBucketDataset(Dataset):
             logger.error("Failed to encode prompts", 
                         extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
             raise
-
-    def _load_image_to_tensor(self, image_path: Union[str, Path]) -> Tuple[torch.Tensor, Tuple[int, int]]:
-        """Load image and convert to tensor.
-        
-        Returns:
-            Tuple of (tensor, (width, height))
-        """
-        img = Image.open(image_path).convert('RGB')
-        w, h = img.size
-        img_tensor = torch.from_numpy(np.array(img)).float().to(self.device) / 255.0
-        img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
-        return img_tensor, (w, h)
 
     def _process_image_tensor(
         self, 
@@ -339,18 +325,37 @@ class AspectBucketDataset(Dataset):
         }
 
     def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
-        """Process a single image with aspect ratio bucketing."""
+        """Process a single image with aspect ratio bucketing and VAE encoding."""
         try:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            img_tensor, original_size = self._load_image_to_tensor(image_path)
-            return self._process_image_tensor(
+            # Use CacheManager's image loading
+            loaded = self.cache_manager.load_image_to_tensor(image_path, self.device)
+            if loaded is None:
+                return None
+            
+            img_tensor, original_size = loaded
+            
+            processed = self._process_image_tensor(
                 img_tensor=img_tensor,
                 original_size=original_size,
                 config=config,
                 image_path=image_path
             )
+            
+            if processed is None:
+                return None
+            
+            # Encode with VAE
+            with torch.no_grad():
+                pixel_values = processed["pixel_values"].unsqueeze(0)
+                vae_latents = self.vae.encode(pixel_values).latent_dist.sample()
+                vae_latents = vae_latents * self.vae.config.scaling_factor
+            
+            processed["vae_latents"] = vae_latents.squeeze(0)
+            return processed
+            
         except Exception as e:
             logger.error(f"Failed to process image {image_path}: {e}")
             return None

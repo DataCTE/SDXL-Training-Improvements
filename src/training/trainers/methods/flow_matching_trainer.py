@@ -252,16 +252,12 @@ class FlowMatchingTrainer(SDXLTrainer):
             model_dtype = next(self.model.parameters()).dtype
 
             # Get batch data and ensure consistent dtype
-            pixel_values = batch["pixel_values"].to(self.device, dtype=model_dtype)
+            vae_latents = batch["vae_latents"].to(self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
 
-            # Convert images to latent space using VAE
-            latents = self.model.vae.encode(pixel_values).latent_dist.sample()
-            latents = latents * self.model.vae.config.scaling_factor
-
-            # Use latents as target (x1)
-            x1 = latents
+            # Use VAE latents directly as target (x1)
+            x1 = vae_latents
 
             # Sample time steps
             t = self.sample_logit_normal(
@@ -275,9 +271,9 @@ class FlowMatchingTrainer(SDXLTrainer):
             x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
 
             # Get metadata from batch and ensure proper types
-            original_sizes = batch["original_sizes"]  # List of (H,W) tuples
+            original_sizes = batch["original_size"]  # List of (H,W) tuples
             target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
-            crop_coords = batch.get("crop_coords", [(0, 0)] * x1.shape[0])
+            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * x1.shape[0])
 
             # Prepare time embeddings for SDXL
             add_time_ids = torch.cat([

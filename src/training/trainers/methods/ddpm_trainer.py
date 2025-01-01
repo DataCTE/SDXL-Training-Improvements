@@ -316,20 +316,20 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Use pre-processed latents directly from batch
-            latents = batch["pixel_values"].to(device=self.device, dtype=model_dtype)  # These are already VAE-encoded latents
+            # Use pre-processed VAE latents directly from batch
+            vae_latents = batch["vae_latents"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
             # Get metadata from batch
             original_sizes = batch["original_size"]
             target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
-            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * latents.shape[0])
+            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * vae_latents.shape[0])
             
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
                 # Prepare time embeddings using metadata
-                batch_size = latents.shape[0]
+                batch_size = vae_latents.shape[0]
                 add_time_ids = torch.cat([
                     self.compute_time_ids(
                         original_size=orig_size,
@@ -342,7 +342,7 @@ class DDPMTrainer(SDXLTrainer):
                 add_time_ids = add_time_ids.to(device=self.device)
 
                 # Sample noise with proper scaling
-                noise = torch.randn_like(latents, device=self.device, dtype=model_dtype)
+                noise = torch.randn_like(vae_latents, device=self.device, dtype=model_dtype)
                 noise = torch.clamp(noise, -20000.0, 20000.0)  # Clamp noise values
                 
                 # Sample timesteps with proper scaling
@@ -352,7 +352,7 @@ class DDPMTrainer(SDXLTrainer):
                 ).long()
 
                 # Add noise to latents with value checking and scaling
-                noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+                noisy_latents = self.noise_scheduler.add_noise(vae_latents, noise, timesteps)
                 
                 # Clamp noisy latents to prevent extreme values
                 noisy_latents = torch.clamp(noisy_latents, -20000.0, 20000.0)
@@ -372,7 +372,7 @@ class DDPMTrainer(SDXLTrainer):
                 if self.config.training.prediction_type == "epsilon":
                     target = noise
                 elif self.config.training.prediction_type == "v_prediction":
-                    target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
+                    target = self.noise_scheduler.get_velocity(vae_latents, noise, timesteps)
                 else:
                     raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
 
@@ -415,7 +415,7 @@ class DDPMTrainer(SDXLTrainer):
                     "pred_max": model_pred.abs().max().item(),
                     "target_max": target.abs().max().item(),
                     "noise_scale": noise.abs().mean().item(),
-                    "latent_scale": latents.abs().mean().item(),
+                    "latent_scale": vae_latents.abs().mean().item(),
                     "weight_mean": tag_weights.mean().item(),
                     "weight_std": tag_weights.std().item(),
                     "weight_min": tag_weights.min().item(),
