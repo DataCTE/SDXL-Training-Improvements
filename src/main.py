@@ -283,31 +283,38 @@ def setup_training(
     image_paths: List[str],
     captions: List[str]
 ) -> Tuple[torch.utils.data.DataLoader, torch.optim.Optimizer, Optional[WandbLogger]]:
-    """Setup training components."""
+    """Setup training components with VAE latent caching."""
     try:
-        # Create dataset directly with model
+        # Initialize cache manager for VAE latents
+        cache_manager = CacheManager(
+            cache_dir=config.global_config.cache.cache_dir,
+            max_cache_size=config.global_config.cache.max_cache_size,
+            device=device
+        )
+
+        # Create dataset with VAE and cache manager
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            model=model,
-            enable_memory_tracking=True,
-            max_memory_usage=0.8,
-            device=device  # Pass device to dataset
+            model=model,  # Model contains VAE
+            device=device,
+            cache_manager=cache_manager  # Pass cache manager directly
         )
 
-        # Create data loader
+        # Create data loader with proper memory settings
         train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.training.batch_size,
             shuffle=True,
-            num_workers=0,  # No multiprocessing
-            pin_memory=False,
+            num_workers=0,  # No multiprocessing to avoid CUDA issues
+            pin_memory=False,  # No pin memory since we're using cached VAE latents
             collate_fn=dataset.collate_fn,
-            drop_last=True  # Drop incomplete batches
+            drop_last=True,
+            persistent_workers=False  # No persistent workers with num_workers=0
         )
 
-        # Initialize optimizer
+        # Initialize optimizer with memory optimizations
         optimizer_cls = {
             "adamw": torch.optim.AdamW,
             "adamw_bf16": AdamWBF16,
@@ -326,34 +333,51 @@ def setup_training(
         # Initialize wandb logger if enabled
         wandb_logger = None
         if config.global_config.logging.use_wandb and is_main_process():
-            # Initialize wandb first with config
+            run_config = {
+                **config.to_dict(),
+                "cache_info": {
+                    "cache_dir": str(cache_manager.cache_dir),
+                    "max_cache_size": cache_manager.max_cache_size,
+                    "device": str(device)
+                },
+                "dataset_info": {
+                    "num_samples": len(dataset),
+                    "batch_size": config.training.batch_size,
+                    "effective_batch_size": config.training.batch_size * config.training.gradient_accumulation_steps
+                }
+            }
+
             if config.global_config.logging.wandb_entity:
                 wandb.init(
                     project=config.global_config.logging.wandb_project,
                     entity=config.global_config.logging.wandb_entity,
-                    config=config.to_dict()
+                    config=run_config
                 )
             else:
                 wandb.init(
                     project=config.global_config.logging.wandb_project,
-                    config=config.to_dict()
+                    config=run_config
                 )
                 
-            # Then create WandbLogger without entity parameter
             wandb_logger = WandbLogger(
                 project=config.global_config.logging.wandb_project,
-                config=config.to_dict()
+                config=run_config
             )
             
-            # Print wandb URL to console
             if wandb_logger.run:
                 logger.info(f"\nWeights & Biases run: {wandb_logger.run.get_url()}\n")
 
         return train_dataloader, optimizer, wandb_logger
         
     except Exception as e:
-        logger.error("Failed to setup training", exc_info=True)
-        raise
+        error_context = {
+            'device': str(device),
+            'num_images': len(image_paths),
+            'batch_size': config.training.batch_size,
+            'error': str(e)
+        }
+        logger.error("Failed to setup training", exc_info=True, extra=error_context)
+        raise TrainingSetupError("Training setup failed", error_context) from e
 
 def check_system_limits():
     """Check and attempt to increase system file limits."""
