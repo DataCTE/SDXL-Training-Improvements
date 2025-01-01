@@ -317,15 +317,14 @@ class DDPMTrainer(SDXLTrainer):
             model_dtype = next(self.model.parameters()).dtype
             
             # Extract latents and embeddings directly from batch
-            # These should already be cached and loaded by the dataloader
             latents = batch["pixel_values"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
             # Get metadata from batch and ensure proper types
-            original_sizes = batch["original_sizes"]  # List of (H,W) tuples
-            target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]  # Single (H,W) tuple
-            crop_coords = batch.get("crop_coords", [(0, 0)] * latents.shape[0])
+            original_sizes = batch["original_size"]  # Changed from "original_sizes"
+            target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
+            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * latents.shape[0])  # Changed from "crop_coords"
 
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
@@ -333,12 +332,12 @@ class DDPMTrainer(SDXLTrainer):
                 batch_size = latents.shape[0]
                 add_time_ids = torch.cat([
                     self.compute_time_ids(
-                        original_size=original_size,
+                        original_size=orig_size,
                         crops_coords_top_left=crop_coord,
                         target_size=target_size,
                         device=self.device,
                         dtype=model_dtype
-                    ) for original_size, crop_coord in zip(original_sizes, crop_coords)
+                    ) for orig_size, crop_coord in zip(original_sizes, crop_coords)
                 ])
                 add_time_ids = add_time_ids.to(device=self.device)
 
