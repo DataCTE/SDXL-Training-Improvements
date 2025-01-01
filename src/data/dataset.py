@@ -61,28 +61,34 @@ class AspectBucketDataset(Dataset):
             self.enable_memory_tracking = enable_memory_tracking
             self.max_memory_usage = max_memory_usage
 
-            # Convert paths if needed
+             # Convert paths if needed
             self.image_paths = [
                 str(convert_windows_path(p) if is_windows_path(p) else Path(p))
                 for p in image_paths
             ]
             self.captions = captions
+            
+            # Set up device
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device_id = 0 if torch.cuda.is_available() else None
 
-            # Initialize cache manager
+            # Initialize cache manager with device
             cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
             self.cache_manager = CacheManager(
                 cache_dir=cache_dir,
                 max_cache_size=config.global_config.cache.max_cache_size,
-                device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                device=self.device
             )
 
-            # Initialize preprocessing pipeline
+            # Initialize preprocessing pipeline with device info
             self.preprocessing_pipeline = preprocessing_pipeline or PreprocessingPipeline(
                 config=config,
                 model=config.model,
                 cache_manager=self.cache_manager,
                 is_train=is_train,
-                enable_memory_tracking=enable_memory_tracking
+                enable_memory_tracking=enable_memory_tracking,
+                device=self.device,
+                device_id=self.device_id
             )
 
             # Initialize tag weighter with index
