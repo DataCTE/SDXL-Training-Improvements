@@ -232,7 +232,7 @@ class AspectBucketDataset(Dataset):
                             "target_size": img_data["target_size"],
                             "text": caption
                         }
-                        self.cache_manager.save_vae_latents(tensors, path, metadata)
+                        self.cache_manager.save_latents(tensors, path, metadata)
                         caption_idx += 1
                     
                     results.append(result)
