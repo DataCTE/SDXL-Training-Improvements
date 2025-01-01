@@ -192,6 +192,11 @@ class AspectBucketDataset(Dataset):
                     config=self.config
                 )
                 
+                # Check successful processing
+                successful = sum(1 for item in processed_items if item is not None)
+                if successful < len(batch_indices):
+                    logger.warning(f"Failed to process {len(batch_indices) - successful} images in batch")
+                    
                 pbar.update(len(batch_indices))
             
             pbar.close()
