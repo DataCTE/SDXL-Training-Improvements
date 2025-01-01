@@ -276,22 +276,28 @@ class FlowMatchingTrainer(SDXLTrainer):
             # Generate random starting point with matching dtype
             x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
 
+            # Get metadata from batch and ensure proper types
+            original_sizes = batch["original_sizes"]  # List of (H,W) tuples
+            target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
+            crop_coords = batch.get("crop_coords", [(0, 0)] * x1.shape[0])
+
             # Prepare time embeddings for SDXL
-            time_ids = self._get_add_time_ids(
-                original_sizes=original_sizes,
-                crops_coords_top_left=crop_top_lefts,
-                target_size=(pixel_values.shape[-2], pixel_values.shape[-1]),
-                dtype=prompt_embeds.dtype,
-                batch_size=x1.shape[0]
-            )
-            time_ids = time_ids.to(device=self.device)
+            add_time_ids = torch.cat([
+                self.compute_time_ids(
+                    original_size=original_size,
+                    crops_coords_top_left=crop_coord,
+                    target_size=target_size,
+                    device=self.device,
+                    dtype=model_dtype
+                ) for original_size, crop_coord in zip(original_sizes, crop_coords)
+            ])
 
             # Prepare conditioning embeddings
             cond_emb = {
                 "prompt_embeds": prompt_embeds,
                 "added_cond_kwargs": {
                     "text_embeds": pooled_prompt_embeds,
-                    "time_ids": time_ids
+                    "time_ids": add_time_ids
                 }
             }
 
@@ -391,3 +397,37 @@ class FlowMatchingTrainer(SDXLTrainer):
         v_true = x1 - x0
         v_pred = self.compute_velocity(model, xt, t, cond_emb)
         return F.mse_loss(v_pred, v_true, reduction="none").mean([1, 2, 3])
+    
+    def compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
+        """Compute time embeddings for SDXL.
+        
+        Args:
+            original_size (tuple): Original image size (height, width)
+            crops_coords_top_left (tuple): Crop coordinates (top, left)
+            target_size (tuple): Target image size (height, width)
+            device (torch.device, optional): Device to place tensor on
+            dtype (torch.dtype, optional): Dtype for the tensor
+        
+        Returns:
+            torch.Tensor: Time embeddings tensor of shape [1, 6]
+        """
+        # Ensure inputs are proper tuples
+        if not isinstance(original_size, (tuple, list)):
+            original_size = (original_size, original_size)
+        if not isinstance(crops_coords_top_left, (tuple, list)):
+            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
+        if not isinstance(target_size, (tuple, list)):
+            target_size = (target_size, target_size)
+        
+        # Combine all values into a single list
+        time_ids = [
+            original_size[0],    # Original height
+            original_size[1],    # Original width
+            crops_coords_top_left[0],  # Crop top
+            crops_coords_top_left[1],  # Crop left
+            target_size[0],     # Target height
+            target_size[1],     # Target width
+        ]
+        
+        # Create tensor with proper device and dtype
+        return torch.tensor([time_ids], device=device, dtype=dtype)
