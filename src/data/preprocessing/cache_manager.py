@@ -172,53 +172,68 @@ class CacheManager:
             logger.error(f"Failed to save to cache: {e}")
             return False
 
-    def load_latents(
-        self,
-        path: Union[str, Path],
-        device: Optional[torch.device] = None
-    ) -> Optional[Dict[str, Any]]:
-        """Optimized latents loading with caching."""
-        cache_key = self.get_cache_key(path)
-        
-        # Use cached entry status
-        entry = self.cache_index["entries"].get(cache_key)
-        if not entry:
-            return None
-        
-        if "is_valid" in entry and not entry["is_valid"]:
-            return None
-        
+    def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
+        """Common tensor loading logic."""
         try:
-            # Load tensors directly to target device with safe loading
+            return torch.load(path, map_location=device, weights_only=True)
+        except Exception as e:
+            logger.error(f"Failed to load tensors: {e}")
+            return None
+
+    def _validate_cache_files(self, tensor_path: Path, metadata_path: Path, cache_key: str) -> bool:
+        """Common validation logic for cache files."""
+        if not tensor_path.exists() or not metadata_path.exists():
+            logger.debug(f"Cache files missing for key: {cache_key}")
+            self._invalidate_cache_entry(cache_key)
+            return False
+        return True
+
+    def _get_cache_size(self) -> int:
+        """Get total size of cached files."""
+        return sum(os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt"))
+
+    def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
+        """Unified tensor loading with validation."""
+        try:
+            entry = self.cache_index["entries"].get(cache_key)
+            if not entry or not entry.get("is_valid", False):
+                return None
+
+            tensor_path = Path(entry["tensors_path"])
+            metadata_path = Path(entry["metadata_path"])
+            
+            if not self._validate_cache_files(tensor_path, metadata_path, cache_key):
+                return None
+
             device = device or self.device
-            tensors = torch.load(
-                entry["tensors_path"], 
-                map_location=device,
-                weights_only=True  # Enable safe loading
-            )
-            
-            # Load metadata with buffered IO
-            with open(entry["metadata_path"]) as f:
-                metadata = json.load(f)
-            
-            return {
-                "pixel_values": tensors["pixel_values"],
-                "prompt_embeds": tensors["prompt_embeds"],
-                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"],
-                "original_size": metadata["original_size"],
-                "crop_coords": metadata["crop_coords"],
-                "target_size": metadata["target_size"],
-                "text": metadata.get("text")
+            tensors = self._load_tensor_file(tensor_path, device)
+            if tensors is None:
+                return None
+
+            try:
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+            except json.JSONDecodeError:
+                self._invalidate_cache_entry(cache_key)
+                return None
+
+            # Validate required keys
+            required_keys = {
+                "tensors": {"pixel_values", "prompt_embeds", "pooled_prompt_embeds"},
+                "metadata": {"original_size", "crop_coords", "target_size"}
             }
             
+            if not (all(k in tensors for k in required_keys["tensors"]) and 
+                   all(k in metadata for k in required_keys["metadata"])):
+                self._invalidate_cache_entry(cache_key)
+                return None
+
+            return {"metadata": metadata, **tensors}
+
         except Exception as e:
-            # Mark entry as invalid on failure
-            with self._lock:
-                entry["is_valid"] = False
-                entry["last_checked"] = time.time()
-            logger.error(f"Failed to load from cache: {e}")
+            logger.error(f"Unexpected error loading cache for {cache_key}: {str(e)}")
             return None
-            
+
     def cleanup(self, max_age: Optional[float] = None):
         """Optimized cleanup with batch processing."""
         try:
@@ -256,15 +271,23 @@ class CacheManager:
             logger.error(f"Cache cleanup failed: {e}")
 
     def _update_stats(self):
-        """Batch update cache statistics."""
-        self.cache_index["stats"].update({
+        """Update cache statistics."""
+        cache_size = self._get_cache_size()
+        stats = {
             "total_entries": len(self.cache_index["entries"]),
-            "latents_size": sum(
-                os.path.getsize(str(p)) 
-                for p in self.latents_dir.glob("*.pt")
-            )
-        })
-        self.cache_index["last_updated"] = time.time()
+            "latents_size": cache_size,
+            "last_updated": time.time()
+        }
+        self.cache_index["stats"].update(stats)
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get current cache statistics."""
+        return {
+            "total_entries": len(self.cache_index["entries"]),
+            "cache_size_bytes": self._get_cache_size(),
+            "last_updated": self.cache_index["last_updated"],
+            "last_cleanup": self.cache_index["stats"]["last_cleanup"]
+        }
 
     def __enter__(self):
         return self
@@ -307,75 +330,6 @@ class CacheManager:
         
         return is_valid
 
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get current cache statistics."""
-        return {
-            "total_entries": len(self.cache_index["entries"]),
-            "cache_size_bytes": sum(
-                os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt")
-            ),
-            "last_updated": self.cache_index["last_updated"],
-            "last_cleanup": self.cache_index["stats"]["last_cleanup"]
-        }
-
-    def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
-        """Load cached tensors with improved validation and error handling."""
-        try:
-            entry = self.cache_index["entries"].get(cache_key)
-            if not entry:
-                logger.debug(f"No cache entry found for key: {cache_key}")
-                return None
-            
-            # Validate cache files exist
-            tensor_path = Path(entry["tensors_path"])
-            metadata_path = Path(entry["metadata_path"])
-            
-            if not tensor_path.exists() or not metadata_path.exists():
-                logger.debug(f"Cache files missing for key: {cache_key}")
-                self._invalidate_cache_entry(cache_key)
-                return None
-            
-            # Load tensors and metadata
-            device = device or self.device
-            try:
-                tensors = torch.load(
-                    tensor_path,
-                    map_location=device,
-                    weights_only=True
-                )
-                
-                with open(metadata_path) as f:
-                    metadata = json.load(f)
-                    
-                # Validate required tensor keys
-                required_tensor_keys = {"pixel_values", "prompt_embeds", "pooled_prompt_embeds"}
-                required_metadata_keys = {"original_size", "crop_coords", "target_size"}
-                
-                if not all(key in tensors for key in required_tensor_keys):
-                    logger.warning(f"Cache entry {cache_key} missing required tensor keys")
-                    self._invalidate_cache_entry(cache_key)
-                    return None
-                    
-                if not all(key in metadata for key in required_metadata_keys):
-                    logger.warning(f"Cache entry {cache_key} missing required metadata keys")
-                    self._invalidate_cache_entry(cache_key)
-                    return None
-                    
-                # Return combined dictionary with both tensors and metadata
-                return {
-                    **tensors,
-                    "metadata": metadata
-                }
-                
-            except (RuntimeError, json.JSONDecodeError) as e:
-                logger.warning(f"Failed to load cache entry {cache_key}: {str(e)}")
-                self._invalidate_cache_entry(cache_key)
-                return None
-                
-        except Exception as e:
-            logger.error(f"Unexpected error loading cache for {cache_key}: {str(e)}")
-            return None
-        
     def _invalidate_cache_entry(self, cache_key: str) -> None:
         """Invalidate and clean up a cache entry."""
         with self._lock:
