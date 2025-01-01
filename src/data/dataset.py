@@ -68,8 +68,9 @@ class AspectBucketDataset(Dataset):
         ]
         self.captions = captions
 
-        # Initialize buckets
-        self.buckets = self.get_aspect_buckets(config)
+        # Generate and cache buckets once during initialization
+        self.buckets = self._generate_dynamic_buckets(config)
+        logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
         self.bucket_indices = []
 
         # Initialize tag weighter if needed
@@ -350,20 +351,13 @@ class AspectBucketDataset(Dataset):
             return None
         
         # Find matching bucket
-        buckets = self.get_aspect_buckets(config)
+        buckets = self.get_aspect_buckets()
         bucket_ratios = [(bw/bh, idx, (bw,bh)) for idx, (bw,bh) in enumerate(buckets)]
         _, bucket_idx, (target_w, target_h) = min(
             [(abs(aspect_ratio - ratio), idx, dims) for ratio, idx, dims in bucket_ratios]
         )
         
         try:
-            # Resize directly to target bucket size
-            img_tensor = F.interpolate(
-                img_tensor.unsqueeze(0),
-                size=(target_h, target_w),
-                mode='bilinear',
-                align_corners=False
-            ).squeeze(0)
             
             return {
                 "pixel_values": img_tensor,
@@ -447,47 +441,63 @@ class AspectBucketDataset(Dataset):
             logger.error("Batch processing failed", exc_info=True)
             return [None] * len(image_paths)
 
-    def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        """Generate dynamic buckets around default buckets to accommodate all images."""
-        base_buckets = config.global_config.image.supported_dims
+    def _generate_dynamic_buckets(self, config: Config) -> List[Tuple[int, int]]:
+        """Generate dynamic buckets based on actual image dimensions."""
         bucket_step = config.global_config.image.bucket_step
         max_ratio = config.global_config.image.max_aspect_ratio
+        min_size = config.global_config.image.min_size
+        max_size = config.global_config.image.max_size
         
-        # Convert base buckets to set for faster lookup
-        buckets = set((w, h) for w, h in base_buckets)
+        # Collect all image dimensions and group by aspect ratio
+        dimensions = {}  # aspect_ratio -> list of (width, height)
+        logger.info("Analyzing image dimensions...")
         
-        # First pass: collect all image aspect ratios
-        aspect_ratios = []
-        for path in self.image_paths:
+        for path in tqdm(self.image_paths, desc="Scanning images"):
             loaded = self.cache_manager.load_image_to_tensor(path, self.device)
             if loaded:
                 _, (w, h) = loaded
-                if 1/max_ratio <= w/h <= max_ratio:
-                    aspect_ratios.append(w/h)
+                ratio = w / h
+                if 1/max_ratio <= ratio <= max_ratio:
+                    # Round ratio to 2 decimal places to group similar ratios
+                    rounded_ratio = round(ratio * 100) / 100
+                    if rounded_ratio not in dimensions:
+                        dimensions[rounded_ratio] = []
+                    dimensions[rounded_ratio].append((w, h))
         
-        # Generate dynamic buckets for uncovered aspect ratios
-        for ratio in aspect_ratios:
-            # Find closest base bucket
-            closest = min(base_buckets, key=lambda x: abs(x[0]/x[1] - ratio))
-            base_w, base_h = closest
+        # Generate buckets for each aspect ratio group
+        buckets = set()
+        for ratio, sizes in dimensions.items():
+            # Find median dimensions for this ratio
+            widths, heights = zip(*sizes)
+            med_w = sorted(widths)[len(widths)//2]
+            med_h = sorted(heights)[len(heights)//2]
             
-            # Generate buckets up/down from base maintaining aspect ratio
-            for scale in [0.75, 0.875, 1.0, 1.125, 1.25]:
+            # Round to nearest bucket step
+            base_w = int(med_w / bucket_step + 0.5) * bucket_step
+            base_h = int(med_h / bucket_step + 0.5) * bucket_step
+            
+            # Ensure dimensions are within bounds
+            base_w = max(min(base_w, max_size[0]), min_size[0])
+            base_h = max(min(base_h, max_size[1]), min_size[1])
+            
+            # Add base bucket
+            buckets.add((base_w, base_h))
+            
+            # Add scaled buckets if needed
+            for scale in [0.75, 1.25]:
                 w = int(base_w * scale / bucket_step) * bucket_step
                 h = int(base_h * scale / bucket_step) * bucket_step
-                
-                # Ensure dimensions are within bounds
-                if (w >= config.global_config.image.min_size[0] and 
-                    h >= config.global_config.image.min_size[1] and
-                    w <= config.global_config.image.max_size[0] and
-                    h <= config.global_config.image.max_size[1]):
+                if (min_size[0] <= w <= max_size[0] and 
+                    min_size[1] <= h <= max_size[1]):
                     buckets.add((w, h))
         
-        # Sort buckets by area for consistent ordering
         sorted_buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]/x[1]))
-        
         logger.info(f"Generated {len(sorted_buckets)} dynamic buckets")
         return sorted_buckets
+
+    def get_aspect_buckets(self) -> List[Tuple[int, int]]:
+        """Return cached buckets."""
+        return self.buckets
 
 def create_dataset(
     config: Config,
