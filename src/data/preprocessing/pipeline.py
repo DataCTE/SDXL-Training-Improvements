@@ -44,7 +44,9 @@ class PreprocessingPipeline:
         cache_manager: Optional[CacheManager] = None,
         is_train: bool = True,
         enable_memory_tracking: bool = True,
-        stream_timeout: float = 10.0
+        stream_timeout: float = 10.0,
+        device: Optional[torch.device] = None,
+        device_id: Optional[int] = None
     ):
         """Initialize preprocessing pipeline."""
         # Performance tracking
@@ -63,9 +65,11 @@ class PreprocessingPipeline:
             torch.backends.cudnn.allow_tf32 = True
             torch.set_float32_matmul_precision('medium')
             
-            self.device = torch.device('cuda')
+            self.device = device or torch.device('cuda')
+            self.device_id = device_id if device_id is not None else 0
         else:
             self.device = torch.device('cpu')
+            self.device_id = None
             
         # Core components
         self.config = config
