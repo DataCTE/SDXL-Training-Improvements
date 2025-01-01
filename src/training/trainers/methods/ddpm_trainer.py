@@ -316,16 +316,16 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Extract latents and embeddings directly from batch
-            latents = batch["pixel_values"].to(device=self.device, dtype=model_dtype)
+            # Use pre-processed latents directly from batch
+            latents = batch["pixel_values"].to(device=self.device, dtype=model_dtype)  # These are already VAE-encoded latents
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
-            # Get metadata from batch and ensure proper types
-            original_sizes = batch["original_size"]  # Changed from "original_sizes"
+            # Get metadata from batch
+            original_sizes = batch["original_size"]
             target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
-            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * latents.shape[0])  # Changed from "crop_coords"
-
+            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * latents.shape[0])
+            
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
                 # Prepare time embeddings using metadata
