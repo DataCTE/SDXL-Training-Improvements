@@ -113,37 +113,18 @@ class AspectBucketDataset(Dataset):
             cached_data = self.cache_manager.load_tensors(cache_key)
             
             if cached_data is None:
-                processed = self._process_single_image(image_path=image_path, config=self.config)
-                
-                if processed is None:
-                    raise ValueError(f"Failed to process image: {image_path}")
-                    
-                processed.update({"text": caption})
-                    
-                if self.config.global_config.cache.use_cache:
-                    tensors = {
-                        "vae_latents": processed["vae_latents"],
-                    }
-                    metadata = {
-                        "original_size": processed["original_size"],
-                        "crop_coords": processed["crop_coords"],
-                        "target_size": processed["target_size"],
-                        "text": caption
-                    }
-                    self.cache_manager.save_vae_latents(tensors, image_path, metadata)
-                    cached_data = {**tensors, "metadata": metadata}
-                else:
-                    cached_data = {
-                        "vae_latents": processed["vae_latents"],
-                        "metadata": {
-                            "original_size": processed["original_size"],
-                            "crop_coords": processed["crop_coords"],
-                            "target_size": processed["target_size"],
-                            "text": caption
-                        }
-                    }
+                raise ValueError(f"Failed to load cached data for: {image_path}")
             
-            return cached_data
+            # Ensure all required keys are present
+            return {
+                "vae_latents": cached_data["vae_latents"],
+                "metadata": {
+                    "original_size": cached_data["metadata"]["original_size"],
+                    "crop_coords": cached_data["metadata"]["crop_coords"],
+                    "target_size": cached_data["metadata"]["target_size"],
+                    "text": caption  # Always use the caption from the dataset
+                }
+            }
 
         except Exception as e:
             logger.error(f"Failed to get item {idx}: {str(e)}")
@@ -424,14 +405,30 @@ class AspectBucketDataset(Dataset):
                 processed = self._process_single_image(path, config)
                 processed_images.append(processed)
                 
-            # Don't encode text here - let collate_fn handle it
+            # Save results and prepare return values
             results = []
-            for img_data, caption in zip(processed_images, captions):
+            for img_data, caption, path in zip(processed_images, captions, image_paths):
                 if img_data is not None:
-                    results.append({
+                    # Add caption to processed data
+                    result = {
                         **img_data,
                         "text": caption
-                    })
+                    }
+                    
+                    # Save to cache if enabled
+                    if self.config.global_config.cache.use_cache:
+                        tensors = {
+                            "vae_latents": img_data["vae_latents"],
+                        }
+                        metadata = {
+                            "original_size": img_data["original_size"],
+                            "crop_coords": img_data["crop_coords"],
+                            "target_size": img_data["target_size"],
+                            "text": caption
+                        }
+                        self.cache_manager.save_vae_latents(tensors, path, metadata)
+                    
+                    results.append(result)
                 else:
                     results.append(None)
                     
