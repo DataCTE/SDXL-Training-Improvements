@@ -275,9 +275,9 @@ class FlowMatchingTrainer(SDXLTrainer):
             x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
 
             # Get metadata from batch and ensure proper types
-            original_sizes = batch["original_sizes"]  # List of (H,W) tuples
+            original_sizes = batch["original_size"]  # Changed from "original_sizes"
             target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
-            crop_coords = batch.get("crop_coords", [(0, 0)] * x1.shape[0])
+            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * x1.shape[0])  # Changed from "crop_coords"
 
             # Prepare time embeddings for SDXL
             add_time_ids = torch.cat([
