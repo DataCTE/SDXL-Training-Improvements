@@ -209,7 +209,7 @@ class CacheManager:
     def _save_tensor_file(self, tensors: Dict[str, torch.Tensor], path: Path) -> bool:
         """Common tensor saving logic."""
         try:
-            torch.save(tensors, path, weights_only=True)
+            torch.save(tensors, path)
             return True
         except Exception as e:
             logger.error(f"Failed to save tensors: {e}")
@@ -218,7 +218,7 @@ class CacheManager:
     def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
         """Common tensor loading logic."""
         try:
-            return torch.load(path, map_location=device, weights_only=True)
+            return torch.load(path, map_location=device)
         except Exception as e:
             logger.error(f"Failed to load tensors: {e}")
             return None
