@@ -146,23 +146,12 @@ class AspectBucketDataset(Dataset):
                 if processed is None:
                     raise ValueError(f"Failed to process image: {image_path}")
                     
-                # Only encode if not cached
-                encoded_text = self.encode_prompt(
-                    batch={"text": [caption]},
-                    proportion_empty_prompts=0.0
-                )
-                
-                processed.update({
-                    "prompt_embeds": encoded_text["prompt_embeds"][0],
-                    "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][0],
-                    "text": caption
-                })
+                # Remove individual text encoding here - it will be handled in batch
+                processed.update({"text": caption})
                     
                 if self.config.global_config.cache.use_cache:
                     tensors = {
                         "pixel_values": processed["pixel_values"],
-                        "prompt_embeds": processed["prompt_embeds"],
-                        "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
                     }
                     metadata = {
                         "original_size": processed["original_size"],
@@ -175,8 +164,6 @@ class AspectBucketDataset(Dataset):
                 else:
                     cached_data = {
                         "pixel_values": processed["pixel_values"],
-                        "prompt_embeds": processed["prompt_embeds"],
-                        "pooled_prompt_embeds": processed["pooled_prompt_embeds"],
                         "metadata": {
                             "original_size": processed["original_size"],
                             "crop_coords": processed["crop_coords"],
@@ -288,8 +275,6 @@ class AspectBucketDataset(Dataset):
                         if processed is not None:
                             batch_tensors.append({
                                 "pixel_values": processed["pixel_values"],
-                                "prompt_embeds": processed["prompt_embeds"],
-                                "pooled_prompt_embeds": processed["pooled_prompt_embeds"]
                             })
                             batch_metadata.append({
                                 "original_size": processed["original_size"],
@@ -378,15 +363,22 @@ class AspectBucketDataset(Dataset):
             largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
             valid_batch = bucket_groups[largest_size]
 
-            # Ensure consistent key names
+            # Batch encode text here
+            captions = [example["metadata"]["text"] for example in valid_batch]
+            encoded_text = self.encode_prompt(
+                batch={"text": captions},
+                proportion_empty_prompts=0.0
+            )
+
+            # Return collated batch with encoded text
             return {
                 "pixel_values": torch.stack([example["pixel_values"] for example in valid_batch]),
-                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
-                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
+                "prompt_embeds": encoded_text["prompt_embeds"],
+                "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"],
                 "original_size": [example["metadata"]["original_size"] for example in valid_batch],
                 "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
                 "target_size": [example["metadata"]["target_size"] for example in valid_batch],
-                "text": [example["metadata"]["text"] for example in valid_batch] if "text" in valid_batch[0]["metadata"] else None
+                "text": captions
             }
 
         except Exception as e:
@@ -441,25 +433,6 @@ class AspectBucketDataset(Dataset):
                         extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
             raise
 
-    @contextmanager
-    def track_memory_usage(self, operation: str):
-        """Track memory usage for operations."""
-        if not self.enable_memory_tracking:
-            yield
-            return
-        
-        start_time = time.time()
-        start_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-        
-        try:
-            yield
-        finally:
-            if self.enable_memory_tracking and torch.cuda.is_available():
-                self._log_action(operation, {
-                    'duration': time.time() - start_time,
-                    'memory_change': torch.cuda.memory_allocated() - start_memory
-                })
-
     def _get_stream(self):
         """Get a CUDA stream for the current thread."""
         import threading
@@ -471,21 +444,13 @@ class AspectBucketDataset(Dataset):
     def _process_on_gpu(self, func, **kwargs):
         """Process on GPU with memory management."""
         try:
-            # Clear cache before processing
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
             with torch.cuda.device(self.device_id):
-                stream = self._get_stream()
-                with create_stream_context(stream):
+                with torch.cuda.stream(torch.cuda.Stream()):
                     result = func(**kwargs)
-                    if stream:
-                        # Add timeout to stream synchronization
-                        start_time = time.time()
-                        while not stream.query():
-                            if time.time() - start_time > self.stream_timeout:
-                                raise TimeoutError("Stream synchronization timeout")
-                            time.sleep(0.001)
+                    torch.cuda.current_stream().synchronize()
                     return result
             
         except Exception as e:
