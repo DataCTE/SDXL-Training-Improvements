@@ -380,6 +380,20 @@ class PreprocessingPipeline:
             logger.error(f"Failed to process image {image_path}: {e}")
             return None
 
+    def _encode_with_vae(self, img_tensor: torch.Tensor) -> torch.Tensor:
+        """Encode image tensor with VAE to get latents.
+        
+        Args:
+            img_tensor: Image tensor of shape (B, C, H, W) in range [0, 1]
+            
+        Returns:
+            VAE latents tensor
+        """
+        with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
+            latents = self.model.vae.encode(img_tensor).latent_dist.sample()
+            latents = latents * self.model.vae.config.scaling_factor
+            return latents.cpu()
+
     def _process_image_tensor(
         self, 
         img_tensor: torch.Tensor,
@@ -427,15 +441,12 @@ class PreprocessingPipeline:
             top = (new_h - target_h) // 2
             img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
         
-        # After resizing and cropping, encode with VAE
-        with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
-            img_tensor = img_tensor.unsqueeze(0)
-            latents = self.model.vae.encode(img_tensor).latent_dist.sample()
-            latents = latents * self.model.vae.config.scaling_factor
-            latents = latents.cpu()
+        # Replace the VAE encoding section with:
+        img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
+        latents = self._encode_with_vae(img_tensor)
 
         return {
-            "pixel_values": latents,  # Now this contains VAE latents
+            "pixel_values": latents,
             "original_size": original_size,
             "target_size": (target_w, target_h),
             "bucket_index": bucket_idx,
