@@ -286,9 +286,16 @@ class AspectBucketDataset(Dataset):
         w, h = original_size
         aspect_ratio = w / h
         
+        # Add minimum size check
+        MIN_DIMENSION = 32  # Minimum size to safely handle 3x3 kernels
+        if w < MIN_DIMENSION or h < MIN_DIMENSION:
+            logger.warning(f"Image {image_path} too small (dimensions: {w}x{h}). Skipping.")
+            return None
+        
         # Early return if aspect ratio is invalid
         max_ratio = config.global_config.image.max_aspect_ratio
         if not (1/max_ratio <= aspect_ratio <= max_ratio):
+            logger.warning(f"Image {image_path} has invalid aspect ratio ({aspect_ratio:.2f}). Skipping.")
             return None
         
         # Find best matching bucket
@@ -298,31 +305,41 @@ class AspectBucketDataset(Dataset):
             [(abs(aspect_ratio - ratio), idx, dims) for ratio, idx, dims in bucket_ratios]
         )
         
-        # Resize and crop in one step if possible
-        scale = min(target_w / w, target_h / h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        
-        img_tensor = F.interpolate(
-            img_tensor.unsqueeze(0),
-            size=(new_h, new_w),
-            mode='bilinear',
-            align_corners=False
-        ).squeeze(0)
-        
-        # Center crop
-        left = (new_w - target_w) // 2
-        top = (new_h - target_h) // 2
-        img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
-        
-        return {
-            "pixel_values": img_tensor,
-            "original_size": original_size,
-            "target_size": (target_w, target_h),
-            "bucket_index": bucket_idx,
-            "path": str(image_path),
-            "timestamp": time.time(),
-            "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
-        }
+        try:
+            # Resize and crop in one step if possible
+            scale = min(target_w / w, target_h / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            
+            img_tensor = F.interpolate(
+                img_tensor.unsqueeze(0),
+                size=(new_h, new_w),
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(0)
+            
+            # Center crop
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
+            img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
+            
+            # Verify final tensor dimensions
+            if img_tensor.shape[1] < MIN_DIMENSION or img_tensor.shape[2] < MIN_DIMENSION:
+                logger.warning(f"Processed image {image_path} too small after resizing. Skipping.")
+                return None
+            
+            return {
+                "pixel_values": img_tensor,
+                "original_size": original_size,
+                "target_size": (target_w, target_h),
+                "bucket_index": bucket_idx,
+                "path": str(image_path),
+                "timestamp": time.time(),
+                "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to process image {image_path} during resizing: {str(e)}")
+            return None
 
     def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
         """Process a single image with aspect ratio bucketing and VAE encoding."""
