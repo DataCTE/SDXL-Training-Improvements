@@ -18,7 +18,6 @@ from .data import (
     Config,
     AspectBucketDataset,
     create_dataset,
-    PreprocessingPipeline,
     CacheManager,
     TagWeighter,
 )
@@ -70,7 +69,6 @@ __all__: List[str] = [
     "Config",
     "AspectBucketDataset",
     "create_dataset",
-    "PreprocessingPipeline",
     "CacheManager",
     "TagWeighter",
 

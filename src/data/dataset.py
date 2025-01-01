@@ -2,12 +2,15 @@
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
+from contextlib import contextmanager
 
 import torch
 import torch.backends.cudnn
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
+from PIL import Image
+import numpy as np
 
 
 # Force speed optimizations
@@ -19,11 +22,14 @@ torch.set_float32_matmul_precision('medium')
 from src.core.logging import get_logger
 from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
 from src.data.config import Config
+from src.models.sdxl import StableDiffusionXL
 from src.data.preprocessing import (
-    PreprocessingPipeline,
     CacheManager,
     create_tag_weighter_with_index
 )
+from src.models.encoders import CLIPEncoder
+from src.core.memory.tensor import create_stream_context
+import torch.nn.functional as F
 
 logger = get_logger(__name__)
 
@@ -37,6 +43,21 @@ class DatasetStats:
     memory_allocated: int = 0
     peak_memory: int = 0
 
+@dataclass
+class ProcessingStats:
+    total_processed: int = 0
+    successful: int = 0
+    failed: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    gpu_oom_events: int = 0
+    stream_sync_failures: int = 0
+    dtype_conversion_errors: int = 0
+
+class ProcessingError(Exception):
+    """Exception raised when image processing fails."""
+    pass
+
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""
     
@@ -45,81 +66,90 @@ class AspectBucketDataset(Dataset):
         config: Config,
         image_paths: List[str],
         captions: List[str],
-        preprocessing_pipeline: Optional[PreprocessingPipeline] = None,
+        model: Optional[StableDiffusionXL] = None,
         is_train: bool = True,
         enable_memory_tracking: bool = True,
-        max_memory_usage: float = 0.8
+        max_memory_usage: float = 0.8,
+        stream_timeout: float = 10.0,
+        device: Optional[torch.device] = None,
+        device_id: Optional[int] = None
     ):
-        try:
-            super().__init__()
-            start_time = time.time()
+        """Initialize dataset with preprocessing capabilities."""
+        super().__init__()
+        
+        # Move initialization code from pipeline here
+        self.config = config
+        self.is_train = is_train
+        self.enable_memory_tracking = enable_memory_tracking
+        self.max_memory_usage = max_memory_usage
+        self.stream_timeout = stream_timeout
+        self.stats = ProcessingStats()
+        
+        # Performance tracking
+        self.performance_stats = {
+            'operation_times': {},
+            'memory_usage': {},
+            'errors': []
+        }
+        self.action_history = {}
+        
+        # CUDA setup
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
             
-            # Basic initialization
-            self.stats = DatasetStats()
-            self.config = config
-            self.is_train = is_train
-            self.enable_memory_tracking = enable_memory_tracking
-            self.max_memory_usage = max_memory_usage
+            self.device = device or torch.device('cuda')
+            self.device_id = device_id if device_id is not None else 0
+        else:
+            self.device = torch.device('cpu')
+            self.device_id = None
 
-             # Convert paths if needed
-            self.image_paths = [
-                str(convert_windows_path(p) if is_windows_path(p) else Path(p))
-                for p in image_paths
-            ]
-            self.captions = captions
-            
-            # Set up device
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.device_id = 0 if torch.cuda.is_available() else None
+        # Core components
+        self.model = model
+        if model:
+            self.vae_encoder = model.vae_encoder
+            self.text_encoders = model.text_encoders
+            self.tokenizers = model.tokenizers
+        
+        # Stream management
+        self._streams = {}
+        
+        # Initialize cache manager
+        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
+        self.cache_manager = CacheManager(
+            cache_dir=cache_dir,
+            max_cache_size=config.global_config.cache.max_cache_size,
+            device=self.device
+        )
 
-            # Initialize cache manager with device
-            cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-            self.cache_manager = CacheManager(
-                cache_dir=cache_dir,
-                max_cache_size=config.global_config.cache.max_cache_size,
-                device=self.device
-            )
+        # Initialize paths and captions
+        self.image_paths = [
+            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
+            for p in image_paths
+        ]
+        self.captions = captions
 
-            # Initialize preprocessing pipeline with device info
-            self.preprocessing_pipeline = preprocessing_pipeline or PreprocessingPipeline(
+        # Initialize buckets
+        self.buckets = self.get_aspect_buckets(config)
+        self.bucket_indices = []
+
+        # Initialize tag weighter if needed
+        if config.tag_weighting.enable_tag_weighting:
+            image_captions = dict(zip(self.image_paths, self.captions))
+            index_path = Path(cache_dir) / "tag_weights_index.json"
+            self.tag_weighter = create_tag_weighter_with_index(
                 config=config,
-                model=config.model,
-                cache_manager=self.cache_manager,
-                is_train=is_train,
-                enable_memory_tracking=enable_memory_tracking,
-                device=self.device,
-                device_id=self.device_id
+                image_captions=image_captions,
+                index_output_path=index_path
             )
+        else:
+            self.tag_weighter = None
 
-            # Initialize tag weighter with index
-            if config.tag_weighting.enable_tag_weighting:
-                image_captions = dict(zip(self.image_paths, self.captions))
-                index_path = Path(cache_dir) / "tag_weights_index.json"
-                self.tag_weighter = create_tag_weighter_with_index(
-                    config=config,
-                    image_captions=image_captions,
-                    index_output_path=index_path
-                )
-            else:
-                self.tag_weighter = None
-
-            # Setup image configuration
-            self._setup_image_config()
-
-            # Precompute latents if caching enabled
-            if config.global_config.cache.use_cache:
-                self._precompute_latents()
-
-            logger.info(f"Dataset initialized in {time.time() - start_time:.2f}s", extra={
-                'num_images': len(image_paths),
-                'num_captions': len(captions),
-                'cache_enabled': config.global_config.cache.use_cache,
-                'tag_weighting_enabled': self.tag_weighter is not None
-            })
-
-        except Exception as e:
-            logger.error("Failed to initialize dataset", exc_info=True)
-            raise
+        # Precompute latents if caching enabled
+        if config.global_config.cache.use_cache:
+            self._precompute_latents()
 
     def __getitem__(self, idx):
         """Get a single item from the dataset."""
@@ -135,14 +165,25 @@ class AspectBucketDataset(Dataset):
             cached_data = self.cache_manager.load_tensors(cache_key)
             if cached_data is None:
                 # If cache is invalid or missing, try to reprocess the image
-                processed = self.preprocessing_pipeline.process_single_image(
+                processed = self._process_single_image(
                     image_path=image_path,
-                    caption=caption,
                     config=self.config
                 )
                 
                 if processed is None:
                     raise ValueError(f"Failed to process image: {image_path}")
+                    
+                # Encode the caption
+                encoded_text = self.encode_prompt(
+                    batch={"text": [caption]},
+                    proportion_empty_prompts=0.0
+                )
+                
+                processed.update({
+                    "prompt_embeds": encoded_text["prompt_embeds"][0],
+                    "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][0],
+                    "text": caption
+                })
                     
                 # Cache the newly processed data
                 if self.config.global_config.cache.use_cache:
@@ -182,8 +223,7 @@ class AspectBucketDataset(Dataset):
             return cached_data
 
         except Exception as e:
-            logger.error(f"Error getting dataset item {idx} for image {self.image_paths[idx]}: {str(e)}")
-            # Return None to allow the collate_fn to filter out failed items
+            logger.error(f"Failed to get item {idx}: {str(e)}")
             return None
 
     def _setup_image_config(self):
@@ -204,14 +244,14 @@ class AspectBucketDataset(Dataset):
         start_time = time.time()
         
         # Get cache status for all images
-        cached_status = self.preprocessing_pipeline._get_cached_status(self.image_paths)
+        cached_status = self._get_cached_status(self.image_paths)
         already_cached = sum(1 for is_cached in cached_status.values() if is_cached)
         
         remaining_images = total_images - already_cached
         failed_images = 0
         processed_images = already_cached
-        batch_size = 64
-        min_batch_size = 8
+        batch_size = 8
+        min_batch_size = 1
         
         # Speed tracking with moving window
         processing_times = []
@@ -266,7 +306,7 @@ class AspectBucketDataset(Dataset):
                 batch_paths = [self.image_paths[i] for i in batch_indices]
                 batch_captions = [self.captions[i] for i in batch_indices]
                 
-                processed_items = self.preprocessing_pipeline.process_image_batch(
+                processed_items = self.process_image_batch(
                     image_paths=batch_paths,
                     captions=batch_captions,
                     config=self.config
@@ -276,6 +316,16 @@ class AspectBucketDataset(Dataset):
                 successful_items = [item for item in processed_items if item is not None]
                 failed_in_batch = batch_size_actual - len(successful_items)
                 
+                # Add batch VAE encoding
+                if successful_items:
+                    # Stack tensors and encode in batch mode
+                    batch_tensors = torch.stack([item["pixel_values"] for item in successful_items])
+                    batch_latents = self.encode_with_vae(batch_tensors, batch_mode=True)
+                    
+                    # Update items with encoded latents
+                    for idx, item in enumerate(successful_items):
+                        item["pixel_values"] = batch_latents[idx]
+
                 # Cache successful results
                 if self.config.global_config.cache.use_cache and successful_items:
                     batch_tensors = []
@@ -391,11 +441,289 @@ class AspectBucketDataset(Dataset):
             logger.error("Failed to collate batch", exc_info=True)
             raise RuntimeError(f"Collate failed: {str(e)}") from e
 
+    def encode_with_vae(
+        self, 
+        img_tensor: torch.Tensor, 
+        batch_mode: bool = False,
+        device: Optional[torch.device] = None
+    ) -> torch.Tensor:
+        """Encode image tensor(s) with VAE to get latents.
+        
+        Args:
+            img_tensor: Image tensor in range [0, 1] of shape:
+                - (C, H, W) for single image
+                - (B, C, H, W) for batch mode
+            batch_mode: If True, input is already batched. If False, add batch dimension.
+            device: Optional device to use. Defaults to self.device.
+            
+        Returns:
+            VAE latents tensor of shape (B, 4, H/8, W/8)
+        """
+        device = device or self.device
+        
+        # Move to correct device
+        img_tensor = img_tensor.to(device)
+        
+        # Add batch dimension if needed
+        if not batch_mode:
+            img_tensor = img_tensor.unsqueeze(0)
+        
+        # Encode with VAE
+        with torch.cuda.amp.autocast(enabled=False), torch.no_grad():
+            latents = self.model.vae.encode(img_tensor).latent_dist.sample()
+            latents = latents * self.model.vae.config.scaling_factor
+            
+        return latents.cpu()
+
+    def encode_prompt(
+        self,
+        batch: Dict[str, List[str]],
+        proportion_empty_prompts: float = 0.0
+    ) -> Dict[str, torch.Tensor]:
+        """Encode prompts using CLIP encoders directly."""
+        try:
+            encoded_output = CLIPEncoder.encode_prompt(
+                batch=batch,
+                text_encoders=self.text_encoders,
+                tokenizers=self.tokenizers,
+                proportion_empty_prompts=proportion_empty_prompts,
+                is_train=self.is_train
+            )
+            
+            return {
+                "prompt_embeds": encoded_output["prompt_embeds"],
+                "pooled_prompt_embeds": encoded_output["pooled_prompt_embeds"],
+                "metadata": {
+                    "num_prompts": len(batch[next(iter(batch))]),
+                    "device": str(self.device),
+                    "dtype": str(encoded_output["prompt_embeds"].dtype),
+                    "timestamp": time.time()
+                }
+            }
+        except Exception as e:
+            logger.error("Failed to encode prompts", 
+                        extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
+            raise
+
+    @contextmanager
+    def track_memory_usage(self, operation: str):
+        """Context manager for tracking memory usage during operations."""
+        try:
+            start_time = time.time()
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+                start_memory = torch.cuda.memory_allocated()
+            
+            yield
+            
+        finally:
+            duration = time.time() - start_time
+            memory_stats = {}
+            
+            if torch.cuda.is_available():
+                end_memory = torch.cuda.memory_allocated()
+                peak_memory = torch.cuda.max_memory_allocated()
+                memory_stats.update({
+                    'start_memory': start_memory,
+                    'end_memory': end_memory,
+                    'peak_memory': peak_memory,
+                    'memory_change': end_memory - start_memory
+                })
+                
+            self._log_action(operation, {
+                'duration': duration,
+                'memory_stats': memory_stats
+            })
+
+    def _get_stream(self):
+        """Get a CUDA stream for the current thread."""
+        import threading
+        thread_id = threading.get_ident()
+        if thread_id not in self._streams and torch.cuda.is_available():
+            self._streams[thread_id] = torch.cuda.Stream()
+        return self._streams.get(thread_id)
+
+    def _process_on_gpu(self, func, **kwargs):
+        """Process on GPU with memory management."""
+        try:
+            # Clear cache before processing
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            with torch.cuda.device(self.device_id):
+                stream = self._get_stream()
+                with create_stream_context(stream):
+                    result = func(**kwargs)
+                    if stream:
+                        # Add timeout to stream synchronization
+                        start_time = time.time()
+                        while not stream.query():
+                            if time.time() - start_time > self.stream_timeout:
+                                raise TimeoutError("Stream synchronization timeout")
+                            time.sleep(0.001)
+                    return result
+            
+        except Exception as e:
+            logger.error(f"GPU processing error: {str(e)}")
+            raise ProcessingError("GPU processing failed", {
+                'device_id': self.device_id,
+                'cuda_memory': torch.cuda.memory_allocated(self.device_id),
+                'error': str(e)
+            })
+
+    def _process_image_tensor(
+        self, 
+        img_tensor: torch.Tensor,
+        original_size: Tuple[int, int],
+        config: Config,
+        image_path: Union[str, Path]
+    ) -> Dict[str, Any]:
+        """Process image tensor on GPU."""
+        w, h = original_size
+        aspect_ratio = w / h
+        
+        # Check aspect ratio
+        if aspect_ratio > config.global_config.image.max_aspect_ratio or \
+           aspect_ratio < (1 / config.global_config.image.max_aspect_ratio):
+            return None
+        
+        # Find best bucket and resize/crop
+        target_w, target_h = self.get_aspect_buckets(config)[0]
+        min_diff = float('inf')
+        bucket_idx = 0
+        
+        for idx, (bucket_w, bucket_h) in enumerate(self.get_aspect_buckets(config)):
+            bucket_ratio = bucket_w / bucket_h
+            diff = abs(aspect_ratio - bucket_ratio)
+            if diff < min_diff:
+                min_diff = diff
+                target_w, target_h = bucket_w, bucket_h
+                bucket_idx = idx
+        
+        # Resize on GPU
+        scale = min(target_w / w, target_h / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        
+        img_tensor = F.interpolate(
+            img_tensor.unsqueeze(0),
+            size=(new_h, new_w),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(0)
+        
+        # Center crop on GPU
+        if new_w != target_w or new_h != target_h:
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
+            img_tensor = img_tensor[:, top:top + target_h, left:left + target_w]
+        
+        # VAE encoding - no need to unsqueeze, handled by encode_with_vae
+        latents = self.encode_with_vae(img_tensor)
+
+        return {
+            "pixel_values": latents,
+            "original_size": original_size,
+            "target_size": (target_w, target_h),
+            "bucket_index": bucket_idx,
+            "path": str(image_path),
+            "timestamp": time.time(),
+            "crop_coords": (left, top) if new_w != target_w or new_h != target_h else (0, 0)
+        }
+
+    def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
+        """Process a single image with aspect ratio bucketing."""
+        try:
+            # Load and validate image
+            img = Image.open(image_path).convert('RGB')
+            w, h = img.size
+            
+            # Early conversion to tensor and move to GPU
+            img_tensor = torch.from_numpy(np.array(img)).float().to(self.device) / 255.0
+            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
+            
+            # Process on GPU
+            return self._process_on_gpu(
+                self._process_image_tensor,
+                img_tensor=img_tensor,
+                original_size=(w, h),
+                config=config,
+                image_path=image_path
+            )
+        
+        except Exception as e:
+            logger.error(f"Failed to process image {image_path}: {e}")
+            return None
+
+    def process_image_batch(
+        self,
+        image_paths: List[Union[str, Path]],
+        captions: List[str],
+        config: Config
+    ) -> List[Optional[Dict[str, Any]]]:
+        """Process a batch of images in parallel."""
+        try:
+            # Process images in parallel
+            processed_images = []
+            
+            for path in image_paths:
+                processed = self._process_single_image(path, config)
+                processed_images.append(processed)
+                
+            # Process each caption individually to match training format
+            results = []
+            for img_data, caption in zip(processed_images, captions):
+                if img_data is not None:
+                    try:
+                        # Encode single prompt
+                        encoded_text = self.encode_prompt(
+                            batch={"text": [caption]},
+                            proportion_empty_prompts=0.0
+                        )
+                        
+                        results.append({
+                            **img_data,
+                            "prompt_embeds": encoded_text["prompt_embeds"][0],
+                            "pooled_prompt_embeds": encoded_text["pooled_prompt_embeds"][0],
+                            "text": caption
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to process caption: {caption}", exc_info=True)
+                        results.append(None)
+                else:
+                    results.append(None)
+                
+            return results
+            
+        except Exception as e:
+            logger.error("Batch processing failed", exc_info=True)
+            return [None] * len(image_paths)
+
+    def _log_action(self, operation: str, stats: Dict[str, Any]):
+        """Log operation statistics."""
+        if operation not in self.performance_stats['operation_times']:
+            self.performance_stats['operation_times'][operation] = []
+        self.performance_stats['operation_times'][operation].append(stats)
+
+    def _get_cached_status(self, image_paths: List[str]) -> Dict[str, bool]:
+        """Get cache status for each image path."""
+        if not self.cache_manager:
+            return {path: False for path in image_paths}
+        
+        return {
+            path: self.cache_manager.is_cached(path)
+            for path in image_paths
+        }
+
+    def get_aspect_buckets(self, config: Config) -> List[Tuple[int, int]]:
+        """Get supported image dimensions for aspect ratio bucketing."""
+        return config.global_config.image.supported_dims
+
 def create_dataset(
     config: Config,
     image_paths: List[str],
     captions: List[str],
-    preprocessing_pipeline: Optional[PreprocessingPipeline] = None,
+    model: Optional[StableDiffusionXL] = None,
     enable_memory_tracking: bool = True,
     max_memory_usage: float = 0.8
 ) -> AspectBucketDataset:
@@ -404,7 +732,7 @@ def create_dataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
-        preprocessing_pipeline=preprocessing_pipeline,
+        model=model,
         enable_memory_tracking=enable_memory_tracking,
         max_memory_usage=max_memory_usage
     )
