@@ -1,10 +1,12 @@
 """Bucket calculation utilities for SDXL training."""
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, TYPE_CHECKING
 import logging
 from collections import defaultdict
 from tqdm import tqdm
 from src.data.config import Config
-from src.data.preprocessing.cache_manager import CacheManager
+
+if TYPE_CHECKING:
+    from src.data.preprocessing.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
