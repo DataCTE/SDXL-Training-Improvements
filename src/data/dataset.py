@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
+from collections import defaultdict
 
 import torch
 import torch.backends.cudnn
@@ -64,7 +65,7 @@ class AspectBucketDataset(Dataset):
             max_cache_size=config.global_config.cache.max_cache_size,
             device=self.device
         )
-        self.cache_manager.rebuild_cache_index()  # Force rebuild cache index
+        self.cache_manager.rebuild_cache_index()
 
         # Data initialization
         self.image_paths = [
@@ -76,24 +77,42 @@ class AspectBucketDataset(Dataset):
         # Bucket generation
         self.buckets = self._generate_dynamic_buckets(config)
         logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
-        self.bucket_indices = []
-
-        # Tag weighting setup
-        self._setup_tag_weighting(config, cache_dir)
-
-        # Precompute latents if enabled
-        if config.global_config.cache.use_cache:
-            self._precompute_latents()
+        
+        # Group images by bucket
+        self.bucket_indices = self._group_images_by_bucket()
+        
+        # Log bucket statistics
+        self._log_bucket_statistics()
 
     # Core Dataset Methods
     def __len__(self) -> int:
-        return len(self.image_paths)
+        """Return total number of samples across all buckets."""
+        return sum(len(indices) for indices in self.bucket_indices.values())
 
-    def __getitem__(self, idx):
-        """Get a single item from the dataset with proper validation and error handling."""
+    def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
+        """Get item from same-sized bucket."""
         try:
-            image_path = self.image_paths[idx]
-            caption = self.captions[idx]
+            # Find which bucket this index belongs to
+            current_pos = 0
+            target_bucket = None
+            bucket_idx = 0
+            
+            for bucket_dims, indices in self.bucket_indices.items():
+                if idx < current_pos + len(indices):
+                    target_bucket = bucket_dims
+                    bucket_idx = idx - current_pos
+                    break
+                current_pos += len(indices)
+            
+            if target_bucket is None:
+                return None
+            
+            # Get actual image index from bucket
+            image_idx = self.bucket_indices[target_bucket][bucket_idx]
+            
+            # Rest of the getitem logic remains the same
+            image_path = self.image_paths[image_idx]
+            caption = self.captions[image_idx]
             
             # Get cache key and load cached data
             cache_key = self.cache_manager.get_cache_key(image_path)
@@ -194,14 +213,14 @@ class AspectBucketDataset(Dataset):
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format."""
         try:
-            # Filter None values and log
+            # Filter None values
             valid_batch = [b for b in batch if b is not None]
             
             # If no valid samples, return None
             if len(valid_batch) == 0:
                 return None
             
-            # If at least half the batch is valid, proceed
+            # If at least minimum batch size
             min_batch_size = max(self.config.training.batch_size // 4, 1)
             if len(valid_batch) >= min_batch_size:
                 return {
@@ -213,15 +232,17 @@ class AspectBucketDataset(Dataset):
                     "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
                     "target_size": [example["metadata"]["target_size"] for example in valid_batch],
                     "text": [example["metadata"]["text"] for example in valid_batch],
-                    "tag_weights": torch.tensor([example["metadata"]["tag_weight"] for example in valid_batch], 
-                                             dtype=torch.float32, 
-                                             device=self.device)
+                    "tag_weights": torch.tensor(
+                        [example["metadata"]["tag_weight"] for example in valid_batch],
+                        dtype=torch.float32,
+                        device=self.device
+                    )
                 }
             
             return None
 
         except Exception as e:
-            logger.error("Failed to collate batch", exc_info=True)
+            logger.error(f"Failed to collate batch: {str(e)}")
             return None
 
     # Setup Methods
@@ -623,6 +644,47 @@ class AspectBucketDataset(Dataset):
     def get_aspect_buckets(self) -> List[Tuple[int, int]]:
         """Return cached buckets."""
         return self.buckets
+
+    def _group_images_by_bucket(self) -> Dict[Tuple[int, int], List[int]]:
+        """Group image indices by their bucket dimensions."""
+        bucket_indices = defaultdict(list)
+        
+        logger.info("Grouping images into buckets...")
+        for idx, image_path in enumerate(tqdm(self.image_paths, desc="Grouping images")):
+            # Load image to get dimensions
+            loaded = self.cache_manager.load_image_to_tensor(image_path, self.device)
+            if loaded is None:
+                continue
+            
+            _, (w, h) = loaded
+            
+            # Find matching bucket
+            aspect_ratio = w / h
+            bucket_ratios = [(bw/bh, (bw,bh)) for bw,bh in self.buckets]
+            _, bucket_dims = min(
+                [(abs(aspect_ratio - ratio), dims) for ratio, dims in bucket_ratios]
+            )
+            
+            # Add image index to bucket
+            bucket_indices[bucket_dims].append(idx)
+        
+        return dict(bucket_indices)
+
+    def _log_bucket_statistics(self):
+        """Log statistics about bucket distribution."""
+        total_images = sum(len(indices) for indices in self.bucket_indices.values())
+        logger.info(f"\nBucket statistics ({total_images} total images):")
+        
+        for bucket_dims, indices in sorted(
+            self.bucket_indices.items(),
+            key=lambda x: len(x[1]),
+            reverse=True
+        ):
+            w, h = bucket_dims
+            logger.info(
+                f"Bucket {w}x{h} (ratio {w/h:.2f}): "
+                f"{len(indices)} images ({len(indices)/total_images*100:.1f}%)"
+            )
 
 def create_dataset(
     config: Config,
