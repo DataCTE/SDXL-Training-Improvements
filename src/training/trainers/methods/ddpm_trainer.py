@@ -277,18 +277,7 @@ class DDPMTrainer(SDXLTrainer):
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Execute single training step with memory optimizations."""
         try:
-            # Get latent dimensions from batch
-            latent_size = batch["latent_size"][0]  # Use first item's latent size
-            vae_latents = batch["vae_latents"].to(device=self.device, dtype=model_dtype)
-            
-            # Verify latent dimensions
-            _, h, w = vae_latents.shape
-            expected_shape = (vae_latents.shape[0], latent_size[1], latent_size[0])
-            if (h, w) != (latent_size[1], latent_size[0]):
-                raise ValueError(
-                    f"Latent shape mismatch: expected {expected_shape}, "
-                    f"got {vae_latents.shape}"
-                )
+           
             
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype

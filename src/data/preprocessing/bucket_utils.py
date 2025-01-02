@@ -20,12 +20,12 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     """Generate bucket sizes in VAE latent space (H/8, W/8)."""
     buckets = []
     
-    # Convert config dimensions to latent space
+    # Convert config dimensions to latent space (divide by 8)
     min_size = (config.global_config.image.min_size[0] // 8,
                 config.global_config.image.min_size[1] // 8)
     max_size = (config.global_config.image.max_size[0] // 8,
                 config.global_config.image.max_size[1] // 8)
-    step = max(config.global_config.image.bucket_step // 8, 1)  # Ensure minimum step of 1
+    step = max(config.global_config.image.bucket_step // 8, 1)
     
     # Convert supported dims to latent space
     supported_latent_dims = [
@@ -38,26 +38,29 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     for h in range(min_size[1], max_size[1] + step, step):
         for w in range(min_size[0], max_size[0] + step, step):
             if max(w/h, h/w) <= config.global_config.image.max_aspect_ratio:
-                bucket = (w, h)
+                bucket = (w, h)  # Already in latent space
                 if bucket not in buckets:
                     buckets.append(bucket)
     
     return sorted(buckets)
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
-    """Compute bucket dimensions in latent space (H/8, W/8)."""
-    w, h = original_size
+    """Convert original size to latent dimensions and find closest bucket."""
+    # Convert to latent dimensions
+    w = original_size[0] // 8  # Integer division to get latent size
+    h = original_size[1] // 8
     
-    # Convert to latent dimensions (divide by 8 and round up)
-    w = (w + 7) // 8  # This gives us the latent width
-    h = (h + 7) // 8  # This gives us the latent height
+    # Find closest bucket by total area and aspect ratio
+    target_area = w * h
+    target_ratio = w / h
     
-    # Find closest bucket by aspect ratio
-    aspect_ratio = w / h
-    _, bucket_dims = min(
-        [(abs(aspect_ratio - (bw/bh)), (bw,bh)) for bw,bh in buckets]
-    )
+    def bucket_distance(bucket: Tuple[int, int]) -> float:
+        bw, bh = bucket
+        area_diff = abs(bw * bh - target_area) / target_area
+        ratio_diff = abs((bw/bh) - target_ratio)
+        return area_diff + ratio_diff
     
+    bucket_dims = min(buckets, key=bucket_distance)
     return bucket_dims
 
 def validate_and_fix_bucket_dims(
@@ -69,12 +72,19 @@ def validate_and_fix_bucket_dims(
     actual_dims = get_bucket_dims_from_latents(latents.shape)
     
     if computed_bucket != actual_dims:
-        logger.debug(
+        logger.warning(
             f"Bucket dimension mismatch for {image_path}: "
             f"computed {computed_bucket}, VAE latents indicate {actual_dims}. "
             f"Using VAE dimensions."
         )
-        return actual_dims
+        # Verify the actual dimensions are valid
+        if actual_dims[0] % 8 == 0 and actual_dims[1] % 8 == 0:
+            return actual_dims
+        else:
+            raise ValueError(
+                f"Invalid VAE latent dimensions {actual_dims} for {image_path}. "
+                f"Dimensions must be divisible by 8."
+            )
     return computed_bucket
 
 def validate_aspect_ratio(width: int, height: int, max_ratio: float) -> bool:
@@ -110,17 +120,31 @@ def group_images_by_bucket(
                 logger.warning(f"Missing VAE latents for {image_path}, skipping")
                 continue
             
+            # Validate latent dimensions
+            latents = cached_data["vae_latents"]
+            if len(latents.shape) != 3 or latents.shape[0] != 4:
+                logger.warning(f"Invalid latent shape {latents.shape} for {image_path}, skipping")
+                continue
+                
             # Group by actual latent dimensions (H/8, W/8)
-            latent_bucket = get_latent_bucket_key(cached_data["vae_latents"])
-            bucket_indices[latent_bucket].append(idx)
+            latent_bucket = get_latent_bucket_key(latents)
             
-            # Store latent dimensions in cache
-            if cache_entry.get("latent_dims") != latent_bucket:
-                cache_entry["latent_dims"] = latent_bucket
-                cache_entry["needs_save"] = True
-                cache_manager.cache_index["entries"][cache_key] = cache_entry
-                cache_manager.cache_index["needs_save"] = True
-            
+            # Verify dimensions are valid
+            if latent_bucket[0] % 8 == 0 and latent_bucket[1] % 8 == 0:
+                bucket_indices[latent_bucket].append(idx)
+                
+                # Store latent dimensions in cache
+                if cache_entry.get("latent_dims") != latent_bucket:
+                    cache_entry["latent_dims"] = latent_bucket
+                    cache_entry["needs_save"] = True
+                    cache_manager.cache_index["entries"][cache_key] = cache_entry
+                    cache_manager.cache_index["needs_save"] = True
+            else:
+                logger.warning(
+                    f"Invalid latent dimensions {latent_bucket} for {image_path}, "
+                    f"must be divisible by 8. Skipping."
+                )
+                
         except Exception as e:
             logger.warning(f"Failed to process {image_path}: {e}")
             continue

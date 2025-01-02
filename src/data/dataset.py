@@ -492,20 +492,14 @@ class AspectBucketDataset(Dataset):
         """Process image tensor ensuring VAE-compatible dimensions."""
         w, h = original_size
         
-        # Validate aspect ratio
-        if not validate_aspect_ratio(w, h, config.global_config.image.max_aspect_ratio):
-            logger.warning(f"Image {image_path} has invalid aspect ratio ({w/h:.2f}). Skipping.")
-            return None
-        
         # Get bucket dimensions in latent space
-        target_w, target_h = compute_bucket_dims(original_size, self.buckets)
+        latent_w, latent_h = compute_bucket_dims(original_size, self.buckets)
         
-        # Store both original and latent dimensions
         return {
             "pixel_values": img_tensor,
             "original_size": original_size,
-            "target_size": (target_w * 8, target_h * 8),  # Convert back to pixel space for conditioning
-            "latent_size": (target_w, target_h),  # Store latent dimensions
+            "target_size": (latent_w * 8, latent_h * 8),  # For conditioning
+            "latent_size": (latent_w, latent_h),  # For VAE
             "path": str(image_path),
             "timestamp": time.time(),
             "crop_coords": (0, 0)
