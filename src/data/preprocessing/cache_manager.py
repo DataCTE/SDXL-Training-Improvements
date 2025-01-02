@@ -359,3 +359,26 @@ class CacheManager:
                 # Remove from index
                 del self.cache_index["entries"][cache_key]
                 self._save_index()
+
+    def are_all_paths_cached(self, paths: List[Union[str, Path]]) -> bool:
+        """Quickly check if all paths exist in cache index without file system checks."""
+        try:
+            # Convert all paths to cache keys
+            cache_keys = {self.get_cache_key(path) for path in paths}
+            
+            # Check if all keys exist in cache index
+            all_cached = all(
+                key in self.cache_index["entries"] and 
+                self.cache_index["entries"][key].get("is_valid", False)
+                for key in cache_keys
+            )
+            
+            if all_cached:
+                logger.info("All images found in cache index")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking cache index: {e}")
+            return False

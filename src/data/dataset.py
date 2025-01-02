@@ -342,8 +342,13 @@ class AspectBucketDataset(Dataset):
         """Process entire dataset in chunks of 1000 images, with progress tracking."""
         total_images = len(self.image_paths)
         
-        # First check if all images are already cached
-        logger.info("Checking cache status for all images...")
+        # Quick check of cache index first
+        if self.cache_manager.are_all_paths_cached(self.image_paths):
+            logger.info("All images already in cache index. Skipping preprocessing.")
+            return
+        
+        # If not all in cache index, do detailed scanning
+        logger.info("Checking detailed cache status for all images...")
         uncached_paths = []
         for path in tqdm(self.image_paths, desc="Checking cache"):
             if not self.cache_manager.is_cached(path):
