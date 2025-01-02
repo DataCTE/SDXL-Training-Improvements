@@ -116,19 +116,26 @@ class AspectBucketDataset(Dataset):
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collate batch of samples into training format."""
         try:
-            batch = [b for b in batch if b is not None]
+            # Filter None values and log
+            valid_batch = [b for b in batch if b is not None]
+            if len(valid_batch) == 0:
+                logger.warning(f"Received batch of size {len(batch)} but all items were None")
+                # Return a special sentinel value instead of raising
+                return None
             
-            if not batch:
-                raise ValueError("Empty batch after filtering")
-
             # Group samples by VAE latent size
             bucket_groups = {}
-            for example in batch:
-                vae_size = example["vae_latents"].shape[-2:]  # Get HxW dimensions of VAE latents
+            for example in valid_batch:
+                vae_size = example["vae_latents"].shape[-2:]
                 if vae_size not in bucket_groups:
                     bucket_groups[vae_size] = []
                 bucket_groups[vae_size].append(example)
 
+            # Find largest group
+            if not bucket_groups:
+                logger.warning("No valid bucket groups found")
+                return None
+            
             largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
             valid_batch = bucket_groups[largest_size]
 
@@ -146,7 +153,7 @@ class AspectBucketDataset(Dataset):
 
         except Exception as e:
             logger.error("Failed to collate batch", exc_info=True)
-            raise RuntimeError(f"Collate failed: {str(e)}") from e
+            return None
 
     # Setup Methods
     def _setup_device(self, device: Optional[torch.device], device_id: Optional[int]):

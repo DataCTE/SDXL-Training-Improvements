@@ -186,7 +186,7 @@ class DDPMTrainer(SDXLTrainer):
         
         # Initialize progress tracking
         global_step = 0
-        current_loss = float('inf')
+        best_loss = float('inf')
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
@@ -200,91 +200,131 @@ class DDPMTrainer(SDXLTrainer):
                 logger.info(f"Starting epoch {epoch + 1}/{num_epochs}")
                 self.model.train()
                 
-                accumulated_loss = 0.0
-                accumulated_metrics = defaultdict(float)
+                epoch_loss = 0.0
+                epoch_metrics = defaultdict(float)
+                valid_steps = 0
                 
                 for step, batch in enumerate(self.train_dataloader):
                     try:
+                        # Skip invalid batches
+                        if batch is None:
+                            logger.warning(f"Skipping invalid batch at step {step}")
+                            continue
+                            
                         step_start_time = time.time()
                         
-                        # Execute training step and accumulate gradients
+                        # Execute training step with gradient accumulation
                         loss, metrics = self._execute_training_step(
                             batch, 
                             accumulate=True,
-                            is_last_accumulation_step=((step + 1) % self.gradient_accumulation_steps == 0)
+                            is_last_accumulation_step=((step + 1) % self.config.training.gradient_accumulation_steps == 0)
                         )
                         
-                        # Skip this batch if loss is invalid
+                        # Skip if loss is invalid
                         if torch.isnan(loss) or torch.isinf(loss):
                             logger.warning(f"Skipping step {step} due to invalid loss")
                             continue
                             
                         step_time = time.time() - step_start_time
                         
-                        # Update current loss tracking
-                        current_loss = loss.item()
+                        # Update epoch accumulators
+                        epoch_loss += loss.item()
+                        for k, v in metrics.items():
+                            epoch_metrics[k] += v
+                        valid_steps += 1
                         
                         # Update progress bar
                         progress_bar.set_postfix(
-                            {'Loss': f"{current_loss:.4f}", 'Time': f"{step_time:.1f}s"},
+                            {
+                                'Loss': f"{loss.item():.4f}",
+                                'Epoch': f"{epoch + 1}/{num_epochs}",
+                                'Step': f"{step}/{len(self.train_dataloader)}",
+                                'Time': f"{step_time:.1f}s"
+                            },
                             refresh=True
                         )
                         
-                        # Accumulate loss and metrics
-                        accumulated_loss += loss.item()
-                        for k, v in metrics.items():
-                            accumulated_metrics[k] += v
-                        
-                        # Only update weights after accumulating enough gradients
+                        # Log step metrics if it's the last accumulation step
                         if (step + 1) % self.config.training.gradient_accumulation_steps == 0:
-                            # Scale loss and metrics by accumulation steps
-                            effective_loss = accumulated_loss / self.config.training.gradient_accumulation_steps
-                            effective_metrics = {
-                                k: v / self.config.training.gradient_accumulation_steps 
-                                for k, v in accumulated_metrics.items()
-                            }
-                            
-                            # Update weights
-                            if self.config.training.clip_grad_norm > 0:
-                                grad_norm = torch.nn.utils.clip_grad_norm_(
-                                    self.model.parameters(),
-                                    self.config.training.clip_grad_norm
-                                )
-                                effective_metrics['grad_norm'] = grad_norm.item()
-                            
-                            self.optimizer.step()
-                            self.optimizer.zero_grad()
-                            
-                            # Reset accumulators
-                            accumulated_loss = 0.0
-                            accumulated_metrics.clear()
-                            
-                            # Log metrics
                             if is_main_process() and self.wandb_logger:
                                 self.wandb_logger.log_metrics(
                                     {
                                         'epoch': epoch + 1,
                                         'step': global_step,
-                                        'loss': effective_loss,
+                                        'loss': loss.item(),
+                                        'learning_rate': self.optimizer.param_groups[0]['lr'],
                                         'step_time': step_time,
-                                        **effective_metrics
+                                        **metrics
                                     },
                                     step=global_step
                                 )
                             
                             global_step += 1
                             progress_bar.update(1)
-                            
-                    except Exception as e:
-                        logger.warning(f"Error in training step {step}: {str(e)}")
-                        continue
                         
+                    except Exception as e:
+                        logger.warning(f"Error in training step {step}: {str(e)}", exc_info=True)
+                        continue
+                    
                
+                # Compute epoch metrics
+                if valid_steps > 0:
+                    avg_epoch_loss = epoch_loss / valid_steps
+                    avg_epoch_metrics = {
+                        k: v / valid_steps for k, v in epoch_metrics.items()
+                    }
+                    
+                    # Log epoch metrics
+                    if is_main_process():
+                        logger.info(
+                            f"Epoch {epoch + 1} summary:\n"
+                            f"Average loss: {avg_epoch_loss:.4f}\n"
+                            f"Metrics: {json.dumps(avg_epoch_metrics, indent=2)}"
+                        )
+                        
+                        if self.wandb_logger:
+                            self.wandb_logger.log_metrics(
+                                {
+                                    'epoch': epoch + 1,
+                                    'epoch_loss': avg_epoch_loss,
+                                    **{f"epoch_{k}": v for k, v in avg_epoch_metrics.items()}
+                                },
+                                step=global_step
+                            )
+                    
+                    # Save checkpoint if loss improved
+                    if avg_epoch_loss < best_loss:
+                        best_loss = avg_epoch_loss
+                        if is_main_process():
+                            save_checkpoint(
+                                model=self.model,
+                                optimizer=self.optimizer,
+                                epoch=epoch + 1,
+                                config=self.config,
+                                is_final=False
+                            )
+                            logger.info(f"Saved checkpoint for epoch {epoch + 1} with loss {best_loss:.4f}")
+                    
+                    # Clear CUDA cache between epochs
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        
         except Exception as e:
             logger.error(f"Training loop failed: {str(e)}", exc_info=True)
             raise
         finally:
             progress_bar.close()
+            
+            # Save final checkpoint
+            if is_main_process():
+                save_checkpoint(
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    epoch=num_epochs,
+                    config=self.config,
+                    is_final=True
+                )
+                logger.info("Saved final checkpoint")
 
     def _execute_training_step(self, batch, accumulate: bool = False, is_last_accumulation_step: bool = True):
         """Execute single training step with gradient accumulation support."""
