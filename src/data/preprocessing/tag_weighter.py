@@ -362,36 +362,33 @@ def create_tag_weighter(
     return weighter
 
 def create_tag_weighter_with_index(
-    config: "Config",
+    config: "Config",  # type: ignore
     image_captions: Dict[str, str],
-    index_output_path: Path,
-    cache_path: Optional[Path] = None
+    index_output_path: Optional[Path] = None
 ) -> TagWeighter:
-    """Create a tag weighter and save comprehensive index."""
-    weighter = TagWeighter(config, cache_path)
+    """Create and initialize tag weighter with index."""
+    # Create tag weighter
+    weighter = TagWeighter(config)
     
-    # Process all captions and compute weights if not cached
-    if not (config.tag_weighting.use_cache and weighter.cache_path.exists()):
-        logger.info("Computing tag statistics...")
-        weighter.update_statistics(list(image_captions.values()))
-        weighter._save_cache()
+    # Process all captions
+    logger.info("Processing captions and updating tag statistics...")
+    weighter.update_statistics(list(image_captions.values()))
     
-    # Process and save individual image tags
-    logger.info("Processing image tags...")
+    # Process detailed tag information
+    logger.info("Creating detailed tag index...")
     image_tags = weighter.process_dataset_tags(image_captions)
     
-    # Save index data using cache manager
-    if hasattr(config, 'cache_manager'):
-        index_data = weighter._prepare_index_data(image_tags)
-        config.cache_manager.save_tag_index(index_data, index_output_path)
+    # Save to index if path provided
+    if index_output_path is not None:
+        logger.info(f"Saving tag index to {index_output_path}")
+        weighter.save_to_index(index_output_path, image_tags)
     
     return weighter
 
 def preprocess_dataset_tags(
     config: "Config",
     image_paths: List[str],
-    captions: List[str],
-    cache_dir: Optional[Path] = None
+    captions: List[str]
 ) -> Optional[TagWeighter]:
     """Preprocess all dataset tags before training."""
     if not config.tag_weighting.enable_tag_weighting:
@@ -399,15 +396,14 @@ def preprocess_dataset_tags(
         
     logger.info("Starting tag preprocessing...")
     
-    # Setup tag directory
-    if cache_dir is None:
-        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-    tag_dir = Path(cache_dir) / "tags"
-    tag_dir.mkdir(parents=True, exist_ok=True)
-    
+    # Get tag index path from cache manager
+    if not hasattr(config, 'cache_manager'):
+        logger.warning("Cache manager not available for tag preprocessing")
+        return None
+        
     # Create and initialize tag weighter
     image_captions = dict(zip(image_paths, captions))
-    index_path = tag_dir / "tag_index.json"
+    index_path = config.cache_manager.get_tag_index_path()
     
     logger.info("Processing tags and creating index...")
     weighter = create_tag_weighter_with_index(
