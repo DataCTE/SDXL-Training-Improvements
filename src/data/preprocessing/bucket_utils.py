@@ -80,7 +80,8 @@ def validate_aspect_ratio(width: int, height: int, max_ratio: float) -> bool:
 def get_latent_bucket_key(latents: "torch.Tensor") -> Tuple[int, int]:
     """Get bucket key from latent dimensions."""
     _, h, w = latents.shape
-    return (w, h)  # Return latent dimensions directly
+    # Return latent dimensions directly (don't multiply by 8)
+    return (w, h)  # These are already in latent space (H/8, W/8)
 
 def group_images_by_bucket(
     image_paths: List[str], 
@@ -104,13 +105,13 @@ def group_images_by_bucket(
                 logger.warning(f"Missing VAE latents for {image_path}, skipping")
                 continue
             
-            # Group by actual latent dimensions
+            # Group by actual latent dimensions (H/8, W/8)
             latent_bucket = get_latent_bucket_key(cached_data["vae_latents"])
             bucket_indices[latent_bucket].append(idx)
             
-            # Update cache entry with latent dimensions
-            if cache_entry.get("bucket_dims") != latent_bucket:
-                cache_entry["bucket_dims"] = latent_bucket
+            # Store latent dimensions in cache
+            if cache_entry.get("latent_dims") != latent_bucket:
+                cache_entry["latent_dims"] = latent_bucket
                 cache_entry["needs_save"] = True
                 cache_manager.cache_index["entries"][cache_key] = cache_entry
                 cache_manager.cache_index["needs_save"] = True
