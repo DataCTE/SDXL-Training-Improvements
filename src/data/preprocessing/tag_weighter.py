@@ -240,12 +240,18 @@ class TagWeighter:
                     self.tag_counts[tag_type].items(),
                     key=lambda x: x[1],
                     reverse=True
-                )[:3],
-                "weight_range": (
+                )[:3]
+            }
+            
+            # Add weight range only if we have weights
+            if self.tag_weights[tag_type]:
+                type_stats["weight_range"] = (
                     min(self.tag_weights[tag_type].values()),
                     max(self.tag_weights[tag_type].values())
                 )
-            }
+            else:
+                type_stats["weight_range"] = (self.default_weight, self.default_weight)
+            
             stats[tag_type] = type_stats
             
         return stats
