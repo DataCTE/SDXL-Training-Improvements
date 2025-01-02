@@ -23,14 +23,12 @@ from src.data.preprocessing import (
 )
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
-from src.data.preprocessing.bucket_utils import DEFAULT_BUCKETS, compute_bucket_dims, generate_buckets  # Update import
+from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims
 
 logger = get_logger(__name__)
 
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""
-    
-    DEFAULT_BUCKETS = DEFAULT_BUCKETS  # Use the shared constant
     
     def __init__(
         self,
@@ -77,8 +75,8 @@ class AspectBucketDataset(Dataset):
         ]
         self.captions = captions
 
-        # Bucket generation
-        self.buckets = self._generate_dynamic_buckets(config)
+        # Generate buckets using utility function
+        self.buckets = generate_buckets(config)
         logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
         
         # Group images by bucket
@@ -588,10 +586,6 @@ class AspectBucketDataset(Dataset):
                         extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
             raise
 
-    def _generate_dynamic_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        """Generate bucket sizes based on config."""
-        return generate_buckets(config)
-
     def get_aspect_buckets(self) -> List[Tuple[int, int]]:
         """Return cached buckets."""
         return self.buckets
@@ -606,7 +600,6 @@ class AspectBucketDataset(Dataset):
             cache_entry = self.cache_manager.cache_index["entries"].get(cache_key)
             
             if cache_entry and "bucket_dims" in cache_entry:
-                # Use cached bucket dimensions as source of truth
                 bucket_dims = tuple(cache_entry["bucket_dims"])
                 bucket_indices[bucket_dims].append(idx)
             else:
