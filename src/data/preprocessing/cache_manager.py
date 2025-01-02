@@ -316,15 +316,23 @@ class CacheManager:
         
         entry = self.cache_index["entries"][cache_key]
         
-        # Use cached validity status if available
-        if "is_valid" in entry and time.time() - entry.get("last_checked", 0) < 60:
+        # Use cached validity status if recently checked
+        if "is_valid" in entry and time.time() - entry.get("last_checked", 0) < 300:  # Cache for 5 minutes
             return entry["is_valid"]
         
-        # Check files exist
+        # Check files exist and are non-empty
         tensors_path = Path(entry["tensors_path"])
         metadata_path = Path(entry["metadata_path"])
         
-        is_valid = tensors_path.exists() and metadata_path.exists()
+        try:
+            is_valid = (
+                tensors_path.exists() and 
+                metadata_path.exists() and 
+                tensors_path.stat().st_size > 0 and  # Check file is not empty
+                metadata_path.stat().st_size > 0
+            )
+        except Exception:
+            is_valid = False
         
         # Cache the validity status
         with self._lock:
