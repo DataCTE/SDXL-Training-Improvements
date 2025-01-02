@@ -508,42 +508,22 @@ class CacheManager:
             self._invalidate_cache_entry(cache_key)
             return False
 
-    def save_tag_index(self, index_data: Dict[str, Any], index_path: Path) -> bool:
-        """Save tag index with atomic write and proper structure.
-        
-        Expected index_data structure:
-        {
-            "metadata": {
-                "total_samples": int,
-                "default_weight": float,
-                "min_weight": float,
-                "max_weight": float,
-                "smoothing_factor": float,
-                "tag_types": List[str]
-            },
-            "statistics": {
-                "tag_counts": Dict[str, Dict[str, int]],
-                "tag_weights": Dict[str, Dict[str, float]],
-                "type_statistics": Dict[str, Any]
-            },
-            "images": {
-                "image_path": {
-                    "caption": str,
-                    "total_weight": float,
-                    "tags": {
-                        "tag_type": [
-                            {
-                                "tag": str,
-                                "weight": float,
-                                "frequency": float
-                            }
-                        ]
-                    }
-                }
-            }
-        }
-        """
+    def get_tag_dir(self) -> Path:
+        """Get path to tag directory."""
+        tag_dir = self.cache_dir / "tags"
+        tag_dir.mkdir(parents=True, exist_ok=True)
+        return tag_dir
+
+    def get_tag_index_path(self) -> Path:
+        """Get path to tag index file."""
+        return self.get_tag_dir() / "tag_index.json"
+
+    def save_tag_index(self, index_data: Dict[str, Any], index_path: Optional[Path] = None) -> bool:
+        """Save tag index with atomic write and proper structure."""
         try:
+            if index_path is None:
+                index_path = self.get_tag_index_path()
+            
             # Validate index structure
             required_keys = {"metadata", "statistics", "images"}
             if not all(k in index_data for k in required_keys):
@@ -573,9 +553,12 @@ class CacheManager:
                 temp_path.unlink()
             return False
 
-    def load_tag_index(self, index_path: Path) -> Optional[Dict[str, Any]]:
+    def load_tag_index(self, index_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
         """Load and validate tag index data."""
         try:
+            if index_path is None:
+                index_path = self.get_tag_index_path()
+            
             if not index_path.exists():
                 return None
             

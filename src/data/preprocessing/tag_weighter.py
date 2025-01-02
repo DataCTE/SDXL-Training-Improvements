@@ -19,16 +19,9 @@ class TagWeighter:
     def __init__(
         self,
         config: "Config",  # type: ignore
-        cache_path: Optional[Path] = None
     ):
         """Initialize tag weighting system."""
         self.config = config
-        
-        cache_dir = convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True)
-        self.cache_path = Path(convert_windows_path(
-            cache_path if cache_path else cache_dir / "tag_weights.json",
-            make_absolute=True
-        ))
         
         # Tag weighting settings
         self.default_weight = config.tag_weighting.default_weight
@@ -51,7 +44,7 @@ class TagWeighter:
         }
         
         # Load cached weights if available
-        if config.tag_weighting.use_cache and self.cache_path.exists():
+        if config.tag_weighting.use_cache and hasattr(config, 'cache_manager'):
             self._load_cache()
 
     def _extract_tags(self, caption: str) -> Dict[str, List[str]]:
@@ -208,40 +201,17 @@ class TagWeighter:
         if not hasattr(self.config, 'cache_manager'):
             return
         
-        # Prepare index data structure
-        index_data = {
-            "metadata": {
-                "total_samples": self.total_samples,
-                "default_weight": self.default_weight,
-                "min_weight": self.min_weight,
-                "max_weight": self.max_weight,
-                "smoothing_factor": self.smoothing_factor,
-                "tag_types": self.tag_types
-            },
-            "statistics": {
-                "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
-                "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
-                "type_statistics": self.get_tag_statistics()
-            },
-            "images": {}  # Will be populated when processing dataset
-        }
-        
-        # Save using new tag index structure
-        self.config.cache_manager.save_tag_index(index_data, self.cache_path)
+        index_data = self._prepare_index_data({})  # Empty images dict for statistics only
+        self.config.cache_manager.save_tag_index(index_data)
 
     def _load_cache(self) -> None:
         """Load tag statistics from cache."""
         if not hasattr(self.config, 'cache_manager'):
             return
         
-        # Load using new tag index structure
-        index_data = self.config.cache_manager.load_tag_index(self.cache_path)
+        index_data = self.config.cache_manager.load_tag_index()
         if not index_data:
             return
-        
-        # Initialize default collections
-        self.tag_counts = defaultdict(lambda: defaultdict(int))
-        self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
         
         # Load statistics from index
         if "statistics" in index_data:
@@ -423,24 +393,21 @@ def preprocess_dataset_tags(
     captions: List[str],
     cache_dir: Optional[Path] = None
 ) -> Optional[TagWeighter]:
-    """Preprocess all dataset tags before training.
-    
-    Returns:
-        TagWeighter instance if tag weighting is enabled, None otherwise.
-    """
+    """Preprocess all dataset tags before training."""
     if not config.tag_weighting.enable_tag_weighting:
         return None
         
     logger.info("Starting tag preprocessing...")
     
-    # Setup paths
+    # Setup tag directory
     if cache_dir is None:
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-    cache_dir = Path(cache_dir)
+    tag_dir = Path(cache_dir) / "tags"
+    tag_dir.mkdir(parents=True, exist_ok=True)
     
     # Create and initialize tag weighter
     image_captions = dict(zip(image_paths, captions))
-    index_path = cache_dir / "tag_weights_index.json"
+    index_path = tag_dir / "tag_index.json"
     
     logger.info("Processing tags and creating index...")
     weighter = create_tag_weighter_with_index(
