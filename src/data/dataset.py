@@ -132,6 +132,14 @@ class AspectBucketDataset(Dataset):
                 )
                 return None
             
+            # Get tag weight if tag weighting is enabled
+            tag_weight = 1.0  # Default weight
+            if self.tag_weighter is not None:
+                try:
+                    tag_weight = self.tag_weighter.get_caption_weight(caption)
+                except Exception as e:
+                    logger.warning(f"Failed to get tag weight for {image_path}: {e}")
+            
             # Validate tensor shapes and types
             try:
                 # Validate VAE latents
@@ -162,7 +170,7 @@ class AspectBucketDataset(Dataset):
                 logger.warning(f"Tensor validation failed for {image_path}: {str(e)}")
                 return None
             
-            # Return properly formatted data
+            # Return properly formatted data with tag weight
             return {
                 "vae_latents": cached_data["vae_latents"],
                 "prompt_embeds": cached_data["prompt_embeds"],
@@ -172,7 +180,8 @@ class AspectBucketDataset(Dataset):
                     "original_size": cached_data["metadata"]["original_size"],
                     "crop_coords": cached_data["metadata"]["crop_coords"],
                     "target_size": cached_data["metadata"]["target_size"],
-                    "text": caption  # Always use the caption from the dataset
+                    "text": caption,  # Always use the caption from the dataset
+                    "tag_weight": tag_weight  # Include tag weight in metadata
                 }
             }
         
@@ -203,7 +212,10 @@ class AspectBucketDataset(Dataset):
                     "original_size": [example["metadata"]["original_size"] for example in valid_batch],
                     "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
                     "target_size": [example["metadata"]["target_size"] for example in valid_batch],
-                    "text": [example["metadata"]["text"] for example in valid_batch]
+                    "text": [example["metadata"]["text"] for example in valid_batch],
+                    "tag_weights": torch.tensor([example["metadata"]["tag_weight"] for example in valid_batch], 
+                                             dtype=torch.float32, 
+                                             device=self.device)
                 }
             
             return None
