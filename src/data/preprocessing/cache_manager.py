@@ -507,3 +507,89 @@ class CacheManager:
             logger.error(f"Error validating cache entry {cache_key}: {e}")
             self._invalidate_cache_entry(cache_key)
             return False
+
+    def save_tag_index(self, index_data: Dict[str, Any], index_path: Path) -> bool:
+        """Save tag index with atomic write and proper structure.
+        
+        Expected index_data structure:
+        {
+            "metadata": {
+                "total_samples": int,
+                "default_weight": float,
+                "min_weight": float,
+                "max_weight": float,
+                "smoothing_factor": float,
+                "tag_types": List[str]
+            },
+            "statistics": {
+                "tag_counts": Dict[str, Dict[str, int]],
+                "tag_weights": Dict[str, Dict[str, float]],
+                "type_statistics": Dict[str, Any]
+            },
+            "images": {
+                "image_path": {
+                    "caption": str,
+                    "total_weight": float,
+                    "tags": {
+                        "tag_type": [
+                            {
+                                "tag": str,
+                                "weight": float,
+                                "frequency": float
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        """
+        try:
+            # Validate index structure
+            required_keys = {"metadata", "statistics", "images"}
+            if not all(k in index_data for k in required_keys):
+                raise ValueError(f"Missing required keys in index data: {required_keys - set(index_data.keys())}")
+            
+            # Create temp file for atomic write
+            temp_path = index_path.with_suffix('.tmp')
+            
+            # Write with proper formatting
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(index_data, f, indent=2, ensure_ascii=False)
+            
+            # Atomic rename
+            temp_path.replace(index_path)
+            
+            # Update cache index
+            with self._lock:
+                self.cache_index["tag_index_path"] = str(index_path)
+                self.cache_index["tag_index_updated"] = time.time()
+                self._save_index()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save tag index: {e}")
+            if 'temp_path' in locals() and temp_path.exists():
+                temp_path.unlink()
+            return False
+
+    def load_tag_index(self, index_path: Path) -> Optional[Dict[str, Any]]:
+        """Load and validate tag index data."""
+        try:
+            if not index_path.exists():
+                return None
+            
+            with open(index_path, 'r', encoding='utf-8') as f:
+                index_data = json.load(f)
+            
+            # Validate structure
+            required_keys = {"metadata", "statistics", "images"}
+            if not all(k in index_data for k in required_keys):
+                logger.error(f"Invalid tag index structure in {index_path}")
+                return None
+            
+            return index_data
+            
+        except Exception as e:
+            logger.error(f"Failed to load tag index: {e}")
+            return None
