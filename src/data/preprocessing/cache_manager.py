@@ -11,6 +11,7 @@ import os
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
+from src.data.preprocessing.bucket_utils import compute_bucket_dims
 
 logger = get_logger(__name__)
 
@@ -447,6 +448,12 @@ class CacheManager:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                 original_path = metadata.get("original_path")
+                original_size = metadata.get("original_size")
+                bucket_dims = metadata.get("bucket_dims")
+                
+                # Compute bucket dims if missing
+                if not bucket_dims and original_size:
+                    bucket_dims = compute_bucket_dims(original_size)
                 
                 if original_path:
                     cache_key = self.get_cache_key(original_path)
@@ -455,7 +462,8 @@ class CacheManager:
                         "metadata_path": str(metadata_path),
                         "created_at": metadata.get("created_at", time.time()),
                         "is_valid": True,
-                        "last_checked": time.time()
+                        "last_checked": time.time(),
+                        "bucket_dims": bucket_dims
                     }
             except Exception as e:
                 logger.warning(f"Failed to process cache file {latents_path}: {e}")
