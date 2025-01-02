@@ -243,3 +243,47 @@ class StableDiffusionXL:
         """Zero out parameter gradients."""
         self.unet.zero_grad()
 
+    def save_pretrained(self, save_directory: str, safe_serialization: bool = True) -> None:
+        """Save model components to directory in diffusers format.
+        
+        Args:
+            save_directory (str): Directory to save model components
+            safe_serialization (bool): Whether to use safetensors format
+        """
+        from pathlib import Path
+        save_path = Path(save_directory)
+        save_path.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Saving model to {save_directory}")
+        
+        # Save UNet
+        self.unet.save_pretrained(
+            save_path / "unet",
+            safe_serialization=safe_serialization
+        )
+        
+        # Save VAE
+        self.vae.save_pretrained(
+            save_path / "vae",
+            safe_serialization=safe_serialization
+        )
+        
+        # Save text encoders
+        self.text_encoder_1.save_pretrained(
+            save_path / "text_encoder",
+            safe_serialization=safe_serialization
+        )
+        self.text_encoder_2.save_pretrained(
+            save_path / "text_encoder_2",
+            safe_serialization=safe_serialization
+        )
+        
+        # Save tokenizers
+        self.tokenizer_1.save_pretrained(save_path / "tokenizer")
+        self.tokenizer_2.save_pretrained(save_path / "tokenizer_2")
+        
+        # Save scheduler
+        self.scheduler.save_pretrained(save_path / "scheduler")
+        
+        logger.info(f"Successfully saved model to {save_directory}")
+

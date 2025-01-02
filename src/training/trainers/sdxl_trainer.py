@@ -7,6 +7,7 @@ from src.data.config import Config
 from src.training.trainers.base_router import BaseRouter
 from src.core.logging import get_logger
 import os
+from pathlib import Path
 
 logger = get_logger(__name__)
 
@@ -54,26 +55,38 @@ def save_checkpoint(
 ):
     """Save checkpoint in diffusers format using save_pretrained with safetensors."""
     from src.data.utils.paths import convert_windows_path
+    from pathlib import Path
     
     # Convert base path
     base_path = "final_checkpoint" if is_final else f"checkpoint_{epoch}"
     path = convert_windows_path(base_path)
+    save_path = Path(path)
     
-    # Save model weights in safetensors format
-    model.save_pretrained(
-        str(path),  # convert Path to string for save_pretrained
-        safe_serialization=True
-    )
-    
-    # Save optimizer state with converted path
-    optimizer_path = convert_windows_path(os.path.join(str(path), "optimizer.safetensors"))
-    torch.save(
-        optimizer.state_dict(),
-        str(optimizer_path),
-        _use_new_zipfile_serialization=False
-    )
-    
-    # Save config with converted path
-    config_path = convert_windows_path(os.path.join(str(path), "config.json"))
-    config.save(str(config_path))
+    try:
+        # Save model weights in safetensors format
+        logger.info(f"Saving model checkpoint to {save_path}")
+        model.save_pretrained(
+            str(save_path),
+            safe_serialization=True
+        )
+        
+        # Save optimizer state
+        optimizer_path = save_path / "optimizer.pt"
+        logger.info(f"Saving optimizer state to {optimizer_path}")
+        torch.save(
+            optimizer.state_dict(),
+            str(optimizer_path),
+            _use_new_zipfile_serialization=False
+        )
+        
+        # Save config
+        config_path = save_path / "config.json"
+        logger.info(f"Saving training config to {config_path}")
+        config.save(str(config_path))
+        
+        logger.info(f"Successfully saved checkpoint to {save_path}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save checkpoint: {str(e)}", exc_info=True)
+        raise
         
