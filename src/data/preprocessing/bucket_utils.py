@@ -83,7 +83,6 @@ def group_images_by_bucket(
 ) -> Dict[Tuple[int, int], List[int]]:
     """Group image indices by their bucket dimensions, using VAE latents as source of truth."""
     bucket_indices = defaultdict(list)
-    buckets = cache_manager.buckets  # Get valid buckets from cache manager
     
     logger.info("Grouping images into buckets...")
     for idx, image_path in enumerate(tqdm(image_paths, desc="Grouping images")):
