@@ -40,37 +40,36 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     return sorted(buckets)
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
-    """Compute initial bucket dimensions for an image size."""
+    """Compute bucket dimensions that will result in correct VAE latent sizes."""
     w, h = original_size
+    
+    # Scale dimensions to be VAE compatible (multiple of 8)
+    w = (w + 7) // 8 * 8
+    h = (h + 7) // 8 * 8
+    
+    # Find closest bucket by aspect ratio
     aspect_ratio = w / h
-    bucket_ratios = [(bw/bh, (bw,bh)) for bw,bh in buckets]
     _, bucket_dims = min(
-        [(abs(aspect_ratio - ratio), dims) for ratio, dims in bucket_ratios]
+        [(abs(aspect_ratio - (bw/bh)), (bw,bh)) for bw,bh in buckets]
     )
+    
     return bucket_dims
 
 def validate_and_fix_bucket_dims(
     computed_bucket: Tuple[int, int],
     latents: "torch.Tensor",
-    image_path: str,
-    buckets: List[Tuple[int, int]]
+    image_path: str
 ) -> Tuple[int, int]:
-    """Validate bucket dimensions against VAE latents and fix if needed by finding closest valid bucket."""
+    """Validate bucket dimensions against VAE latents and use VAE dims if mismatch."""
     actual_dims = get_bucket_dims_from_latents(latents.shape)
     
     if computed_bucket != actual_dims:
-        # Find the closest valid bucket to the actual dimensions
-        actual_ratio = actual_dims[0] / actual_dims[1]
-        _, closest_bucket = min(
-            [(abs(actual_ratio - (w/h)), (w,h)) for w,h in buckets]
-        )
-        
-        logger.warning(
+        logger.debug(
             f"Bucket dimension mismatch for {image_path}: "
             f"computed {computed_bucket}, VAE latents indicate {actual_dims}. "
-            f"Auto-correcting to nearest valid bucket {closest_bucket}."
+            f"Using VAE dimensions."
         )
-        return closest_bucket
+        return actual_dims
     return computed_bucket
 
 def validate_aspect_ratio(width: int, height: int, max_ratio: float) -> bool:
@@ -108,8 +107,7 @@ def group_images_by_bucket(
             bucket_dims = validate_and_fix_bucket_dims(
                 computed_bucket,
                 cached_data["vae_latents"],
-                image_path,
-                buckets
+                image_path
             )
             
             # Update cache entry if dimensions changed

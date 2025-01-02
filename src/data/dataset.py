@@ -489,15 +489,15 @@ class AspectBucketDataset(Dataset):
         config: Config,
         image_path: Union[str, Path]
     ) -> Dict[str, Any]:
-        """Process image tensor by finding exact bucket match."""
+        """Process image tensor ensuring VAE-compatible dimensions."""
         w, h = original_size
         
-        # Validate aspect ratio using bucket_utils
+        # Validate aspect ratio
         if not validate_aspect_ratio(w, h, config.global_config.image.max_aspect_ratio):
             logger.warning(f"Image {image_path} has invalid aspect ratio ({w/h:.2f}). Skipping.")
             return None
         
-        # Find matching bucket using bucket_utils
+        # Get bucket dimensions that will be VAE compatible
         target_w, target_h = compute_bucket_dims(original_size, self.buckets)
         
         try:
@@ -507,9 +507,8 @@ class AspectBucketDataset(Dataset):
                 "target_size": (target_w, target_h),
                 "path": str(image_path),
                 "timestamp": time.time(),
-                "crop_coords": (0, 0)  # No cropping needed with dynamic buckets
+                "crop_coords": (0, 0)
             }
-            
         except Exception as e:
             logger.warning(f"Failed to process image {image_path} during resizing: {str(e)}")
             return None
