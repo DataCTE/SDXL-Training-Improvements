@@ -20,6 +20,7 @@ from .data import (
     create_dataset,
     CacheManager,
     TagWeighter,
+    preprocess_dataset_tags
 )
 
 from .models import (
@@ -71,6 +72,7 @@ __all__: List[str] = [
     "create_dataset",
     "CacheManager",
     "TagWeighter",
+    "preprocess_dataset_tags",
 
     # Models
     "BaseModel",

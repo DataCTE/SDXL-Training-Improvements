@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from src.data.config import Config
 
 from src.core.logging import get_logger, LogConfig
+from src.data.utils.paths import convert_windows_path
 
 logger = get_logger(__name__)
 
@@ -23,7 +24,6 @@ class TagWeighter:
         """Initialize tag weighting system."""
         self.config = config
         
-        from src.data.utils.paths import convert_windows_path
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir, make_absolute=True)
         self.cache_path = Path(convert_windows_path(
             cache_path if cache_path else cache_dir / "tag_weights.json",
@@ -395,3 +395,36 @@ def create_tag_weighter_with_index(
         logger.info(f"Weight range: {type_stats['weight_range']}")
     
     return weighter
+
+def preprocess_dataset_tags(
+    config: "Config",
+    image_paths: List[str],
+    captions: List[str],
+    cache_dir: Optional[Path] = None
+) -> None:
+    """Preprocess all dataset tags before training.
+    
+    This should be called before dataset creation to ensure all tags are properly processed.
+    """
+    if not config.tag_weighting.enable_tag_weighting:
+        return
+        
+    logger.info("Starting tag preprocessing...")
+    
+    # Setup paths
+    if cache_dir is None:
+        cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
+    cache_dir = Path(cache_dir)
+    
+    # Create tag weighter and process all captions
+    image_captions = dict(zip(image_paths, captions))
+    index_path = cache_dir / "tag_weights_index.json"
+    
+    logger.info("Processing tags and creating index...")
+    weighter = create_tag_weighter_with_index(
+        config=config,
+        image_captions=image_captions,
+        index_output_path=index_path
+    )
+    
+    logger.info("Tag preprocessing complete")

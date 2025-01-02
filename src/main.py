@@ -39,7 +39,8 @@ from src.core.memory.optimizations import (
 from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.data.preprocessing import (
-    CacheManager
+    CacheManager,
+    preprocess_dataset_tags
 )
 from src.training.trainers import (
     BaseRouter,
@@ -292,12 +293,20 @@ def setup_training(
             device=device
         )
 
-        # Create dataset 
+        # Preprocess tags before dataset creation
+        preprocess_dataset_tags(
+            config=config,
+            image_paths=image_paths,
+            captions=captions,
+            cache_dir=config.global_config.cache.cache_dir
+        )
+        
+        # Create dataset (which will now use preprocessed tags)
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            model=model,  # Model contains VAE
+            model=model
         )
 
         # Create data loader with proper memory settings
