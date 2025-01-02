@@ -149,14 +149,21 @@ class CacheManager:
                 return None
 
             device = device or self.device
-            tensors = self._load_tensor_file(tensor_path, device)
-            if tensors is None:
+            
+            # Load tensors with proper error handling
+            try:
+                tensors = torch.load(tensor_path, map_location=device)
+            except Exception as e:
+                logger.error(f"Failed to load tensor file {tensor_path}: {e}")
+                self._invalidate_cache_entry(cache_key)
                 return None
 
+            # Load metadata with proper error handling
             try:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
-            except json.JSONDecodeError:
+            except Exception as e:
+                logger.error(f"Failed to load metadata file {metadata_path}: {e}")
                 self._invalidate_cache_entry(cache_key)
                 return None
 
@@ -166,15 +173,24 @@ class CacheManager:
                 "metadata": {"original_size", "crop_coords", "target_size"}
             }
             
-            if not (all(k in tensors for k in required_keys["tensors"]) and 
-                   all(k in metadata for k in required_keys["metadata"])):
+            if not all(k in tensors for k in required_keys["tensors"]):
+                logger.error(f"Missing required tensor keys in {tensor_path}")
+                self._invalidate_cache_entry(cache_key)
+                return None
+            
+            if not all(k in metadata for k in required_keys["metadata"]):
+                logger.error(f"Missing required metadata keys in {metadata_path}")
                 self._invalidate_cache_entry(cache_key)
                 return None
 
-            return {"metadata": metadata, **tensors}
+            return {
+                "metadata": metadata,
+                **tensors
+            }
 
         except Exception as e:
             logger.error(f"Unexpected error loading cache for {cache_key}: {str(e)}")
+            self._invalidate_cache_entry(cache_key)
             return None
 
     # Helper Methods
@@ -406,57 +422,79 @@ class CacheManager:
             "created_at": time.time(),
             "last_updated": time.time(),
             "entries": {},
-            "stats": {
-                "total_entries": 0,
-                "latents_size": 0,
-                "last_cleanup": None
-            }
+            "stats": {"total_entries": 0, "latents_size": 0, "last_cleanup": None}
         }
         
         # Scan latents directory
         latents_files = list(self.latents_dir.glob("*.pt"))
-        total_files = len(latents_files)
-        
-        logger.info(f"Found {total_files} existing latent files. Rebuilding index...")
+        logger.info(f"Found {len(latents_files)} existing latent files. Rebuilding index...")
         
         for latents_path in tqdm(latents_files, desc="Rebuilding cache index"):
             try:
-                # Get corresponding metadata path
                 metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
+                if not (latents_path.exists() and metadata_path.exists()):
+                    continue
                 
-                # Check if both files exist and are non-empty
-                if (latents_path.exists() and 
-                    metadata_path.exists() and 
-                    latents_path.stat().st_size > 0 and 
-                    metadata_path.stat().st_size > 0):
-                    
-                    # Load metadata to get original path
-                    with open(metadata_path) as f:
-                        metadata = json.load(f)
-                    original_path = metadata.get("original_path")
-                    
-                    if original_path:
-                        cache_key = self.get_cache_key(original_path)
-                        new_index["entries"][cache_key] = {
-                            "tensors_path": str(latents_path),
-                            "metadata_path": str(metadata_path),
-                            "created_at": metadata.get("created_at", time.time()),
-                            "is_valid": True,
-                            "last_checked": time.time()
-                        }
-            
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+                original_path = metadata.get("original_path")
+                
+                if original_path:
+                    cache_key = self.get_cache_key(original_path)
+                    new_index["entries"][cache_key] = {
+                        "tensors_path": str(latents_path),
+                        "metadata_path": str(metadata_path),
+                        "created_at": metadata.get("created_at", time.time()),
+                        "is_valid": True,
+                        "last_checked": time.time()
+                    }
             except Exception as e:
                 logger.warning(f"Failed to process cache file {latents_path}: {e}")
                 continue
         
-        # Update stats
+        # Update stats and save
         new_index["stats"]["total_entries"] = len(new_index["entries"])
         new_index["stats"]["latents_size"] = sum(
             os.path.getsize(str(p)) for p in latents_files if p.exists()
         )
-        
-        # Save new index
         self.cache_index = new_index
         self._save_index()
         
         logger.info(f"Cache index rebuilt with {len(new_index['entries'])} valid entries")
+
+    def _validate_and_clean_cache_entry(self, tensor_path: Path, metadata_path: Path, cache_key: str) -> bool:
+        """Validate cache entry files and clean up if invalid."""
+        try:
+            # Check if both files exist and are non-empty
+            if not (tensor_path.exists() and metadata_path.exists()):
+                self._invalidate_cache_entry(cache_key)
+                return False
+
+            # Check file sizes
+            if tensor_path.stat().st_size == 0 or metadata_path.stat().st_size == 0:
+                self._invalidate_cache_entry(cache_key)
+                return False
+
+            # Try to load metadata to verify it's valid JSON
+            try:
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+                    if not isinstance(metadata, dict):
+                        raise ValueError("Metadata is not a dictionary")
+            except Exception:
+                self._invalidate_cache_entry(cache_key)
+                return False
+
+            # Try to load tensor file header to verify it's valid
+            try:
+                torch.load(tensor_path, map_location="cpu", weights_only=True)
+            except Exception:
+                self._invalidate_cache_entry(cache_key)
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error validating cache entry {cache_key}: {e}")
+            self._invalidate_cache_entry(cache_key)
+            return False

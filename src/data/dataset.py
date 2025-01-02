@@ -52,16 +52,14 @@ class AspectBucketDataset(Dataset):
             self.tokenizers = model.tokenizers
             self.vae = model.vae
 
-        # Cache setup
+        # Cache setup with rebuild
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         self.cache_manager = CacheManager(
             cache_dir=cache_dir,
             max_cache_size=config.global_config.cache.max_cache_size,
             device=self.device
         )
-
-        # Rebuild cache index to ensure it's up-to-date
-        self.cache_manager.rebuild_cache_index()
+        self.cache_manager.rebuild_cache_index()  # Force rebuild cache index
 
         # Data initialization
         self.image_paths = [
@@ -184,8 +182,10 @@ class AspectBucketDataset(Dataset):
             valid_batch = [b for b in batch if b is not None]
             if len(valid_batch) == 0:
                 logger.warning(f"Received batch of size {len(batch)} but all items were None")
-                # Return a special sentinel value instead of raising
                 return None
+            
+            if len(valid_batch) < len(batch):
+                logger.warning(f"Filtered {len(batch) - len(valid_batch)} invalid items from batch")
             
             # Group samples by VAE latent size
             bucket_groups = {}
@@ -202,6 +202,10 @@ class AspectBucketDataset(Dataset):
             
             largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
             valid_batch = bucket_groups[largest_size]
+            
+            if len(valid_batch) < self.config.training.batch_size // 2:
+                logger.warning(f"Batch size too small after filtering: {len(valid_batch)}")
+                return None
 
             # Return collated batch
             return {
