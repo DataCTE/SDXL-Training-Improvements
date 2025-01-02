@@ -127,7 +127,7 @@ def group_images_by_bucket(
     
     # Save any updates to cache index
     if cache_manager.cache_index.get("needs_save", False):
-        cache_manager.save_cache_index()
+        cache_manager._save_index()
     
     return dict(bucket_indices)
 
