@@ -125,6 +125,24 @@ class AspectBucketDataset(Dataset):
                 logger.warning(f"Failed to load cached data for: {image_path}")
                 return None
             
+            # Get tag weight from tag index if available
+            tag_weight = 1.0  # Default weight
+            if self.tag_weighter is not None:
+                try:
+                    # Load from tag index
+                    tag_index_path = Path(self.cache_manager.cache_index.get("tag_index_path", ""))
+                    if tag_index_path.exists():
+                        tag_index = self.cache_manager.load_tag_index(tag_index_path)
+                        if tag_index and str(image_path) in tag_index["images"]:
+                            tag_weight = tag_index["images"][str(image_path)]["total_weight"]
+                        else:
+                            tag_weight = self.tag_weighter.get_caption_weight(caption)
+                    else:
+                        tag_weight = self.tag_weighter.get_caption_weight(caption)
+                except Exception as e:
+                    logger.warning(f"Failed to get tag weight for {image_path}: {e}")
+                    tag_weight = 1.0
+
             # Verify the latents match the bucket dimensions from cache
             latents = cached_data["vae_latents"]
             cached_bucket = tuple(cache_entry["bucket_dims"])
@@ -165,14 +183,6 @@ class AspectBucketDataset(Dataset):
                     f"Required: {required_metadata}"
                 )
                 return None
-            
-            # Get tag weight if tag weighting is enabled
-            tag_weight = 1.0  # Default weight
-            if self.tag_weighter is not None:
-                try:
-                    tag_weight = self.tag_weighter.get_caption_weight(caption)
-                except Exception as e:
-                    logger.warning(f"Failed to get tag weight for {image_path}: {e}")
             
             # Return properly formatted data with tag weight
             return {

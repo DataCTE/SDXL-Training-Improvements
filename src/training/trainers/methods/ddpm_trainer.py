@@ -280,12 +280,10 @@ class DDPMTrainer(SDXLTrainer):
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Use pre-processed VAE latents directly from batch
+            # Move batch data to device and dtype
             vae_latents = batch["vae_latents"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
-            
-            # Get tag weights directly from batch
             tag_weights = batch["tag_weights"].to(device=self.device, dtype=model_dtype)
             
             # Get metadata from batch
@@ -376,10 +374,6 @@ class DDPMTrainer(SDXLTrainer):
                     "loss": loss.detach().item(),
                     "lr": self.optimizer.param_groups[0]["lr"],
                     "timestep_mean": timesteps.float().mean().item(),
-                    "pred_max": model_pred.abs().max().item(),
-                    "target_max": target.abs().max().item(),
-                    "noise_scale": noise.abs().mean().item(),
-                    "latent_scale": vae_latents.abs().mean().item(),
                     "weight_mean": tag_weights.mean().item(),
                     "weight_std": tag_weights.std().item(),
                     "weight_min": tag_weights.min().item(),
