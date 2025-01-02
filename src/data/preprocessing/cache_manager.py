@@ -98,7 +98,7 @@ class CacheManager:
         self._save_index()
 
     # Core Cache Operations
-    def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any]) -> bool:
+    def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any], bucket_dims: Optional[Tuple[int, int]] = None) -> bool:
         """Save VAE encoded latents and other tensors to cache."""
         cache_key = self.get_cache_key(original_path)
         tensors_path = self.latents_dir / f"{cache_key}.pt"
@@ -113,12 +113,14 @@ class CacheManager:
                 "time_ids": tensors["time_ids"].cpu()
             }
             
+            # Save tensors
             if not self._save_tensor_file(tensors_to_save, tensors_path):
                 return False
                 
             full_metadata = {
                 "original_path": str(original_path),
                 "created_at": time.time(),
+                "bucket_dims": bucket_dims,  # Add bucket dimensions to metadata
                 **metadata
             }
             
@@ -131,7 +133,8 @@ class CacheManager:
                     "metadata_path": str(metadata_path),
                     "created_at": time.time(),
                     "is_valid": True,
-                    "last_checked": time.time()
+                    "last_checked": time.time(),
+                    "bucket_dims": bucket_dims  # Add bucket dimensions to index
                 }
                 self._update_stats()
                 

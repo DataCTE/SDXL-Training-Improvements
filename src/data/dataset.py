@@ -90,7 +90,7 @@ class AspectBucketDataset(Dataset):
         return sum(len(indices) for indices in self.bucket_indices.values())
 
     def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
-        """Get item from same-sized bucket."""
+        """Get item from same-sized bucket to ensure stackable tensors."""
         try:
             # Find which bucket this index belongs to
             current_pos = 0
@@ -109,17 +109,32 @@ class AspectBucketDataset(Dataset):
             
             # Get actual image index from bucket
             image_idx = self.bucket_indices[target_bucket][bucket_idx]
-            
-            # Rest of the getitem logic remains the same
             image_path = self.image_paths[image_idx]
             caption = self.captions[image_idx]
             
             # Get cache key and load cached data
             cache_key = self.cache_manager.get_cache_key(image_path)
-            cached_data = self.cache_manager.load_tensors(cache_key)
+            cache_entry = self.cache_manager.cache_index["entries"].get(cache_key)
             
+            if not cache_entry or not cache_entry.get("bucket_dims"):
+                logger.warning(f"Missing cache entry or bucket dims for {image_path}")
+                return None
+            
+            cached_data = self.cache_manager.load_tensors(cache_key)
             if cached_data is None:
                 logger.warning(f"Failed to load cached data for: {image_path}")
+                return None
+            
+            # Verify the latents match the bucket dimensions from cache
+            latents = cached_data["vae_latents"]
+            cached_bucket = tuple(cache_entry["bucket_dims"])
+            expected_shape = (4, cached_bucket[1]//8, cached_bucket[0]//8)  # VAE reduces spatial dims by 8
+            
+            if latents.shape != expected_shape:
+                logger.warning(
+                    f"Latent shape mismatch for {image_path}: "
+                    f"expected {expected_shape}, got {latents.shape}"
+                )
                 return None
             
             # Validate required tensors
@@ -159,36 +174,6 @@ class AspectBucketDataset(Dataset):
                 except Exception as e:
                     logger.warning(f"Failed to get tag weight for {image_path}: {e}")
             
-            # Validate tensor shapes and types
-            try:
-                # Validate VAE latents
-                if not isinstance(cached_data["vae_latents"], torch.Tensor):
-                    raise ValueError("vae_latents must be a torch.Tensor")
-                if len(cached_data["vae_latents"].shape) != 3:  # [C, H, W]
-                    raise ValueError(f"Invalid vae_latents shape: {cached_data['vae_latents'].shape}")
-                
-                # Validate prompt embeddings
-                if not isinstance(cached_data["prompt_embeds"], torch.Tensor):
-                    raise ValueError("prompt_embeds must be a torch.Tensor")
-                if len(cached_data["prompt_embeds"].shape) != 2:  # [S, D]
-                    raise ValueError(f"Invalid prompt_embeds shape: {cached_data['prompt_embeds'].shape}")
-                
-                # Validate pooled embeddings
-                if not isinstance(cached_data["pooled_prompt_embeds"], torch.Tensor):
-                    raise ValueError("pooled_prompt_embeds must be a torch.Tensor")
-                if len(cached_data["pooled_prompt_embeds"].shape) != 1:  # [D]
-                    raise ValueError(f"Invalid pooled_prompt_embeds shape: {cached_data['pooled_prompt_embeds'].shape}")
-                
-                # Validate time IDs
-                if not isinstance(cached_data["time_ids"], torch.Tensor):
-                    raise ValueError("time_ids must be a torch.Tensor")
-                if cached_data["time_ids"].shape[-1] != 6:  # [..., 6]
-                    raise ValueError(f"Invalid time_ids shape: {cached_data['time_ids'].shape}")
-                
-            except ValueError as e:
-                logger.warning(f"Tensor validation failed for {image_path}: {str(e)}")
-                return None
-            
             # Return properly formatted data with tag weight
             return {
                 "vae_latents": cached_data["vae_latents"],
@@ -199,13 +184,11 @@ class AspectBucketDataset(Dataset):
                     "original_size": cached_data["metadata"]["original_size"],
                     "crop_coords": cached_data["metadata"]["crop_coords"],
                     "target_size": cached_data["metadata"]["target_size"],
-                    "text": caption,  # Always use the caption from the dataset
-                    "tag_weight": tag_weight  # Include tag weight in metadata
+                    "text": caption,
+                    "tag_weight": tag_weight
                 }
             }
         
-            
-
         except Exception as e:
             logger.error(f"Failed to get item {idx}: {str(e)}", exc_info=True)
             return None
@@ -282,6 +265,15 @@ class AspectBucketDataset(Dataset):
             
             for path in image_paths:
                 processed = self._process_single_image(path, config)
+                if processed:
+                    # Compute bucket dimensions during initial processing
+                    w, h = processed["original_size"]
+                    aspect_ratio = w / h
+                    bucket_ratios = [(bw/bh, (bw,bh)) for bw,bh in self.buckets]
+                    _, bucket_dims = min(
+                        [(abs(aspect_ratio - ratio), dims) for ratio, dims in bucket_ratios]
+                    )
+                    processed["bucket_dims"] = bucket_dims
                 processed_images.append(processed)
             
             # Batch encode text for all valid images
@@ -296,7 +288,7 @@ class AspectBucketDataset(Dataset):
                     proportion_empty_prompts=0.0
                 )
             
-            # Save results and prepare return values
+            # Save results with bucket information
             results = []
             caption_idx = 0
             
@@ -329,7 +321,12 @@ class AspectBucketDataset(Dataset):
                             "target_size": img_data["target_size"],
                             "text": caption
                         }
-                        self.cache_manager.save_latents(tensors, path, metadata)
+                        self.cache_manager.save_latents(
+                            tensors, 
+                            path, 
+                            metadata,
+                            bucket_dims=img_data["bucket_dims"]  # Pass bucket dims to cache
+                        )
                         caption_idx += 1
                     
                     results.append(result)
@@ -646,27 +643,24 @@ class AspectBucketDataset(Dataset):
         return self.buckets
 
     def _group_images_by_bucket(self) -> Dict[Tuple[int, int], List[int]]:
-        """Group image indices by their bucket dimensions."""
+        """Group image indices by their bucket dimensions using cached information."""
         bucket_indices = defaultdict(list)
         
         logger.info("Grouping images into buckets...")
         for idx, image_path in enumerate(tqdm(self.image_paths, desc="Grouping images")):
-            # Load image to get dimensions
-            loaded = self.cache_manager.load_image_to_tensor(image_path, self.device)
-            if loaded is None:
+            cache_key = self.cache_manager.get_cache_key(image_path)
+            cache_entry = self.cache_manager.cache_index["entries"].get(cache_key)
+            
+            if cache_entry and "bucket_dims" in cache_entry:
+                # Use cached bucket dimensions as source of truth
+                bucket_dims = tuple(cache_entry["bucket_dims"])
+                bucket_indices[bucket_dims].append(idx)
+            else:
+                logger.warning(f"Missing bucket dimensions for {image_path}, skipping")
                 continue
-            
-            _, (w, h) = loaded
-            
-            # Find matching bucket
-            aspect_ratio = w / h
-            bucket_ratios = [(bw/bh, (bw,bh)) for bw,bh in self.buckets]
-            _, bucket_dims = min(
-                [(abs(aspect_ratio - ratio), dims) for ratio, dims in bucket_ratios]
-            )
-            
-            # Add image index to bucket
-            bucket_indices[bucket_dims].append(idx)
+        
+        if not bucket_indices:
+            raise RuntimeError("No valid bucket dimensions found in cache. Please preprocess the dataset first.")
         
         return dict(bucket_indices)
 
