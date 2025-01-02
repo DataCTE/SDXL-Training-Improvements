@@ -12,26 +12,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 def get_bucket_dims_from_latents(latent_shape: Tuple[int, ...]) -> Tuple[int, int]:
-    """Convert VAE latent dimensions to bucket dimensions (source of truth)."""
-    # VAE latents have shape (4, H/8, W/8)
-    # So we multiply spatial dims by 8 to get original dimensions
+    """Get latent dimensions directly (H/8, W/8)."""
     _, h, w = latent_shape
-    return (w * 8, h * 8)
+    return (w, h)  # Return latent dimensions directly, don't multiply by 8
 
 def generate_buckets(config: Config) -> List[Tuple[int, int]]:
-    """Generate bucket sizes based on config."""
+    """Generate bucket sizes in latent space dimensions."""
     buckets = []
-    min_size = config.global_config.image.min_size
-    max_size = config.global_config.image.max_size
-    step = config.global_config.image.bucket_step
+    # Convert min/max sizes to latent dimensions
+    min_size = ((config.global_config.image.min_size[0] + 7) // 8,
+                (config.global_config.image.min_size[1] + 7) // 8)
+    max_size = ((config.global_config.image.max_size[0] + 7) // 8,
+                (config.global_config.image.max_size[1] + 7) // 8)
+    step = (config.global_config.image.bucket_step + 7) // 8
     
-    # Add supported dimensions first
-    buckets.extend(tuple(dims) for dims in config.global_config.image.supported_dims)
+    # Convert supported dims to latent space
+    supported_latent_dims = [
+        ((w + 7) // 8, (h + 7) // 8) 
+        for w, h in config.global_config.image.supported_dims
+    ]
+    buckets.extend(supported_latent_dims)
     
-    # Generate additional buckets within bounds
+    # Generate additional buckets within bounds (in latent space)
     for h in range(min_size[1], max_size[1] + step, step):
         for w in range(min_size[0], max_size[0] + step, step):
-            # Check aspect ratio
             if max(w/h, h/w) <= config.global_config.image.max_aspect_ratio:
                 bucket = (w, h)
                 if bucket not in buckets:
@@ -40,12 +44,12 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     return sorted(buckets)
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
-    """Compute bucket dimensions that will result in correct VAE latent sizes."""
+    """Compute bucket dimensions in latent space (H/8, W/8)."""
     w, h = original_size
     
-    # Scale dimensions to be VAE compatible (multiple of 8)
-    w = (w + 7) // 8 * 8
-    h = (h + 7) // 8 * 8
+    # Convert to latent dimensions (divide by 8 and round up)
+    w = (w + 7) // 8  # This gives us the latent width
+    h = (h + 7) // 8  # This gives us the latent height
     
     # Find closest bucket by aspect ratio
     aspect_ratio = w / h
