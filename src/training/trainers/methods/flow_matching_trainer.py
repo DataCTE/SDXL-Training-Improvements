@@ -10,7 +10,7 @@ from collections import defaultdict
 import time
 
 from src.core.logging import get_logger, MetricsLogger
-from src.training.trainers.sdxl_trainer import SDXLTrainer
+from src.training.trainers.sdxl_trainer import SDXLTrainer, save_checkpoint
 from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
 from src.core.distributed import is_main_process

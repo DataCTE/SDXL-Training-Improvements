@@ -292,21 +292,24 @@ def setup_training(
             max_cache_size=config.global_config.cache.max_cache_size,
             device=device
         )
+        
+        # Attach cache manager to config for tag weighting
+        config.cache_manager = cache_manager
 
-        # Preprocess tags before dataset creation
-        preprocess_dataset_tags(
+        # Initialize tag weighting
+        tag_weighter = preprocess_dataset_tags(
             config=config,
             image_paths=image_paths,
-            captions=captions,
-            cache_dir=config.global_config.cache.cache_dir
+            captions=captions
         )
         
-        # Create dataset (which will now use preprocessed tags)
+        # Create dataset with tag weighter
         dataset = create_dataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
-            model=model
+            model=model,
+            tag_weighter=tag_weighter
         )
 
         # Create data loader with proper memory settings

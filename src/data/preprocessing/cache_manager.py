@@ -60,6 +60,12 @@ class CacheManager:
                 self.rebuild_cache_index()
         
         logger.info(f"Cache initialized at {self.cache_dir}")
+        
+        # Add tag cache setup
+        self.tags_dir = self.cache_dir / "tags"
+        self.tags_dir.mkdir(exist_ok=True)
+        self.tag_index_path = self.tags_dir / "tag_weights_index.json"
+        self.tag_cache = {}  # Memory cache for tag weights
 
     # Cache Initialization Methods
     def _initialize_cache(self):
@@ -498,3 +504,112 @@ class CacheManager:
             logger.error(f"Error validating cache entry {cache_key}: {e}")
             self._invalidate_cache_entry(cache_key)
             return False
+
+    def save_tag_weights(self, tag_data: Dict[str, Any], original_path: Union[str, Path]) -> bool:
+        """Save tag weights to cache with proper file handling."""
+        try:
+            cache_key = self.get_cache_key(original_path)
+            tag_path = self.tags_dir / f"{cache_key}.json"
+            
+            # Save tag data with proper error handling
+            try:
+                with open(tag_path, 'w') as f:
+                    json.dump(tag_data, f)
+            except Exception as e:
+                logger.error(f"Failed to write tag data for {original_path}: {e}")
+                return False
+            
+            # Update cache index
+            with self._lock:
+                if "tag_entries" not in self.cache_index:
+                    self.cache_index["tag_entries"] = {}
+                    
+                self.cache_index["tag_entries"][cache_key] = {
+                    "tag_path": str(tag_path),
+                    "created_at": time.time(),
+                    "is_valid": True,
+                    "last_checked": time.time()
+                }
+                self._save_index()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save tag weights: {e}")
+            return False
+
+    def load_tag_weights(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Load tag weights from cache with validation."""
+        try:
+            # Check cache index
+            if "tag_entries" not in self.cache_index or cache_key not in self.cache_index["tag_entries"]:
+                return None
+
+            entry = self.cache_index["tag_entries"][cache_key]
+            tag_path = Path(entry["tag_path"])
+
+            if not tag_path.exists():
+                self._invalidate_tag_entry(cache_key)
+                return None
+
+            # Load and validate tag data
+            try:
+                with open(tag_path) as f:
+                    tag_data = json.load(f)
+                return tag_data
+            except Exception as e:
+                logger.error(f"Failed to load tag data from {tag_path}: {e}")
+                self._invalidate_tag_entry(cache_key)
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to load tag weights for {cache_key}: {e}")
+            return None
+
+    def _invalidate_tag_entry(self, cache_key: str) -> None:
+        """Invalidate a tag cache entry."""
+        with self._lock:
+            if "tag_entries" in self.cache_index and cache_key in self.cache_index["tag_entries"]:
+                entry = self.cache_index["tag_entries"][cache_key]
+                try:
+                    Path(entry["tag_path"]).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                del self.cache_index["tag_entries"][cache_key]
+                self._save_index()
+            
+            # Clear from memory cache
+            self.tag_cache.pop(cache_key, None)
+
+    def save_tag_index(self, index_data: Dict[str, Any], index_path: Path) -> bool:
+        """Save tag index with proper error handling."""
+        try:
+            # Create temp file for atomic write
+            temp_path = index_path.with_suffix('.tmp')
+            
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(index_data, f, indent=2, ensure_ascii=False)
+            
+            # Atomic rename
+            temp_path.replace(index_path)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save tag index: {e}")
+            if temp_path.exists():
+                temp_path.unlink()
+            return False
+
+    def load_tag_index(self, index_path: Path) -> Optional[Dict[str, Any]]:
+        """Load tag index with validation."""
+        try:
+            if not index_path.exists():
+                return None
+            
+            with open(index_path, 'r', encoding='utf-8') as f:
+                index_data = json.load(f)
+            return index_data
+            
+        except Exception as e:
+            logger.error(f"Failed to load tag index: {e}")
+            return None

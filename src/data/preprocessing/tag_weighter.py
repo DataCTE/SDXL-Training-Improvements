@@ -3,7 +3,7 @@
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, Union, TYPE_CHECKING, Any
 import numpy as np
 import torch
 
@@ -211,23 +211,30 @@ class TagWeighter:
             "total_samples": self.total_samples
         }
         
-        with open(self.cache_path, 'w', encoding='utf-8') as f:
-            json.dump(cache_data, f, indent=2, ensure_ascii=False)
+        # Use cache manager to save if available
+        if hasattr(self.config, 'cache_manager'):
+            self.config.cache_manager.save_tag_weights(cache_data, self.cache_path)
 
     def _load_cache(self) -> None:
         """Load tag statistics from cache."""
-        with open(self.cache_path, 'r', encoding='utf-8') as f:
-            cache_data = json.load(f)
-            
+        if not hasattr(self.config, 'cache_manager'):
+            return
+        
+        cache_data = self.config.cache_manager.load_tag_weights(
+            self.config.cache_manager.get_cache_key(self.cache_path)
+        )
+        if not cache_data:
+            return
+        
         self.tag_counts = defaultdict(lambda: defaultdict(int))
         self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
         
         for tag_type, counts in cache_data["tag_counts"].items():
             self.tag_counts[tag_type].update(counts)
-            
+        
         for tag_type, weights in cache_data["tag_weights"].items():
             self.tag_weights[tag_type].update(weights)
-            
+        
         self.total_samples = cache_data["total_samples"]
 
     def get_tag_statistics(self) -> Dict[str, Dict[str, Union[int, float]]]:
@@ -253,7 +260,15 @@ class TagWeighter:
         return stats
 
     def save_to_index(self, output_path: Path, image_tags: Dict[str, Dict[str, any]]) -> None:
-        """Save tag weights and statistics to a JSON index file with proper structure."""
+        """Save tag weights and statistics to index using cache manager."""
+        if not hasattr(self.config, 'cache_manager'):
+            return
+        
+        index_data = self._prepare_index_data(image_tags)
+        self.config.cache_manager.save_tag_index(index_data, output_path)
+
+    def _prepare_index_data(self, image_tags: Dict[str, Dict[str, any]]) -> Dict[str, Any]:
+        """Prepare index data structure without file operations."""
         index_data = {
             "metadata": {
                 "total_samples": self.total_samples,
@@ -264,52 +279,46 @@ class TagWeighter:
                 "tag_types": self.tag_types
             },
             "statistics": {
-                "tag_counts": {
-                    tag_type: dict(counts) 
-                    for tag_type, counts in self.tag_counts.items()
-                },
-                "tag_weights": {
-                    tag_type: dict(weights)
-                    for tag_type, weights in self.tag_weights.items()
-                },
+                "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
+                "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
                 "type_statistics": self.get_tag_statistics()
             },
             "images": {
-                str(image_path): {
-                    "caption": image_data["caption"],
-                    "total_weight": image_data["weight_details"]["total_weight"],
-                    "tags": {
-                        tag_type: [
-                            {
-                                "tag": tag_info["tag"],
-                                "weight": float(tag_info["weight"]),
-                                "frequency": float(tag_info["frequency"])
-                            }
-                            for tag_info in tags_list
-                        ]
-                        for tag_type, tags_list in image_data["weight_details"]["tags"].items()
-                    }
-                }
+                str(image_path): self._prepare_image_data(image_data)
                 for image_path, image_data in image_tags.items()
             }
         }
+        
+        return self._clean_numeric_values(index_data)
 
-        # Ensure all numeric values are properly formatted
-        def clean_numeric(obj):
-            if isinstance(obj, (torch.Tensor, np.ndarray)):
-                return float(obj)
-            elif isinstance(obj, dict):
-                return {k: clean_numeric(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, tuple)):
-                return [clean_numeric(x) for x in obj]
-            return obj
+    def _prepare_image_data(self, image_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare individual image data for index."""
+        return {
+            "caption": image_data["caption"],
+            "total_weight": image_data["weight_details"]["total_weight"],
+            "tags": {
+                tag_type: [
+                    {
+                        "tag": tag_info["tag"],
+                        "weight": float(tag_info["weight"]),
+                        "frequency": float(tag_info["frequency"])
+                    }
+                    for tag_info in tags_list
+                ]
+                for tag_type, tags_list in image_data["weight_details"]["tags"].items()
+            }
+        }
 
-        index_data = clean_numeric(index_data)
+    def _clean_numeric_values(self, obj: Any) -> Any:
+        """Clean numeric values for JSON serialization."""
+        if isinstance(obj, (torch.Tensor, np.ndarray)):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {k: self._clean_numeric_values(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._clean_numeric_values(x) for x in obj]
+        return obj
 
-        # Save with proper formatting
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(index_data, f, indent=2, ensure_ascii=False)
-    
     def process_dataset_tags(self, image_captions: Dict[str, str]) -> Dict[str, Dict[str, any]]:
         """Process all image captions and return detailed tag information."""
         image_tags = {}
@@ -370,29 +379,20 @@ def create_tag_weighter_with_index(
     """Create a tag weighter and save comprehensive index."""
     weighter = TagWeighter(config, cache_path)
     
+    # Process all captions and compute weights if not cached
     if not (config.tag_weighting.use_cache and weighter.cache_path.exists()):
         logger.info("Computing tag statistics...")
         weighter.update_statistics(list(image_captions.values()))
-        # Force save cache after statistics update
         weighter._save_cache()
     
-    logger.info("Processing image tags and creating index...")
+    # Process and save individual image tags
+    logger.info("Processing image tags...")
     image_tags = weighter.process_dataset_tags(image_captions)
     
-    # Ensure the output directory exists
-    index_output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Save the index file
-    weighter.save_to_index(index_output_path, image_tags)
-    logger.info(f"Saved tag weights index to {index_output_path}")
-    
-    stats = weighter.get_tag_statistics()
-    logger.info("Tag statistics:")
-    for tag_type, type_stats in stats.items():
-        logger.info(f"\n{tag_type}:")
-        logger.info(f"Total unique tags: {type_stats['total_tags']}")
-        logger.info(f"Total occurrences: {type_stats['total_occurrences']}")
-        logger.info(f"Weight range: {type_stats['weight_range']}")
+    # Save index data using cache manager
+    if hasattr(config, 'cache_manager'):
+        index_data = weighter._prepare_index_data(image_tags)
+        config.cache_manager.save_tag_index(index_data, index_output_path)
     
     return weighter
 
@@ -401,10 +401,14 @@ def preprocess_dataset_tags(
     image_paths: List[str],
     captions: List[str],
     cache_dir: Optional[Path] = None
-) -> None:
-    """Preprocess all dataset tags before training."""
+) -> Optional[TagWeighter]:
+    """Preprocess all dataset tags before training.
+    
+    Returns:
+        TagWeighter instance if tag weighting is enabled, None otherwise.
+    """
     if not config.tag_weighting.enable_tag_weighting:
-        return
+        return None
         
     logger.info("Starting tag preprocessing...")
     
@@ -413,15 +417,16 @@ def preprocess_dataset_tags(
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
     cache_dir = Path(cache_dir)
     
-    # Create tag weighter and process all captions
+    # Create and initialize tag weighter
     image_captions = dict(zip(image_paths, captions))
     index_path = cache_dir / "tag_weights_index.json"
     
     logger.info("Processing tags and creating index...")
-    create_tag_weighter_with_index(
+    weighter = create_tag_weighter_with_index(
         config=config,
         image_captions=image_captions,
         index_output_path=index_path
     )
     
     logger.info("Tag preprocessing complete")
+    return weighter

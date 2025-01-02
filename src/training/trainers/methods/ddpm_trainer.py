@@ -11,7 +11,7 @@ from pathlib import Path
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
-from src.training.trainers.sdxl_trainer import SDXLTrainer
+from src.training.trainers.sdxl_trainer import SDXLTrainer, save_checkpoint
 from src.core.distributed import is_main_process
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config

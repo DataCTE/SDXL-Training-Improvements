@@ -170,6 +170,8 @@ class AspectBucketDataset(Dataset):
                     "text": caption  # Always use the caption from the dataset
                 }
             }
+        
+            
 
         except Exception as e:
             logger.error(f"Failed to get item {idx}: {str(e)}", exc_info=True)
