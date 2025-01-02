@@ -12,7 +12,7 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 from src.data.preprocessing.bucket_utils import compute_bucket_dims, generate_buckets
-
+from src.data.config import Config
 logger = get_logger(__name__)
 
 class CacheManager:
@@ -21,6 +21,7 @@ class CacheManager:
     def __init__(
         self,
         cache_dir: Union[str, Path],
+        config: Optional["Config"] = None,
         max_cache_size: int = 10000,
         device: Optional[torch.device] = None
     ):
@@ -28,6 +29,7 @@ class CacheManager:
         
         Args:
             cache_dir: Base directory for cache storage
+            config: Configuration object
             max_cache_size: Maximum number of entries to keep
             device: Default device for loading tensors
         """
@@ -67,6 +69,9 @@ class CacheManager:
         self.tags_dir.mkdir(exist_ok=True)
         self.tag_index_path = self.tags_dir / "tag_weights_index.json"
         self.tag_cache = {}  # Memory cache for tag weights
+
+        self.config = config
+        self.buckets = generate_buckets(config) if config else []
 
     # Cache Initialization Methods
     def _initialize_cache(self):
@@ -424,6 +429,10 @@ class CacheManager:
 
     def rebuild_cache_index(self) -> None:
         """Rebuild cache index from existing files in cache directories."""
+        if not self.buckets:
+            logger.warning("No buckets available for cache rebuild. Generating from config...")
+            self.buckets = generate_buckets(self.config)
+            
         logger.info("Rebuilding cache index from existing files...")
         
         # Create new index structure
@@ -453,7 +462,7 @@ class CacheManager:
                 
                 # Compute bucket dims if missing using AspectBucketDataset's method
                 if not bucket_dims and original_size:
-                    bucket_dims = compute_bucket_dims(original_size)
+                    bucket_dims = compute_bucket_dims(original_size, self.buckets)
                 
                 if original_path:
                     cache_key = self.get_cache_key(original_path)
