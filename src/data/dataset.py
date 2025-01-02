@@ -129,20 +129,16 @@ class AspectBucketDataset(Dataset):
             tag_weight = 1.0  # Default weight
             if self.tag_weighter is not None:
                 try:
-                    # Load from tag index
-                    tag_index_path = Path(self.cache_manager.cache_index.get("tag_index_path", ""))
-                    if tag_index_path.exists():
-                        tag_index = self.cache_manager.load_tag_index(tag_index_path)
-                        if tag_index and str(image_path) in tag_index["images"]:
-                            tag_weight = tag_index["images"][str(image_path)]["total_weight"]
-                        else:
-                            tag_weight = self.tag_weighter.get_caption_weight(caption)
+                    # Try to get weight from tag index first
+                    tag_index = self.cache_manager.load_tag_index()
+                    if tag_index and "images" in tag_index and str(image_path) in tag_index["images"]:
+                        tag_weight = tag_index["images"][str(image_path)]["total_weight"]
                     else:
+                        # Fall back to computing weight directly
                         tag_weight = self.tag_weighter.get_caption_weight(caption)
                 except Exception as e:
                     logger.warning(f"Failed to get tag weight for {image_path}: {e}")
-                    tag_weight = 1.0
-
+            
             # Verify the latents match the bucket dimensions from cache
             latents = cached_data["vae_latents"]
             cached_bucket = tuple(cache_entry["bucket_dims"])
