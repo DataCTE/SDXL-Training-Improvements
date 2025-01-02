@@ -60,6 +60,9 @@ class AspectBucketDataset(Dataset):
             device=self.device
         )
 
+        # Rebuild cache index to ensure it's up-to-date
+        self.cache_manager.rebuild_cache_index()
+
         # Data initialization
         self.image_paths = [
             str(convert_windows_path(p) if is_windows_path(p) else Path(p))

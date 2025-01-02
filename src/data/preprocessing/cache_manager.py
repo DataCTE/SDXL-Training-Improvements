@@ -10,6 +10,7 @@ from src.data.utils.paths import convert_windows_path, is_windows_path
 import os
 from PIL import Image
 import numpy as np
+from tqdm import tqdm
 
 logger = get_logger(__name__)
 
@@ -45,7 +46,19 @@ class CacheManager:
         self.metadata_dir.mkdir(exist_ok=True)
         
         # Initialize cache state
-        self._initialize_cache()
+        self.index_path = self.cache_dir / "cache_index.json"
+        
+        # Rebuild index if needed
+        if not self.index_path.exists():
+            self.rebuild_cache_index()
+        else:
+            try:
+                with open(self.index_path) as f:
+                    self.cache_index = json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load cache index: {e}. Rebuilding...")
+                self.rebuild_cache_index()
+        
         logger.info(f"Cache initialized at {self.cache_dir}")
 
     # Cache Initialization Methods
@@ -382,3 +395,68 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Error checking cache index: {e}")
             return False
+
+    def rebuild_cache_index(self) -> None:
+        """Rebuild cache index from existing files in cache directories."""
+        logger.info("Rebuilding cache index from existing files...")
+        
+        # Create new index structure
+        new_index = {
+            "version": "1.0",
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "entries": {},
+            "stats": {
+                "total_entries": 0,
+                "latents_size": 0,
+                "last_cleanup": None
+            }
+        }
+        
+        # Scan latents directory
+        latents_files = list(self.latents_dir.glob("*.pt"))
+        total_files = len(latents_files)
+        
+        logger.info(f"Found {total_files} existing latent files. Rebuilding index...")
+        
+        for latents_path in tqdm(latents_files, desc="Rebuilding cache index"):
+            try:
+                # Get corresponding metadata path
+                metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
+                
+                # Check if both files exist and are non-empty
+                if (latents_path.exists() and 
+                    metadata_path.exists() and 
+                    latents_path.stat().st_size > 0 and 
+                    metadata_path.stat().st_size > 0):
+                    
+                    # Load metadata to get original path
+                    with open(metadata_path) as f:
+                        metadata = json.load(f)
+                    original_path = metadata.get("original_path")
+                    
+                    if original_path:
+                        cache_key = self.get_cache_key(original_path)
+                        new_index["entries"][cache_key] = {
+                            "tensors_path": str(latents_path),
+                            "metadata_path": str(metadata_path),
+                            "created_at": metadata.get("created_at", time.time()),
+                            "is_valid": True,
+                            "last_checked": time.time()
+                        }
+            
+            except Exception as e:
+                logger.warning(f"Failed to process cache file {latents_path}: {e}")
+                continue
+        
+        # Update stats
+        new_index["stats"]["total_entries"] = len(new_index["entries"])
+        new_index["stats"]["latents_size"] = sum(
+            os.path.getsize(str(p)) for p in latents_files if p.exists()
+        )
+        
+        # Save new index
+        self.cache_index = new_index
+        self._save_index()
+        
+        logger.info(f"Cache index rebuilt with {len(new_index['entries'])} valid entries")
