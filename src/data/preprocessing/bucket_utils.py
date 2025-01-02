@@ -4,6 +4,7 @@ import logging
 from collections import defaultdict
 from tqdm import tqdm
 from src.data.config import Config
+import torch
 
 if TYPE_CHECKING:
     from src.data.preprocessing.cache_manager import CacheManager
