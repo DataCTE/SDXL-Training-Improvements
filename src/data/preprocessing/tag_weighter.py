@@ -205,37 +205,58 @@ class TagWeighter:
 
     def _save_cache(self) -> None:
         """Save tag statistics to cache."""
-        cache_data = {
-            "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
-            "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
-            "total_samples": self.total_samples
+        if not hasattr(self.config, 'cache_manager'):
+            return
+        
+        # Prepare index data structure
+        index_data = {
+            "metadata": {
+                "total_samples": self.total_samples,
+                "default_weight": self.default_weight,
+                "min_weight": self.min_weight,
+                "max_weight": self.max_weight,
+                "smoothing_factor": self.smoothing_factor,
+                "tag_types": self.tag_types
+            },
+            "statistics": {
+                "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
+                "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
+                "type_statistics": self.get_tag_statistics()
+            },
+            "images": {}  # Will be populated when processing dataset
         }
         
-        # Use cache manager to save if available
-        if hasattr(self.config, 'cache_manager'):
-            self.config.cache_manager.save_tag_weights(cache_data, self.cache_path)
+        # Save using new tag index structure
+        self.config.cache_manager.save_tag_index(index_data, self.cache_path)
 
     def _load_cache(self) -> None:
         """Load tag statistics from cache."""
         if not hasattr(self.config, 'cache_manager'):
             return
         
-        cache_data = self.config.cache_manager.load_tag_weights(
-            self.config.cache_manager.get_cache_key(self.cache_path)
-        )
-        if not cache_data:
+        # Load using new tag index structure
+        index_data = self.config.cache_manager.load_tag_index(self.cache_path)
+        if not index_data:
             return
         
+        # Initialize default collections
         self.tag_counts = defaultdict(lambda: defaultdict(int))
         self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
         
-        for tag_type, counts in cache_data["tag_counts"].items():
-            self.tag_counts[tag_type].update(counts)
+        # Load statistics from index
+        if "statistics" in index_data:
+            stats = index_data["statistics"]
+            if "tag_counts" in stats:
+                for tag_type, counts in stats["tag_counts"].items():
+                    self.tag_counts[tag_type].update(counts)
+            
+            if "tag_weights" in stats:
+                for tag_type, weights in stats["tag_weights"].items():
+                    self.tag_weights[tag_type].update(weights)
         
-        for tag_type, weights in cache_data["tag_weights"].items():
-            self.tag_weights[tag_type].update(weights)
-        
-        self.total_samples = cache_data["total_samples"]
+        # Load metadata
+        if "metadata" in index_data:
+            self.total_samples = index_data["metadata"].get("total_samples", 0)
 
     def get_tag_statistics(self) -> Dict[str, Dict[str, Union[int, float]]]:
         """Get statistics about tags and weights."""
