@@ -68,7 +68,7 @@ def validate_and_fix_bucket_dims(
     latents: "torch.Tensor",
     image_path: str
 ) -> Tuple[int, int]:
-    """Validate bucket dimensions against VAE latents and use VAE dims if mismatch."""
+    """Validate bucket dimensions against VAE latents."""
     actual_dims = get_bucket_dims_from_latents(latents.shape)
     
     if computed_bucket != actual_dims:
@@ -77,14 +77,7 @@ def validate_and_fix_bucket_dims(
             f"computed {computed_bucket}, VAE latents indicate {actual_dims}. "
             f"Using VAE dimensions."
         )
-        # Verify the actual dimensions are valid
-        if actual_dims[0] % 8 == 0 and actual_dims[1] % 8 == 0:
-            return actual_dims
-        else:
-            raise ValueError(
-                f"Invalid VAE latent dimensions {actual_dims} for {image_path}. "
-                f"Dimensions must be divisible by 8."
-            )
+        return actual_dims
     return computed_bucket
 
 def validate_aspect_ratio(width: int, height: int, max_ratio: float) -> bool:
@@ -128,22 +121,14 @@ def group_images_by_bucket(
                 
             # Group by actual latent dimensions (H/8, W/8)
             latent_bucket = get_latent_bucket_key(latents)
+            bucket_indices[latent_bucket].append(idx)
             
-            # Verify dimensions are valid
-            if latent_bucket[0] % 8 == 0 and latent_bucket[1] % 8 == 0:
-                bucket_indices[latent_bucket].append(idx)
-                
-                # Store latent dimensions in cache
-                if cache_entry.get("latent_dims") != latent_bucket:
-                    cache_entry["latent_dims"] = latent_bucket
-                    cache_entry["needs_save"] = True
-                    cache_manager.cache_index["entries"][cache_key] = cache_entry
-                    cache_manager.cache_index["needs_save"] = True
-            else:
-                logger.warning(
-                    f"Invalid latent dimensions {latent_bucket} for {image_path}, "
-                    f"must be divisible by 8. Skipping."
-                )
+            # Store latent dimensions in cache
+            if cache_entry.get("latent_dims") != latent_bucket:
+                cache_entry["latent_dims"] = latent_bucket
+                cache_entry["needs_save"] = True
+                cache_manager.cache_index["entries"][cache_key] = cache_entry
+                cache_manager.cache_index["needs_save"] = True
                 
         except Exception as e:
             logger.warning(f"Failed to process {image_path}: {e}")

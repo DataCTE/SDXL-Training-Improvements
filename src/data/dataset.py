@@ -490,16 +490,20 @@ class AspectBucketDataset(Dataset):
         image_path: Union[str, Path]
     ) -> Dict[str, Any]:
         """Process image tensor ensuring VAE-compatible dimensions."""
-        w, h = original_size
+       
         
         # Get bucket dimensions in latent space
         latent_w, latent_h = compute_bucket_dims(original_size, self.buckets)
         
+        # Convert latent dimensions back to pixel space for conditioning
+        pixel_w = latent_w * 8
+        pixel_h = latent_h * 8
+        
         return {
             "pixel_values": img_tensor,
             "original_size": original_size,
-            "target_size": (latent_w * 8, latent_h * 8),  # For conditioning
-            "latent_size": (latent_w, latent_h),  # For VAE
+            "target_size": (pixel_w, pixel_h),  # For conditioning (in pixel space)
+            "latent_size": (latent_w, latent_h),  # For VAE (in latent space)
             "path": str(image_path),
             "timestamp": time.time(),
             "crop_coords": (0, 0)
