@@ -17,7 +17,8 @@ from src.data.config import Config
 from src.models.sdxl import StableDiffusionXL
 from src.data.preprocessing import (
     CacheManager,
-    create_tag_weighter_with_index
+    create_tag_weighter_with_index,
+    TagWeighter
 )
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
@@ -33,6 +34,7 @@ class AspectBucketDataset(Dataset):
         image_paths: List[str],
         captions: List[str],
         model: Optional[StableDiffusionXL] = None,
+        tag_weighter: Optional["TagWeighter"] = None,
         is_train: bool = True,
         device: Optional[torch.device] = None,
         device_id: Optional[int] = None
@@ -44,6 +46,9 @@ class AspectBucketDataset(Dataset):
         self.config = config
         self.is_train = is_train
         self._setup_device(device, device_id)
+        
+        # Tag weighting
+        self.tag_weighter = tag_weighter
 
         # Model components
         self.model = model
@@ -612,11 +617,21 @@ def create_dataset(
     image_paths: List[str],
     captions: List[str],
     model: Optional[StableDiffusionXL] = None,
+    tag_weighter: Optional["TagWeighter"] = None
 ) -> AspectBucketDataset:
-    """Create and initialize dataset instance."""
+    """Create and initialize dataset instance.
+    
+    Args:
+        config: Configuration object
+        image_paths: List of image paths
+        captions: List of image captions
+        model: Optional SDXL model instance
+        tag_weighter: Optional TagWeighter instance for caption weighting
+    """
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
-        model=model
+        model=model,
+        tag_weighter=tag_weighter
     )
