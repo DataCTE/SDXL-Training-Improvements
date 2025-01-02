@@ -490,8 +490,6 @@ class AspectBucketDataset(Dataset):
         image_path: Union[str, Path]
     ) -> Dict[str, Any]:
         """Process image tensor ensuring VAE-compatible dimensions."""
-       
-        
         # Get bucket dimensions in latent space
         latent_w, latent_h = compute_bucket_dims(original_size, self.buckets)
         
@@ -500,7 +498,7 @@ class AspectBucketDataset(Dataset):
         pixel_h = latent_h * 8
         
         return {
-            "pixel_values": img_tensor,
+            "pixel_values": img_tensor.clone(),  # Clone to ensure we don't modify original
             "original_size": original_size,
             "target_size": (pixel_w, pixel_h),  # For conditioning (in pixel space)
             "latent_size": (latent_w, latent_h),  # For VAE (in latent space)
@@ -515,13 +513,30 @@ class AspectBucketDataset(Dataset):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            # Use CacheManager's image loading
+            # Check if image is already cached
+            cache_key = self.cache_manager.get_cache_key(image_path)
+            cached_data = self.cache_manager.load_tensors(cache_key)
+            
+            if cached_data is not None and "vae_latents" in cached_data:
+                # Use cached data if available
+                return {
+                    "vae_latents": cached_data["vae_latents"],
+                    "original_size": cached_data["metadata"]["original_size"],
+                    "target_size": cached_data["metadata"]["target_size"],
+                    "latent_size": cached_data["metadata"]["latent_size"],
+                    "path": str(image_path),
+                    "timestamp": time.time(),
+                    "crop_coords": cached_data["metadata"].get("crop_coords", (0, 0))
+                }
+            
+            # If not cached, load and process the image
             loaded = self.cache_manager.load_image_to_tensor(image_path, self.device)
             if loaded is None:
                 return None
             
             img_tensor, original_size = loaded
             
+            # Process the image tensor
             processed = self._process_image_tensor(
                 img_tensor=img_tensor,
                 original_size=original_size,
@@ -539,6 +554,22 @@ class AspectBucketDataset(Dataset):
                 vae_latents = vae_latents * self.vae.config.scaling_factor
             
             processed["vae_latents"] = vae_latents.squeeze(0)
+            
+            # Cache the processed data
+            self.cache_manager.save_latents(
+                tensors={
+                    "vae_latents": processed["vae_latents"],
+                },
+                image_path=image_path,
+                metadata={
+                    "original_size": processed["original_size"],
+                    "target_size": processed["target_size"],
+                    "latent_size": processed["latent_size"],
+                    "crop_coords": processed["crop_coords"],
+                    "timestamp": processed["timestamp"]
+                }
+            )
+            
             return processed
             
         except Exception as e:
