@@ -41,39 +41,8 @@ class DDPMTrainer(SDXLTrainer):
             **kwargs
         )
         
-        # Initialize cache manager for tag weights
-        from src.data.preprocessing.cache_manager import CacheManager
-        self.cache_manager = CacheManager(
-            cache_dir=config.global_config.cache.cache_dir,
-            device=device
-        )
-        
-        # Load tag weights from cache
-        self.tag_weights_cache = {}
-        self.tag_weights_path = self.cache_manager.cache_dir / "tag_weights.json"
-        self.tag_index_path = self.cache_manager.cache_dir / "tag_weights_index.json"
-        
-        if not (self.tag_weights_path.exists() and self.tag_index_path.exists()):
-            raise ValueError(
-                f"Tag weights files not found at {self.tag_weights_path} or {self.tag_index_path}. "
-                "Please run preprocessing first."
-            )
-        
-        try:
-            # Load both JSON files
-            with open(self.tag_weights_path, 'r') as f:
-                self.tag_weights_data = json.load(f)
-            with open(self.tag_index_path, 'r') as f:
-                self.tag_index_data = json.load(f)
-            logger.info("Loaded tag weights from cache")
-            
-            # Pre-cache metadata for faster lookup
-            self.metadata = self.tag_index_data["metadata"]
-            self.default_weight = float(self.metadata["default_weight"])
-            
-        except Exception as e:
-            logger.error(f"Failed to load tag weights cache: {e}")
-            raise
+        # Remove tag weight caching since weights now come from dataset
+        self.default_weight = config.tag_weighting.default_weight
         
         # Verify effective batch size with fixed gradient accumulation
         self.effective_batch_size = (
@@ -134,51 +103,6 @@ class DDPMTrainer(SDXLTrainer):
         
         logger.info(f"Model components using dtype: {model_dtype}")
         
-    def get_tag_weights(self, texts: List[str]) -> torch.Tensor:
-        """Get cached tag weights for a batch of texts efficiently."""
-        weights = []
-        for text in texts:
-            # First check memory cache
-            if text in self.tag_weights_cache:
-                weights.append(self.tag_weights_cache[text])
-                continue
-            
-            # Then check index data
-            image_data = self.tag_index_data["images"].get(text, None)
-            if image_data:
-                weight = float(image_data["total_weight"])
-            else:
-                # If not found, calculate from tag weights
-                try:
-                    tags = text.split(",")  # Split caption into tags
-                    tag_weights = []
-                    for tag in tags:
-                        tag = tag.strip().lower()
-                        # Check all tag types from metadata
-                        for tag_type in ["subject", "style", "quality", "technical", "meta"]:
-                            if tag in self.tag_weights_data["tag_weights"][tag_type]:
-                                tag_weights.append(
-                                    self.tag_weights_data["tag_weights"][tag_type][tag]
-                                )
-                                break
-                
-                    # Calculate geometric mean of tag weights
-                    if tag_weights:
-                        import numpy as np
-                        weight = float(np.exp(np.mean(np.log(tag_weights))))
-                    else:
-                        weight = self.default_weight
-                        
-                except Exception as e:
-                    logger.warning(f"Error calculating weight for text: {text[:50]}... - {str(e)}")
-                    weight = self.default_weight
-            
-            # Cache the result
-            self.tag_weights_cache[text] = weight
-            weights.append(weight)
-        
-        return torch.tensor(weights, dtype=torch.float32, device=self.device)
-
     def train(self, num_epochs: int):
         """Execute training loop with proper gradient accumulation."""
         total_steps = len(self.train_dataloader) * num_epochs
@@ -361,6 +285,9 @@ class DDPMTrainer(SDXLTrainer):
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             
+            # Get tag weights directly from batch
+            tag_weights = batch["tag_weights"].to(device=self.device, dtype=model_dtype)
+            
             # Get metadata from batch
             original_sizes = batch["original_size"]
             target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
@@ -427,9 +354,6 @@ class DDPMTrainer(SDXLTrainer):
                 # Calculate unweighted loss
                 base_loss = F.mse_loss(model_pred, target, reduction="none")  # Keep per-sample losses
                 
-                # Get tag weights from cache for the batch
-                tag_weights = self.get_tag_weights(batch["text"])
-                
                 # Reshape weights to match loss dimensions
                 tag_weights = tag_weights.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
                 
@@ -447,7 +371,7 @@ class DDPMTrainer(SDXLTrainer):
                     # Clip loss to prevent explosion
                     loss = torch.clamp(loss, max=1000.0)
 
-                # Log metrics with additional noise and weight statistics
+                # Log metrics with tag weight statistics
                 metrics = {
                     "loss": loss.detach().item(),
                     "lr": self.optimizer.param_groups[0]["lr"],
