@@ -23,7 +23,7 @@ from src.data.preprocessing import (
 )
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
-from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims
+from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, validate_aspect_ratio, group_images_by_bucket, log_bucket_statistics
 
 logger = get_logger(__name__)
 
@@ -491,28 +491,20 @@ class AspectBucketDataset(Dataset):
     ) -> Dict[str, Any]:
         """Process image tensor by finding exact bucket match."""
         w, h = original_size
-        aspect_ratio = w / h
         
-        # Early return if aspect ratio is invalid
-        max_ratio = config.global_config.image.max_aspect_ratio
-        if not (1/max_ratio <= aspect_ratio <= max_ratio):
-            logger.warning(f"Image {image_path} has invalid aspect ratio ({aspect_ratio:.2f}). Skipping.")
+        # Validate aspect ratio using bucket_utils
+        if not validate_aspect_ratio(w, h, config.global_config.image.max_aspect_ratio):
+            logger.warning(f"Image {image_path} has invalid aspect ratio ({w/h:.2f}). Skipping.")
             return None
         
-        # Find matching bucket
-        buckets = self.get_aspect_buckets()
-        bucket_ratios = [(bw/bh, idx, (bw,bh)) for idx, (bw,bh) in enumerate(buckets)]
-        _, bucket_idx, (target_w, target_h) = min(
-            [(abs(aspect_ratio - ratio), idx, dims) for ratio, idx, dims in bucket_ratios]
-        )
+        # Find matching bucket using bucket_utils
+        target_w, target_h = compute_bucket_dims(original_size, self.buckets)
         
         try:
-            
             return {
                 "pixel_values": img_tensor,
                 "original_size": original_size,
                 "target_size": (target_w, target_h),
-                "bucket_index": bucket_idx,
                 "path": str(image_path),
                 "timestamp": time.time(),
                 "crop_coords": (0, 0)  # No cropping needed with dynamic buckets
@@ -593,41 +585,12 @@ class AspectBucketDataset(Dataset):
         return self.buckets
 
     def _group_images_by_bucket(self) -> Dict[Tuple[int, int], List[int]]:
-        """Group image indices by their bucket dimensions using cached information."""
-        bucket_indices = defaultdict(list)
-        
-        logger.info("Grouping images into buckets...")
-        for idx, image_path in enumerate(tqdm(self.image_paths, desc="Grouping images")):
-            cache_key = self.cache_manager.get_cache_key(image_path)
-            cache_entry = self.cache_manager.cache_index["entries"].get(cache_key)
-            
-            if cache_entry and "bucket_dims" in cache_entry:
-                bucket_dims = tuple(cache_entry["bucket_dims"])
-                bucket_indices[bucket_dims].append(idx)
-            else:
-                logger.warning(f"Missing bucket dimensions for {image_path}, skipping")
-                continue
-        
-        if not bucket_indices:
-            raise RuntimeError("No valid bucket dimensions found in cache. Please preprocess the dataset first.")
-        
-        return dict(bucket_indices)
+        """Group image indices by their bucket dimensions using bucket_utils."""
+        return group_images_by_bucket(self.image_paths, self.cache_manager)
 
     def _log_bucket_statistics(self):
-        """Log statistics about bucket distribution."""
-        total_images = sum(len(indices) for indices in self.bucket_indices.values())
-        logger.info(f"\nBucket statistics ({total_images} total images):")
-        
-        for bucket_dims, indices in sorted(
-            self.bucket_indices.items(),
-            key=lambda x: len(x[1]),
-            reverse=True
-        ):
-            w, h = bucket_dims
-            logger.info(
-                f"Bucket {w}x{h} (ratio {w/h:.2f}): "
-                f"{len(indices)} images ({len(indices)/total_images*100:.1f}%)"
-            )
+        """Log statistics about bucket distribution using bucket_utils."""
+        log_bucket_statistics(self.bucket_indices)
 
 def create_dataset(
     config: Config,
