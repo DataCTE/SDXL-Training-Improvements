@@ -497,21 +497,19 @@ class AspectBucketDataset(Dataset):
             logger.warning(f"Image {image_path} has invalid aspect ratio ({w/h:.2f}). Skipping.")
             return None
         
-        # Get bucket dimensions that will be VAE compatible
+        # Get bucket dimensions in latent space
         target_w, target_h = compute_bucket_dims(original_size, self.buckets)
         
-        try:
-            return {
-                "pixel_values": img_tensor,
-                "original_size": original_size,
-                "target_size": (target_w, target_h),
-                "path": str(image_path),
-                "timestamp": time.time(),
-                "crop_coords": (0, 0)
-            }
-        except Exception as e:
-            logger.warning(f"Failed to process image {image_path} during resizing: {str(e)}")
-            return None
+        # Store both original and latent dimensions
+        return {
+            "pixel_values": img_tensor,
+            "original_size": original_size,
+            "target_size": (target_w * 8, target_h * 8),  # Convert back to pixel space for conditioning
+            "latent_size": (target_w, target_h),  # Store latent dimensions
+            "path": str(image_path),
+            "timestamp": time.time(),
+            "crop_coords": (0, 0)
+        }
 
     def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
         """Process a single image with aspect ratio bucketing and VAE encoding."""
