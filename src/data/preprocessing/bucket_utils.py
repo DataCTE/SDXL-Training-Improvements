@@ -77,14 +77,19 @@ def validate_aspect_ratio(width: int, height: int, max_ratio: float) -> bool:
     aspect_ratio = width / height
     return 1/max_ratio <= aspect_ratio <= max_ratio
 
+def get_latent_bucket_key(latents: "torch.Tensor") -> Tuple[int, int]:
+    """Get bucket key from latent dimensions."""
+    _, h, w = latents.shape
+    return (w, h)  # Return latent dimensions directly
+
 def group_images_by_bucket(
     image_paths: List[str], 
     cache_manager: "CacheManager"
 ) -> Dict[Tuple[int, int], List[int]]:
-    """Group image indices by their bucket dimensions, using VAE latents as source of truth."""
+    """Group image indices by their VAE latent dimensions to ensure compatible batches."""
     bucket_indices = defaultdict(list)
     
-    logger.info("Grouping images into buckets...")
+    logger.info("Grouping images by VAE latent dimensions...")
     for idx, image_path in enumerate(tqdm(image_paths, desc="Grouping images")):
         cache_key = cache_manager.get_cache_key(image_path)
         cache_entry = cache_manager.cache_index["entries"].get(cache_key)
@@ -99,24 +104,16 @@ def group_images_by_bucket(
                 logger.warning(f"Missing VAE latents for {image_path}, skipping")
                 continue
             
-            # Get computed bucket dims if they exist
-            computed_bucket = tuple(cache_entry.get("bucket_dims", (0, 0)))
+            # Group by actual latent dimensions
+            latent_bucket = get_latent_bucket_key(cached_data["vae_latents"])
+            bucket_indices[latent_bucket].append(idx)
             
-            # Validate against VAE latents and get correct bucket
-            bucket_dims = validate_and_fix_bucket_dims(
-                computed_bucket,
-                cached_data["vae_latents"],
-                image_path
-            )
-            
-            # Update cache entry if dimensions changed
-            if bucket_dims != computed_bucket:
-                cache_entry["bucket_dims"] = bucket_dims
+            # Update cache entry with latent dimensions
+            if cache_entry.get("bucket_dims") != latent_bucket:
+                cache_entry["bucket_dims"] = latent_bucket
                 cache_entry["needs_save"] = True
                 cache_manager.cache_index["entries"][cache_key] = cache_entry
                 cache_manager.cache_index["needs_save"] = True
-            
-            bucket_indices[bucket_dims].append(idx)
             
         except Exception as e:
             logger.warning(f"Failed to process {image_path}: {e}")
@@ -128,6 +125,12 @@ def group_images_by_bucket(
     # Save any updates to cache index
     if cache_manager.cache_index.get("needs_save", False):
         cache_manager._save_index()
+    
+    # Log bucket distribution
+    total_images = sum(len(indices) for indices in bucket_indices.values())
+    logger.info(f"\nFound {len(bucket_indices)} distinct latent dimension groups:")
+    for (w, h), indices in sorted(bucket_indices.items(), key=lambda x: len(x[1]), reverse=True):
+        logger.info(f"Latent dims {w}x{h}: {len(indices)} images ({len(indices)/total_images*100:.1f}%)")
     
     return dict(bucket_indices)
 
