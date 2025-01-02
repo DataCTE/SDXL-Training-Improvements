@@ -180,44 +180,26 @@ class AspectBucketDataset(Dataset):
         try:
             # Filter None values and log
             valid_batch = [b for b in batch if b is not None]
+            
+            # If no valid samples, return None
             if len(valid_batch) == 0:
-                logger.warning(f"Received batch of size {len(batch)} but all items were None")
                 return None
             
-            if len(valid_batch) < len(batch):
-                logger.warning(f"Filtered {len(batch) - len(valid_batch)} invalid items from batch")
+            # If at least half the batch is valid, proceed
+            min_batch_size = max(self.config.training.batch_size // 4, 1)
+            if len(valid_batch) >= min_batch_size:
+                return {
+                    "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
+                    "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
+                    "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
+                    "time_ids": torch.stack([example["time_ids"] for example in valid_batch]),
+                    "original_size": [example["metadata"]["original_size"] for example in valid_batch],
+                    "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
+                    "target_size": [example["metadata"]["target_size"] for example in valid_batch],
+                    "text": [example["metadata"]["text"] for example in valid_batch]
+                }
             
-            # Group samples by VAE latent size
-            bucket_groups = {}
-            for example in valid_batch:
-                vae_size = example["vae_latents"].shape[-2:]
-                if vae_size not in bucket_groups:
-                    bucket_groups[vae_size] = []
-                bucket_groups[vae_size].append(example)
-
-            # Find largest group
-            if not bucket_groups:
-                logger.warning("No valid bucket groups found")
-                return None
-            
-            largest_size = max(bucket_groups.keys(), key=lambda k: len(bucket_groups[k]))
-            valid_batch = bucket_groups[largest_size]
-            
-            if len(valid_batch) < self.config.training.batch_size // 2:
-                logger.warning(f"Batch size too small after filtering: {len(valid_batch)}")
-                return None
-
-            # Return collated batch
-            return {
-                "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
-                "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
-                "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
-                "time_ids": torch.stack([example["time_ids"] for example in valid_batch]),
-                "original_size": [example["metadata"]["original_size"] for example in valid_batch],
-                "crop_top_lefts": [example["metadata"]["crop_coords"] for example in valid_batch],
-                "target_size": [example["metadata"]["target_size"] for example in valid_batch],
-                "text": [example["metadata"]["text"] for example in valid_batch]
-            }
+            return None
 
         except Exception as e:
             logger.error("Failed to collate batch", exc_info=True)

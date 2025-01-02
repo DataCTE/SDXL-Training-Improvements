@@ -56,15 +56,34 @@ class TagWeighter:
 
     def _extract_tags(self, caption: str) -> Dict[str, List[str]]:
         """Extract and categorize tags from caption."""
-        import re
-        tags = [t.strip() for t in re.split(r'[,\(\)]', caption) if t.strip()]
-        
-        categorized_tags = defaultdict(list)
-        for tag in tags:
-            tag_type = self._determine_tag_type(tag)
-            categorized_tags[tag_type].append(tag)
+        try:
+            # More robust tag splitting
+            tags = [t.strip() for t in caption.split(',') if t.strip()]
             
-        return dict(categorized_tags)
+            # Initialize categories
+            categorized = {category: [] for category in self.tag_types.keys()}
+            
+            for tag in tags:
+                # Skip empty or malformed tags
+                if not tag or len(tag) > 100:  # Sanity check for tag length
+                    continue
+                    
+                # Default to 'meta' category if no match found
+                matched = False
+                for category, keywords in self.tag_types.items():
+                    if any(keyword in tag.lower() for keyword in keywords):
+                        categorized[category].append(tag)
+                        matched = True
+                        break
+                
+                if not matched:
+                    categorized["meta"].append(tag)
+                    
+            return categorized
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract tags from caption: {caption[:50]}...")
+            return {category: [] for category in self.tag_types.keys()}
 
     def _determine_tag_type(self, tag: str) -> str:
         """Determine tag type based on keywords.
