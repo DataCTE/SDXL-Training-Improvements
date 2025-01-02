@@ -84,18 +84,79 @@ class AspectBucketDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        """Get a single item from the dataset."""
+        """Get a single item from the dataset with proper validation and error handling."""
         try:
             image_path = self.image_paths[idx]
             caption = self.captions[idx]
             
+            # Get cache key and load cached data
             cache_key = self.cache_manager.get_cache_key(image_path)
             cached_data = self.cache_manager.load_tensors(cache_key)
             
             if cached_data is None:
-                raise ValueError(f"Failed to load cached data for: {image_path}")
+                logger.warning(f"Failed to load cached data for: {image_path}")
+                return None
             
-            # Ensure all required keys are present
+            # Validate required tensors
+            required_keys = {
+                "vae_latents", 
+                "prompt_embeds", 
+                "pooled_prompt_embeds", 
+                "time_ids"
+            }
+            if not all(k in cached_data for k in required_keys):
+                logger.warning(
+                    f"Missing required keys for {image_path}. "
+                    f"Found: {set(cached_data.keys())}, "
+                    f"Required: {required_keys}"
+                )
+                return None
+            
+            # Validate metadata
+            required_metadata = {
+                "original_size",
+                "crop_coords",
+                "target_size"
+            }
+            if not all(k in cached_data.get("metadata", {}) for k in required_metadata):
+                logger.warning(
+                    f"Missing required metadata for {image_path}. "
+                    f"Found: {set(cached_data.get('metadata', {}).keys())}, "
+                    f"Required: {required_metadata}"
+                )
+                return None
+            
+            # Validate tensor shapes and types
+            try:
+                # Validate VAE latents
+                if not isinstance(cached_data["vae_latents"], torch.Tensor):
+                    raise ValueError("vae_latents must be a torch.Tensor")
+                if len(cached_data["vae_latents"].shape) != 3:  # [C, H, W]
+                    raise ValueError(f"Invalid vae_latents shape: {cached_data['vae_latents'].shape}")
+                
+                # Validate prompt embeddings
+                if not isinstance(cached_data["prompt_embeds"], torch.Tensor):
+                    raise ValueError("prompt_embeds must be a torch.Tensor")
+                if len(cached_data["prompt_embeds"].shape) != 2:  # [S, D]
+                    raise ValueError(f"Invalid prompt_embeds shape: {cached_data['prompt_embeds'].shape}")
+                
+                # Validate pooled embeddings
+                if not isinstance(cached_data["pooled_prompt_embeds"], torch.Tensor):
+                    raise ValueError("pooled_prompt_embeds must be a torch.Tensor")
+                if len(cached_data["pooled_prompt_embeds"].shape) != 1:  # [D]
+                    raise ValueError(f"Invalid pooled_prompt_embeds shape: {cached_data['pooled_prompt_embeds'].shape}")
+                
+                # Validate time IDs
+                if not isinstance(cached_data["time_ids"], torch.Tensor):
+                    raise ValueError("time_ids must be a torch.Tensor")
+                if cached_data["time_ids"].shape[-1] != 6:  # [..., 6]
+                    raise ValueError(f"Invalid time_ids shape: {cached_data['time_ids'].shape}")
+                
+            except ValueError as e:
+                logger.warning(f"Tensor validation failed for {image_path}: {str(e)}")
+                return None
+            
+            # Return properly formatted data
             return {
                 "vae_latents": cached_data["vae_latents"],
                 "prompt_embeds": cached_data["prompt_embeds"],
@@ -110,7 +171,7 @@ class AspectBucketDataset(Dataset):
             }
 
         except Exception as e:
-            logger.error(f"Failed to get item {idx}: {str(e)}")
+            logger.error(f"Failed to get item {idx}: {str(e)}", exc_info=True)
             return None
 
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
