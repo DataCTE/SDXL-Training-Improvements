@@ -39,7 +39,8 @@ class AspectBucketDataset(Dataset):
         tag_weighter: Optional["TagWeighter"] = None,
         is_train: bool = True,
         device: Optional[torch.device] = None,
-        device_id: Optional[int] = None
+        device_id: Optional[int] = None,
+        cache_manager: Optional["CacheManager"] = None
     ):
         """Initialize dataset with preprocessing capabilities."""
         super().__init__()
@@ -61,8 +62,9 @@ class AspectBucketDataset(Dataset):
 
         # Cache setup with rebuild
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
-        self.cache_manager = CacheManager(
+        self.cache_manager = cache_manager or CacheManager(
             cache_dir=cache_dir,
+            config=config,
             max_cache_size=config.global_config.cache.max_cache_size,
             device=self.device
         )
@@ -634,19 +636,19 @@ def create_dataset(
     model: Optional[StableDiffusionXL] = None,
     tag_weighter: Optional["TagWeighter"] = None
 ) -> AspectBucketDataset:
-    """Create and initialize dataset instance.
+    """Create and initialize dataset instance."""
+    # Initialize cache manager with config
+    cache_manager = CacheManager(
+        cache_dir=config.global_config.cache.cache_dir,
+        config=config,  # Pass config here
+        max_cache_size=config.global_config.cache.max_cache_size
+    )
     
-    Args:
-        config: Configuration object
-        image_paths: List of image paths
-        captions: List of image captions
-        model: Optional SDXL model instance
-        tag_weighter: Optional TagWeighter instance for caption weighting
-    """
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,
         captions=captions,
         model=model,
-        tag_weighter=tag_weighter
+        tag_weighter=tag_weighter,
+        cache_manager=cache_manager
     )
