@@ -402,10 +402,7 @@ def preprocess_dataset_tags(
     captions: List[str],
     cache_dir: Optional[Path] = None
 ) -> None:
-    """Preprocess all dataset tags before training.
-    
-    This should be called before dataset creation to ensure all tags are properly processed.
-    """
+    """Preprocess all dataset tags before training."""
     if not config.tag_weighting.enable_tag_weighting:
         return
         
@@ -421,7 +418,7 @@ def preprocess_dataset_tags(
     index_path = cache_dir / "tag_weights_index.json"
     
     logger.info("Processing tags and creating index...")
-    weighter = create_tag_weighter_with_index(
+    create_tag_weighter_with_index(
         config=config,
         image_captions=image_captions,
         index_output_path=index_path
