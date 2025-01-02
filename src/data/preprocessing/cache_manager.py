@@ -11,7 +11,6 @@ import os
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
-from src.data.preprocessing.bucket_utils import compute_bucket_dims
 from src.data.dataset import AspectBucketDataset
 
 logger = get_logger(__name__)
