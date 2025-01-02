@@ -23,11 +23,14 @@ from src.data.preprocessing import (
 )
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
+from src.data.preprocessing.bucket_utils import DEFAULT_BUCKETS, compute_bucket_dims, generate_buckets  # Update import
 
 logger = get_logger(__name__)
 
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""
+    
+    DEFAULT_BUCKETS = DEFAULT_BUCKETS  # Use the shared constant
     
     def __init__(
         self,
@@ -273,12 +276,7 @@ class AspectBucketDataset(Dataset):
                 processed = self._process_single_image(path, config)
                 if processed:
                     # Compute bucket dimensions during initial processing
-                    w, h = processed["original_size"]
-                    aspect_ratio = w / h
-                    bucket_ratios = [(bw/bh, (bw,bh)) for bw,bh in self.buckets]
-                    _, bucket_dims = min(
-                        [(abs(aspect_ratio - ratio), dims) for ratio, dims in bucket_ratios]
-                    )
+                    bucket_dims = compute_bucket_dims(processed["original_size"], self.buckets)
                     processed["bucket_dims"] = bucket_dims
                 processed_images.append(processed)
             
@@ -591,58 +589,8 @@ class AspectBucketDataset(Dataset):
             raise
 
     def _generate_dynamic_buckets(self, config: Config) -> List[Tuple[int, int]]:
-        """Generate dynamic buckets based on actual image dimensions."""
-        bucket_step = config.global_config.image.bucket_step
-        max_ratio = config.global_config.image.max_aspect_ratio
-        min_size = config.global_config.image.min_size
-        max_size = config.global_config.image.max_size
-        
-        # Collect all image dimensions and group by aspect ratio
-        dimensions = {}  # aspect_ratio -> list of (width, height)
-        logger.info("Analyzing image dimensions...")
-        
-        for path in tqdm(self.image_paths, desc="Scanning images"):
-            loaded = self.cache_manager.load_image_to_tensor(path, self.device)
-            if loaded:
-                _, (w, h) = loaded
-                ratio = w / h
-                if 1/max_ratio <= ratio <= max_ratio:
-                    # Round ratio to 2 decimal places to group similar ratios
-                    rounded_ratio = round(ratio * 100) / 100
-                    if rounded_ratio not in dimensions:
-                        dimensions[rounded_ratio] = []
-                    dimensions[rounded_ratio].append((w, h))
-        
-        # Generate buckets for each aspect ratio group
-        buckets = set()
-        for ratio, sizes in dimensions.items():
-            # Find median dimensions for this ratio
-            widths, heights = zip(*sizes)
-            med_w = sorted(widths)[len(widths)//2]
-            med_h = sorted(heights)[len(heights)//2]
-            
-            # Round to nearest bucket step
-            base_w = int(med_w / bucket_step + 0.5) * bucket_step
-            base_h = int(med_h / bucket_step + 0.5) * bucket_step
-            
-            # Ensure dimensions are within bounds
-            base_w = max(min(base_w, max_size[0]), min_size[0])
-            base_h = max(min(base_h, max_size[1]), min_size[1])
-            
-            # Add base bucket
-            buckets.add((base_w, base_h))
-            
-            # Add scaled buckets if needed
-            for scale in [0.75, 1.25]:
-                w = int(base_w * scale / bucket_step) * bucket_step
-                h = int(base_h * scale / bucket_step) * bucket_step
-                if (min_size[0] <= w <= max_size[0] and 
-                    min_size[1] <= h <= max_size[1]):
-                    buckets.add((w, h))
-        
-        sorted_buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]/x[1]))
-        logger.info(f"Generated {len(sorted_buckets)} dynamic buckets")
-        return sorted_buckets
+        """Generate bucket sizes based on config."""
+        return generate_buckets(config)
 
     def get_aspect_buckets(self) -> List[Tuple[int, int]]:
         """Return cached buckets."""

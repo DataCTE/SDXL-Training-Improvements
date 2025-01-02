@@ -12,6 +12,7 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 from src.data.dataset import AspectBucketDataset
+from src.data.preprocessing.bucket_utils import compute_bucket_dims
 
 logger = get_logger(__name__)
 
@@ -453,12 +454,7 @@ class CacheManager:
                 
                 # Compute bucket dims if missing using AspectBucketDataset's method
                 if not bucket_dims and original_size:
-                    w, h = original_size
-                    aspect_ratio = w / h
-                    bucket_ratios = [(bw/bh, (bw,bh)) for bw,bh in AspectBucketDataset.DEFAULT_BUCKETS]
-                    _, bucket_dims = min(
-                        [(abs(aspect_ratio - ratio), dims) for ratio, dims in bucket_ratios]
-                    )
+                    bucket_dims = compute_bucket_dims(original_size)
                 
                 if original_path:
                     cache_key = self.get_cache_key(original_path)
