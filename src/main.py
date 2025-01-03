@@ -21,7 +21,14 @@ from src.models import StableDiffusionXL
 from src.models.base import ModelType
 from src.training.trainers import BaseRouter, save_checkpoint
 
-logger = get_logger(__name__)
+# Setup enhanced logging first
+logger, tensor_logger = setup_logging(
+    log_dir="outputs/logs",
+    filename="training.log",
+    console_level="INFO",
+    capture_warnings=True
+)
+
 CONFIG_PATH = Path("src/config.yaml")
 
 @contextmanager
@@ -39,7 +46,7 @@ def setup_environment():
 
 def main():
     """Main training entry point."""
-    print("Starting training script...")
+    logger.info("Starting training script...", extra={'keyword': 'start'})
     mp.set_start_method('spawn', force=True)
     
     # Set default distributed training environment variables
@@ -52,10 +59,10 @@ def main():
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
-        logger, _ = setup_logging(config.global_config.logging)
         
         with setup_environment():
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            logger.info(f"Using device: {device}", extra={'success': True})
             
             # Initialize components using config
             model = StableDiffusionXL.from_pretrained(
@@ -92,9 +99,10 @@ def main():
                     config=config,
                     is_final=True
                 )
+                logger.info("Training completed successfully", extra={'keyword': 'success'})
 
     except Exception as e:
-        logger.error("Training failed", exc_info=True)
+        logger.error(f"Training failed: {str(e)}", exc_info=True, extra={'keyword': 'error'})
         sys.exit(1)
 
 if __name__ == "__main__":
