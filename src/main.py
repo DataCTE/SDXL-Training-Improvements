@@ -107,16 +107,7 @@ def main():
             )
             
             trainer.train(num_epochs=config.training.num_epochs)
-            
-            if is_main_process() and config.training.save_final_model:
-                save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    epoch=config.training.num_epochs,
-                    config=config,
-                    is_final=True
-                )
-                logger.info("Training completed successfully", extra={'keyword': 'success'})
+            logger.info("Training completed successfully", extra={'keyword': 'success'})
 
     except Exception as e:
         logger.error(f"Training failed: {str(e)}", exc_info=True, extra={'keyword': 'error'})
