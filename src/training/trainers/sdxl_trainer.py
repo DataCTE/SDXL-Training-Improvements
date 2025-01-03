@@ -2,6 +2,7 @@ from typing import Optional
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
+import json
 
 from src.core.logging import WandbLogger, get_logger
 from src.data.config import Config
@@ -72,7 +73,7 @@ class SDXLTrainer(BaseTrainer):
         logger.info(f"Delegating training to {self.trainer.__class__.__name__}")
         return self.trainer.train(num_epochs)
     
-    def save_checkpoint(self, epoch: int, is_final: bool = False):
+    def save_checkpoint(self, save_path: Path, is_final: bool = False):
         """Save checkpoint in diffusers format using save_pretrained with safetensors."""
         if not is_main_process():
             return
@@ -80,9 +81,10 @@ class SDXLTrainer(BaseTrainer):
         from src.data.utils.paths import convert_windows_path
         
         # Convert base path
-        base_path = "final_checkpoint" if is_final else f"checkpoint_{epoch}"
+        base_path = "final_checkpoint" if is_final else str(save_path)
         path = convert_windows_path(base_path)
         save_path = Path(path)
+        save_path.mkdir(parents=True, exist_ok=True)
         
         try:
             # Save model weights in safetensors format
@@ -101,10 +103,11 @@ class SDXLTrainer(BaseTrainer):
                 _use_new_zipfile_serialization=False
             )
             
-            # Save config
+            # Save config as JSON
             config_path = save_path / "config.json"
             logger.info(f"Saving training config to {config_path}")
-            self.config.save(str(config_path))
+            with open(config_path, 'w') as f:
+                json.dump(self.config.to_dict(), f, indent=2)
             
             logger.info(f"Successfully saved checkpoint to {save_path}")
             

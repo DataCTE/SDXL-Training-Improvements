@@ -295,6 +295,20 @@ class Config:
     global_config: GlobalConfig = field(default_factory=GlobalConfig)
     tag_weighting: TagWeightingConfig = field(default_factory=TagWeightingConfig)
 
+    def to_dict(self) -> Dict:
+        """Convert configuration to dictionary format, maintaining structure."""
+        def _convert_to_dict(obj):
+            if hasattr(obj, '__dict__'):
+                return {k: _convert_to_dict(v) for k, v in asdict(obj).items()}
+            elif isinstance(obj, (list, tuple)):
+                return [_convert_to_dict(x) for x in obj]
+            elif isinstance(obj, dict):
+                return {k: _convert_to_dict(v) for k, v in obj.items()}
+            else:
+                return obj
+
+        return _convert_to_dict(self)
+
     @classmethod
     def from_yaml(cls, path: Union[str, Path]) -> "Config":
         """Load configuration from YAML file with proper fallback hierarchy."""

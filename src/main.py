@@ -115,13 +115,14 @@ def main():
             # Save final model if configured
             if config.training.save_final_model:
                 save_path = Path("outputs/models/final_model")
-                trainer.save_checkpoint(save_path)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                trainer.save_checkpoint(save_path, is_final=True)
                 logger.info(f"Saved final model to {save_path}")
             
             logger.info("Training completed successfully", extra={'keyword': 'success'})
 
     except Exception as e:
-        logger.error(f"Training failed: {str(e)}", exc_info=True, extra={'keyword': 'error'})
+        logger.error(f"Training failed: {str(e)}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":
