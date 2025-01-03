@@ -178,15 +178,22 @@ class TrainingConfig:
 class ImageConfig:
     """Image processing configuration."""
     supported_dims: List[List[int]] = field(default_factory=lambda: [
-        [1024, 1024],  # Square
-        [1024, 1536],  # Portrait
-        [1536, 1024],  # Landscape
+        # Primary SDXL aspect ratios (all within 589k-1.04M pixels)
+        [640, 1536],   # 983k pixels
+        [768, 1344],   # 1032k pixels
+        [832, 1216],   # 1012k pixels
+        [896, 1152],   # 1032k pixels
+        [1024, 1024],  # 1048k pixels (square)
+        [1152, 896],   # 1032k pixels
+        [1216, 832],   # 1012k pixels
+        [1344, 768],   # 1032k pixels
+        [1536, 640],   # 983k pixels
     ])
-    max_aspect_ratio: float = 2.0
-    target_size: List[int] = field(default_factory=lambda: [1024, 1024])
-    max_size: List[int] = field(default_factory=lambda: [1536, 1536])
-    min_size: List[int] = field(default_factory=lambda: [512, 512])
-    bucket_step: int = 64
+    max_aspect_ratio: float = 2.4      # Matches 1536/640
+    target_size: List[int] = field(default_factory=lambda: [1024, 1024])  # SDXL optimal square
+    max_size: List[int] = field(default_factory=lambda: [1536, 1536])     # SDXL max dimension
+    min_size: List[int] = field(default_factory=lambda: [384, 384])       # SDXL minimum useful size
+    bucket_step: int = 64              # Required for SDXL to avoid 6N IndexError
 
 @dataclass
 class CacheConfig:
