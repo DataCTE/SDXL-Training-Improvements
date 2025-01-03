@@ -234,3 +234,33 @@ class CacheManager:
     def get_image_tags_path(self) -> Path:
         """Get path for image tags file."""
         return self.get_tag_index_path() / "image_tags.json"
+
+    def load_tag_index(self) -> Optional[Dict[str, Any]]:
+        """Load tag index from split files."""
+        try:
+            # Load statistics
+            stats_path = self.get_tag_statistics_path()
+            if not stats_path.exists():
+                return None
+            
+            with open(stats_path, 'r', encoding='utf-8') as f:
+                statistics_data = json.load(f)
+            
+            # Load image tags
+            tags_path = self.get_image_tags_path()
+            if tags_path.exists():
+                with open(tags_path, 'r', encoding='utf-8') as f:
+                    image_tags_data = json.load(f)
+            else:
+                image_tags_data = {"images": {}}
+            
+            # Combine data
+            return {
+                "metadata": statistics_data["metadata"],
+                "statistics": statistics_data["statistics"],
+                "images": image_tags_data["images"]
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to load tag index: {e}")
+            return None
