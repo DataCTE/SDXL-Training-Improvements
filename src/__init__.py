@@ -42,15 +42,12 @@ from .training import (
     get_karras_sigmas,
     get_sigmas,
     get_scheduler_parameters,
-    get_add_time_ids,   
-    save_checkpoint
+    get_add_time_ids
 )
 
 __version__ = "0.1.0"
 
-from typing import List
-
-__all__: List[str] = [
+__all__ = [
     # Core
     "DataType",
     "ModelWeightDtypes",
@@ -91,6 +88,5 @@ __all__: List[str] = [
     "get_karras_sigmas",
     "get_sigmas",
     "get_scheduler_parameters",
-    "get_add_time_ids",
-    "save_checkpoint"
+    "get_add_time_ids"
 ]
