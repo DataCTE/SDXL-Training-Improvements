@@ -71,10 +71,7 @@ def get_wsl_drive_mount() -> Optional[str]:
     return None
 
 def load_data_from_directory(data_dir: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
-    """Load image paths and captions from data directory.
-    
-    Returns copies of paths and captions to prevent dataset corruption.
-    """
+    """Load image paths and captions from data directory."""
     # Handle single directory or list of directories
     if isinstance(data_dir, str):
         data_dir = [data_dir]
@@ -84,37 +81,40 @@ def load_data_from_directory(data_dir: Union[str, List[str]]) -> Tuple[List[str]
     captions = []
     
     for directory in data_dir:
-        dir_image_paths = []
-        # Collect image files for this directory
-        for ext in ['*.jpg', '*.jpeg', '*.png', '*.webp']:
-            # Use str() to create new string objects
-            dir_image_paths.extend([str(p) for p in glob.glob(os.path.join(directory, ext))])
+        logger.info(f"Processing directory: {directory}")
         
-        # Load corresponding captions for this directory's images
-        dir_captions = []
+        # Collect all image files for this directory
+        dir_image_paths = []
+        for ext in ['*.jpg', '*.jpeg', '*.png', '*.webp']:
+            pattern = os.path.join(directory, ext)
+            found_paths = glob.glob(pattern)
+            dir_image_paths.extend([str(p) for p in found_paths])
+            logger.debug(f"Found {len(found_paths)} files with extension {ext}")
+        
+        logger.info(f"Found {len(dir_image_paths)} total images in {directory}")
+        
+        # Process each image in this directory
         for img_path in dir_image_paths:
             txt_path = os.path.splitext(img_path)[0] + '.txt'
             try:
                 with open(txt_path, 'r', encoding='utf-8') as f:
-                    # Create new string object for caption
                     caption = str(f.read().strip())
-                    dir_captions.append(caption)
-                # Only add copies of paths if caption was successfully loaded
-                image_paths.append(str(img_path))
-                captions.append(caption)
+                    # Add to main lists
+                    image_paths.append(str(img_path))
+                    captions.append(caption)
             except Exception as e:
                 logger.warning(f"Failed to load caption for {img_path}: {e}")
                 continue
     
+    # Validate final results
     if not image_paths:
-        logger.error("No valid image-caption pairs found in directories: %s", data_dir)
+        logger.error(f"No valid image-caption pairs found in directories: {data_dir}")
         raise ValueError("No valid image-caption pairs found")
     
-    # Create final copies of lists to ensure complete isolation
-    image_paths = image_paths.copy()
-    captions = captions.copy()
+    # Create final copies
+    final_image_paths = image_paths.copy()
+    final_captions = captions.copy()
     
-    logger.info(f"Loaded {len(image_paths)} image-caption pairs from {len(data_dir)} directories")
+    logger.info(f"Successfully loaded {len(final_image_paths)} image-caption pairs from {len(data_dir)} directories")
     
-    # Return copies of everything to ensure complete isolation
-    return image_paths, captions
+    return final_image_paths, final_captions
