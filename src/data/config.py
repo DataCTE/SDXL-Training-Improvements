@@ -143,56 +143,92 @@ class Config:
 
     @classmethod
     def from_yaml(cls, path: Union[str, Path]) -> "Config":
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file with proper fallback hierarchy."""
         path = Path(path)
         if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
+            logger.warning(f"Config file not found: {path}, using default values")
+            return cls()
             
         try:
-            # Load raw YAML first
+            # Load raw YAML
             with open(path) as f:
                 raw_config = yaml.safe_load(f)
             
-            # Create default config
+            # Create default config as fallback
             config = cls()
             
-            # Update model config
+            # Helper function to update config with YAML values
+            def update_config(config_obj, yaml_data):
+                if not yaml_data:
+                    return config_obj
+                
+                # Get default values
+                default_values = asdict(config_obj)
+                
+                # Update only values that exist in YAML
+                for key, value in yaml_data.items():
+                    if key in default_values:
+                        if isinstance(value, dict) and hasattr(config_obj, key):
+                            # Recursively update nested configs
+                            nested_obj = getattr(config_obj, key)
+                            if hasattr(nested_obj, '__dict__'):
+                                setattr(config_obj, key, update_config(nested_obj, value))
+                        else:
+                            setattr(config_obj, key, value)
+                
+                return config_obj
+
+            # Update each config section, maintaining defaults for missing values
             if 'model' in raw_config:
-                config.model = ModelConfig(**raw_config['model'])
+                config.model = update_config(config.model, raw_config['model'])
             
-            # Update optimizer config
             if 'optimizer' in raw_config:
-                config.optimizer = OptimizerConfig(**raw_config['optimizer'])
+                config.optimizer = update_config(config.optimizer, raw_config['optimizer'])
             
-            # Update training config
             if 'training' in raw_config:
                 training_data = raw_config['training'].copy()
                 if 'method_config' in training_data:
                     scheduler_data = training_data['method_config'].get('scheduler', {})
-                    scheduler = SchedulerConfig()
-                    scheduler.rescale_betas_zero_snr = scheduler_data.get('rescale_betas_zero_snr', True)
-                    training_data['method_config'] = MethodConfig(scheduler=scheduler)
-                config.training = TrainingConfig(**training_data)
+                    config.training.method_config.scheduler = update_config(
+                        config.training.method_config.scheduler,
+                        scheduler_data
+                    )
+                    del training_data['method_config']
+                config.training = update_config(config.training, training_data)
             
-            # Update data config
             if 'data' in raw_config:
-                config.data = DataConfig(**raw_config['data'])
+                config.data = update_config(config.data, raw_config['data'])
             
-            # Update global config
             if 'global_config' in raw_config:
                 global_data = raw_config['global_config']
-                cache_config = CacheConfig(**global_data.get('cache', {}))
-                logging_config = LoggingConfig(**global_data.get('logging', {}))
-                image_config = ImageConfig(**global_data.get('image', {}))
-                config.global_config = GlobalConfig(
-                    cache=cache_config,
-                    logging=logging_config,
-                    image=image_config
+                if 'cache' in global_data:
+                    config.global_config.cache = update_config(
+                        config.global_config.cache,
+                        global_data['cache']
+                    )
+                if 'logging' in global_data:
+                    config.global_config.logging = update_config(
+                        config.global_config.logging,
+                        global_data['logging']
+                    )
+                if 'image' in global_data:
+                    config.global_config.image = update_config(
+                        config.global_config.image,
+                        global_data['image']
+                    )
+            
+            if 'tag_weighting' in raw_config:
+                config.tag_weighting = update_config(
+                    config.tag_weighting,
+                    raw_config['tag_weighting']
                 )
             
-            # Update tag weighting config
-            if 'tag_weighting' in raw_config:
-                config.tag_weighting = TagWeightingConfig(**raw_config['tag_weighting'])
+            # Log which values came from YAML vs defaults
+            if logger.isEnabledFor(logging.DEBUG):
+                yaml_keys = set(_flatten_dict(raw_config).keys())
+                default_keys = set(_flatten_dict(asdict(cls())).keys())
+                logger.debug(f"Values from YAML: {yaml_keys}")
+                logger.debug(f"Using defaults for: {default_keys - yaml_keys}")
             
             return config
             
@@ -200,22 +236,13 @@ class Config:
             logger.error(f"Failed to load config from {path}: {str(e)}", exc_info=True)
             raise
 
-    def to_dict(self) -> Dict:
-        """Convert Config to dictionary."""
-        return {
-            'model': asdict(self.model),
-            'optimizer': asdict(self.optimizer),
-            'training': {
-                **asdict(self.training),
-                'method_config': {
-                    'scheduler': self.training.method_config.scheduler.to_dict()
-                }
-            },
-            'data': asdict(self.data),
-            'global_config': {
-                'cache': asdict(self.global_config.cache),
-                'logging': asdict(self.global_config.logging),
-                'image': asdict(self.global_config.image)
-            },
-            'tag_weighting': asdict(self.tag_weighting)
-        }
+def _flatten_dict(d: Dict, parent_key: str = '', sep: str = '.') -> Dict:
+    """Helper function to flatten nested dictionaries for logging."""
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(_flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)

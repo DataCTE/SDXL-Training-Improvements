@@ -3,8 +3,9 @@ import os
 import platform
 import re
 from pathlib import Path, PureWindowsPath
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Tuple
 from src.core.logging import get_logger, LogConfig
+import glob
 
 logger = get_logger(__name__)
 
@@ -68,3 +69,25 @@ def get_wsl_drive_mount() -> Optional[str]:
         if os.path.isdir(mp):
             return mp
     return None
+
+def load_data_from_directory(data_dir: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
+    """Load image paths and captions from data directory."""
+    # Handle single directory or list of directories
+    if isinstance(data_dir, str):
+        data_dir = [data_dir]
+        
+    image_paths = []
+    captions = []
+    
+    for directory in data_dir:
+        # Collect image files
+        for ext in ['*.jpg', '*.jpeg', '*.png', '*.webp']:
+            image_paths.extend(glob.glob(os.path.join(directory, ext)))
+        
+        # Load corresponding captions (assuming same name with .txt extension)
+        for img_path in image_paths:
+            txt_path = os.path.splitext(img_path)[0] + '.txt'
+            with open(txt_path, 'r', encoding='utf-8') as f:
+                captions.append(f.read().strip())
+    
+    return image_paths, captions
