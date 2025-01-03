@@ -1,6 +1,6 @@
 """Weights & Biases logging utilities."""
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, TYPE_CHECKING
 import functools
 from functools import wraps
 
@@ -10,7 +10,10 @@ from PIL import Image
 import logging
 from src.core.logging.base import LogConfig
 from src.data.config import Config
-from src.training.optimizers.base import BaseOptimizer
+
+# Use TYPE_CHECKING for type hints only
+if TYPE_CHECKING:
+    from src.training.optimizers.base import BaseOptimizer
 
 logger = logging.getLogger(__name__)
 
