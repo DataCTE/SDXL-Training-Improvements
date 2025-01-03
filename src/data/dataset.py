@@ -616,26 +616,48 @@ def create_dataset(
     verify_cache: bool = True
 ) -> AspectBucketDataset:
     """Create dataset using config values with proper fallbacks."""
+    logger.info("Creating dataset...")
     
-    # Initialize cache manager with config
-    cache_manager = CacheManager(
-        cache_dir=config.global_config.cache.cache_dir,
-        config=config,
-        max_cache_size=config.global_config.cache.max_cache_size
-    )
-    
-    # Load data paths from config
-    image_paths, captions = load_data_from_directory(config.data.train_data_dir)
-    
-    # Verify and rebuild cache if needed
-    if verify_cache:
-        cache_manager.verify_and_rebuild_cache(image_paths, captions)
-    
-    # Create dataset with all components
-    return AspectBucketDataset(
-        config=config,
-        image_paths=image_paths,
-        captions=captions,
-        model=model,
-        cache_manager=cache_manager
-    )
+    try:
+        # Initialize cache manager with config
+        cache_manager = CacheManager(
+            cache_dir=config.global_config.cache.cache_dir,
+            config=config,
+            max_cache_size=config.global_config.cache.max_cache_size
+        )
+        
+        # Load data paths from config (returns copies)
+        logger.info(f"Loading data from: {config.data.train_data_dir}")
+        image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+        
+        # Validate data
+        if len(image_paths) != len(captions):
+            raise ValueError(
+                f"Mismatch between number of images ({len(image_paths)}) "
+                f"and captions ({len(captions)})"
+            )
+        
+        # Verify and rebuild cache if needed
+        if verify_cache:
+            logger.info("Verifying cache...")
+            cache_manager.verify_and_rebuild_cache(image_paths, captions)
+        
+        # Create dataset with all components
+        dataset = AspectBucketDataset(
+            config=config,
+            image_paths=image_paths,  # Extra safety copy
+            captions=captions,        # Extra safety copy
+            model=model,
+            cache_manager=cache_manager
+        )
+        
+        logger.info(
+            f"Dataset created successfully with {len(dataset)} samples "
+            f"in {len(dataset.buckets)} buckets"
+        )
+        
+        return dataset
+        
+    except Exception as e:
+        logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
+        raise
