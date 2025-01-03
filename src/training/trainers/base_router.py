@@ -15,8 +15,8 @@ class BaseRouter(ABC):
     # Map model types to their trainer modules
     TRAINER_MAP = {
         ModelType.SDXL: "src.training.trainers.sdxl_trainer",
-        ModelType.SD: "src.training.trainers.sd_trainer",
-        ModelType.IF: "src.training.trainers.if_trainer",
+        #ModelType.SD: "src.training.trainers.sd_trainer",
+        #ModelType.IF: "src.training.trainers.if_trainer",
         # Add more model types as needed
     }
     
