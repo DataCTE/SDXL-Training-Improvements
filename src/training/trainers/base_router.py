@@ -5,10 +5,11 @@ from importlib import import_module
 from src.core.logging import WandbLogger, get_logger
 from src.data.config import Config
 from src.models.base import ModelType
+from abc import ABC, abstractmethod
 
 logger = get_logger(__name__)
 
-class BaseRouter:
+class BaseRouter(ABC):
     """Base router class that dynamically handles training based on model type."""
     
     # Map model types to their trainer modules
@@ -95,13 +96,7 @@ class BaseRouter:
             logger.error(f"Training failed: {str(e)}", exc_info=True)
             raise
 
+    @abstractmethod
     def save_checkpoint(self, epoch: int, is_final: bool = False):
-        """Save training checkpoint."""
-        from src.training.trainers import save_checkpoint
-        save_checkpoint(
-            model=self.model,
-            optimizer=self.optimizer,
-            epoch=epoch,
-            config=self.config,
-            is_final=is_final
-        ) 
+        """Save checkpoint implementation specific to each model architecture."""
+        pass 
