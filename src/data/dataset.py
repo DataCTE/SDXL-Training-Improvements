@@ -370,104 +370,97 @@ class AspectBucketDataset(Dataset):
         return torch.tensor([time_ids], device=device, dtype=dtype)
 
     def _precompute_latents(self) -> None:
-        """Process uncached images and store their latents."""
-        total_images = len(self.image_paths)
-        
-        # Get list of paths that need processing from cache manager
-        uncached_paths = self.cache_manager.get_uncached_paths(self.image_paths)
-        
-        if not uncached_paths:
-            logger.info("All images already in cache. Skipping preprocessing.")
-            return
-        
-        logger.info(f"Found {len(uncached_paths)} uncached images. Starting preprocessing...")
-        
-        # Get corresponding captions for uncached paths
-        uncached_captions = [self.captions[self.image_paths.index(p)] for p in uncached_paths]
-        
-        # Process in chunks
-        chunk_size = 1000
-      
-        
-        with tqdm(total=len(uncached_paths), desc="Processing images") as pbar:
-            for chunk_start in range(0, len(uncached_paths), chunk_size):
-                chunk_end = min(chunk_start + chunk_size, len(uncached_paths))
-                chunk_paths = uncached_paths[chunk_start:chunk_end]
-                chunk_captions = uncached_captions[chunk_start:chunk_end]
-                
-                # Process in smaller batches for memory efficiency
-                batch_size = 8
-                for batch_start in range(0, len(chunk_paths), batch_size):
-                    batch_end = min(batch_start + batch_size, len(chunk_paths))
-                    batch_paths = chunk_paths[batch_start:batch_end]
-                    batch_captions = chunk_captions[batch_start:batch_end]
-                    
-                    try:
-                        # Load and process images
-                        for path, caption in zip(batch_paths, batch_captions):
-                            # Load image
-                            img = Image.open(path).convert('RGB')
-                            img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
-                            img_tensor = img_tensor.permute(2, 0, 1).to(self.device)
-                            
-                            # Get bucket dimensions
-                            bucket_dims = compute_bucket_dims(img.size, self.buckets)
-                            
-                            # Encode with VAE
-                            with torch.no_grad():
-                                vae_latents = self.model.vae.encode(
-                                    img_tensor.unsqueeze(0)
-                                ).latent_dist.sample()
-                                vae_latents = vae_latents * self.model.vae.config.scaling_factor
-                            
-                            # Encode text
-                            text_output = self.encode_prompt(
-                                batch={"text": [caption]},
-                                proportion_empty_prompts=0.0
-                            )
-                            
-                            # Compute time ids
-                            time_ids = self._compute_time_ids(
-                                original_size=img.size,
-                                crops_coords_top_left=(0, 0),
-                                target_size=(bucket_dims[0]*8, bucket_dims[1]*8)
-                            )
-                            
-                            # Save to cache
-                            self.cache_manager.save_latents(
-                                tensors={
-                                    "vae_latents": vae_latents.squeeze(0),
-                                    "prompt_embeds": text_output["prompt_embeds"][0],
-                                    "pooled_prompt_embeds": text_output["pooled_prompt_embeds"][0],
-                                    "time_ids": time_ids
-                                },
-                                path=path,
-                                metadata={
-                                    "original_size": img.size,
-                                    "crop_coords": (0, 0),
-                                    "target_size": (bucket_dims[0]*8, bucket_dims[1]*8),
-                                    "text": caption
-                                },
-                                bucket_dims=bucket_dims
-                            )
-                            
-                            pbar.update(1)
-                            
-                    except Exception as e:
-                        logger.error(f"Failed to process batch: {e}")
-                        continue
-                    
-                    # Clear CUDA cache periodically
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+        """Precompute and cache VAE latents for all images."""
+        try:
+            # Get uncached paths
+            uncached_paths = self.cache_manager.get_uncached_paths(self.image_paths)
+            total_images = len(self.image_paths)
             
-            # Log final statistics
-            logger.info(
-                f"\nPrecomputing complete:\n"
-                f"- Total images: {total_images}\n"
-                f"- Already cached: {total_images - len(uncached_paths)}\n"
-                f"- Processed: {len(uncached_paths)}\n"
-            )
+            if uncached_paths:
+                # Process in batches
+                batch_size = self.config.training.batch_size
+                
+                with tqdm(total=len(uncached_paths), desc="Precomputing latents") as pbar:
+                    for batch_start in range(0, len(uncached_paths), batch_size):
+                        batch_end = min(batch_start + batch_size, len(uncached_paths))
+                        batch_paths = uncached_paths[batch_start:batch_end]
+                        batch_captions = [self.captions[self.image_paths.index(p)] for p in batch_paths]
+                        
+                        try:
+                            # Load and process images
+                            for path, caption in zip(batch_paths, batch_captions):
+                                # Load image
+                                img = Image.open(path).convert('RGB')
+                                
+                                # Get bucket dimensions
+                                bucket_dims = compute_bucket_dims(img.size, self.buckets)
+                                target_size = (bucket_dims[0]*8, bucket_dims[1]*8)
+                                
+                                # Resize image to bucket dimensions
+                                img = img.resize(target_size, Image.Resampling.LANCZOS)
+                                
+                                # Convert to tensor
+                                img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
+                                img_tensor = img_tensor.permute(2, 0, 1).to(self.device)
+                                
+                                # Encode with VAE
+                                with torch.no_grad():
+                                    vae_latents = self.model.vae.encode(
+                                        img_tensor.unsqueeze(0)
+                                    ).latent_dist.sample()
+                                    vae_latents = vae_latents * self.model.vae.config.scaling_factor
+                                
+                                # Encode text
+                                text_output = self.encode_prompt(
+                                    batch={"text": [caption]},
+                                    proportion_empty_prompts=0.0
+                                )
+                                
+                                # Compute time ids
+                                time_ids = self._compute_time_ids(
+                                    original_size=img.size,
+                                    crops_coords_top_left=(0, 0),
+                                    target_size=(bucket_dims[0]*8, bucket_dims[1]*8)
+                                )
+                                
+                                # Save to cache
+                                self.cache_manager.save_latents(
+                                    tensors={
+                                        "vae_latents": vae_latents.squeeze(0),
+                                        "prompt_embeds": text_output["prompt_embeds"][0],
+                                        "pooled_prompt_embeds": text_output["pooled_prompt_embeds"][0],
+                                        "time_ids": time_ids
+                                    },
+                                    path=path,
+                                    metadata={
+                                        "original_size": img.size,
+                                        "crop_coords": (0, 0),
+                                        "target_size": (bucket_dims[0]*8, bucket_dims[1]*8),
+                                        "text": caption
+                                    },
+                                    bucket_dims=bucket_dims
+                                )
+                                
+                                pbar.update(1)
+                                
+                        except Exception as e:
+                            logger.error(f"Failed to process batch: {e}")
+                            continue
+                        
+                        # Clear CUDA cache periodically
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                
+                # Log final statistics
+                logger.info(
+                    f"\nPrecomputing complete:\n"
+                    f"- Total images: {total_images}\n"
+                    f"- Already cached: {total_images - len(uncached_paths)}\n"
+                    f"- Processed: {len(uncached_paths)}\n"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to precompute latents: {e}")
 
     def _process_image_tensor(
         self, 

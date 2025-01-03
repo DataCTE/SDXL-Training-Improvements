@@ -30,9 +30,11 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     # Convert to sorted list
     buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))
     
-    logger.info("\nConfigured buckets:")
-    for w, h in buckets:
-        logger.info(f"- {w*8}x{h*8} (ratio {w/h:.2f})")
+    # Only log buckets once during generation
+    if logger.isEnabledFor(logging.INFO):
+        logger.info("\nConfigured buckets:")
+        for w, h in buckets:
+            logger.info(f"- {w*8}x{h*8} (ratio {w/h:.2f})")
     
     return buckets
 
