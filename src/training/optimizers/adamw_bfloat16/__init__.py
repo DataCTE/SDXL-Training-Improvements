@@ -53,12 +53,17 @@ class AdamWBF16(BaseOptimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         defaults = dict(betas=betas, eps=eps, weight_decay=weight_decay, lr=lr)
+        self._param_groups = []
         super().__init__(params, defaults)
 
     @property
     def param_groups(self) -> Iterator[dict]:
         """Returns an iterator over parameter groups."""
         return iter(self._param_groups)
+
+    @param_groups.setter
+    def param_groups(self, value):
+        self._param_groups = value
 
     def state_dict(self) -> Dict[str, Any]:
         """Returns the optimizer state as a dict."""
