@@ -19,7 +19,7 @@ from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.models import StableDiffusionXL
 from src.models.base import ModelType
-from src.training.trainers import BaseRouter, save_checkpoint
+from src.training.trainers import BaseRouter
 
 # Import our custom optimizers
 from src.training.optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
