@@ -97,7 +97,7 @@ def main():
             wandb_logger = WandbLogger(config) if config.global_config.logging.use_wandb else None
 
             # Use BaseRouter for architecture-agnostic training
-            trainer = BaseRouter(
+            trainer = BaseRouter.create(
                 model=model,
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,
