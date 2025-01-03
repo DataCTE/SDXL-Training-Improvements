@@ -1,5 +1,5 @@
 """Bucket calculation utilities for SDXL training."""
-from typing import List, Tuple, Dict, TYPE_CHECKING
+from typing import List, Tuple, Dict, TYPE_CHECKING, Optional
 import logging
 from collections import defaultdict
 from tqdm import tqdm
@@ -16,8 +16,21 @@ def get_bucket_dims_from_latents(latent_shape: Tuple[int, ...]) -> Tuple[int, in
     _, h, w = latent_shape
     return (w, h)  # Return latent dimensions directly, don't multiply by 8
 
-def generate_buckets(config: Config) -> List[Tuple[int, int]]:
+def generate_buckets(config: Optional[Config]) -> List[Tuple[int, int]]:
     """Generate bucket sizes in VAE latent space (H/8, W/8)."""
+    if not config:
+        # Return default buckets if no config provided
+        default_buckets = [
+            (64, 64),    # 512x512 
+            (64, 96),    # 512x768
+            (96, 64),    # 768x512
+            (128, 128),  # 1024x1024
+            (128, 192),  # 1024x1536
+            (192, 128),  # 1536x1024
+        ]
+        logger.warning("No config provided, using default buckets")
+        return default_buckets
+        
     buckets = []
     
     # Convert config dimensions to latent space (divide by 8)

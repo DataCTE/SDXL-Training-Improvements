@@ -37,22 +37,8 @@ class CacheManager:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache_size = max_cache_size
-        self.device = device
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
-        
-        # Initialize buckets before rebuild_cache_index is called
-        self.buckets = generate_buckets(config) if config else []
-        
-        # Add tag cache setup
-        self.tags_dir = self.cache_dir / "tags"
-        self.tags_dir.mkdir(exist_ok=True)
-        self.tag_index_path = self.tags_dir / "tag_weights_index.json"
-        self.tag_cache = {}  # Memory cache for tag weights
-        
-        # Now safe to call rebuild_cache_index since buckets is initialized
-        self.rebuild_cache_index()
-        
-        logger.info(f"Cache initialized at {self.cache_dir}")
         
         # Core setup
         self._lock = threading.Lock()
@@ -62,6 +48,15 @@ class CacheManager:
         self.metadata_dir = self.cache_dir / "metadata"
         self.latents_dir.mkdir(exist_ok=True)
         self.metadata_dir.mkdir(exist_ok=True)
+        
+        # Add tag cache setup
+        self.tags_dir = self.cache_dir / "tags"
+        self.tags_dir.mkdir(exist_ok=True)
+        self.tag_index_path = self.tags_dir / "tag_weights_index.json"
+        self.tag_cache = {}  # Memory cache for tag weights
+        
+        # Initialize buckets before rebuild_cache_index is called
+        self.buckets = generate_buckets(config)  # Will use default buckets if config is None
         
         # Initialize cache state
         self.index_path = self.cache_dir / "cache_index.json"
@@ -77,7 +72,7 @@ class CacheManager:
                 logger.warning(f"Failed to load cache index: {e}. Rebuilding...")
                 self.rebuild_cache_index()
         
-        logger.info(f"Cache initialized at {self.cache_dir}")
+        logger.info(f"Cache initialized at {self.cache_dir} with {len(self.buckets)} buckets")
 
     # Cache Initialization Methods
     def _initialize_cache(self):
