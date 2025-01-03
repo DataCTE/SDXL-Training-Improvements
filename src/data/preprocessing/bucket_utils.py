@@ -16,23 +16,24 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     image_config = config.global_config.image
     buckets = []
     
-    # Add supported dimensions from config
+    # Add supported dimensions from config (converting to latent space dimensions)
     for dims in image_config.supported_dims:
-        buckets.append((dims[0] // 8, dims[1] // 8))
+        # Convert pixel dimensions to latent dimensions (divide by 8)
+        w, h = dims[0] // 8, dims[1] // 8
+        if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
+            buckets.append((w, h))
+            # Also add the flipped dimension if it's valid
+            if h != w and validate_aspect_ratio(h, w, image_config.max_aspect_ratio):
+                buckets.append((h, w))
     
-    # Add intermediate buckets based on bucket_step
-    step = image_config.bucket_step // 8
-    min_w, min_h = image_config.min_size[0] // 8, image_config.min_size[1] // 8
-    max_w, max_h = image_config.max_size[0] // 8, image_config.max_size[1] // 8
+    # Sort buckets by area and width for consistent ordering
+    buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))
     
-    for w in range(min_w, max_w + 1, step):
-        for h in range(min_h, max_h + 1, step):
-            if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
-                bucket = (w, h)
-                if bucket not in buckets:
-                    buckets.append(bucket)
+    logger.info("\nConfigured buckets:")
+    for w, h in buckets:
+        logger.info(f"- {w*8}x{h*8} (ratio {w/h:.2f})")
     
-    return sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))
+    return buckets
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
     """Find closest bucket for given dimensions."""

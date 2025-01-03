@@ -637,19 +637,32 @@ def create_dataset(
                 f"and captions ({len(captions)})"
             )
         
-        # Verify and rebuild cache if needed
+        # Create dataset instance first (needed for VAE encoding)
+        dataset = AspectBucketDataset(
+            config=config,
+            image_paths=image_paths,
+            captions=captions,
+            model=model,
+            cache_manager=cache_manager
+        )
+        
+        # Verify cache and get uncached paths
         if verify_cache:
             logger.info("Verifying cache...")
             cache_manager.verify_and_rebuild_cache(image_paths, captions)
         
-        # Create dataset with all components
-        dataset = AspectBucketDataset(
-            config=config,
-            image_paths=image_paths,  # Extra safety copy
-            captions=captions,        # Extra safety copy
-            model=model,
-            cache_manager=cache_manager
-        )
+        # Precompute latents for uncached images
+        logger.info("Checking for uncached images...")
+        uncached_paths = cache_manager.get_uncached_paths(image_paths)
+        if uncached_paths:
+            logger.info(f"Found {len(uncached_paths)} uncached images. Starting precomputation...")
+            dataset._precompute_latents()  # This will handle the actual precomputation
+        else:
+            logger.info("All images are cached. Skipping precomputation.")
+        
+        # Rebuild buckets after precomputation
+        dataset.bucket_indices = dataset._group_images_by_bucket()
+        dataset._log_bucket_statistics()
         
         logger.info(
             f"Dataset created successfully with {len(dataset)} samples "
