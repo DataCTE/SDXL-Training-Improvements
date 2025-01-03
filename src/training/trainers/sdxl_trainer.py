@@ -5,12 +5,12 @@ from pathlib import Path
 
 from src.core.logging import WandbLogger, get_logger
 from src.data.config import Config
-from src.training.trainers.base_router import BaseRouter
+from src.training.trainers.base_router import BaseTrainer
 from src.core.distributed import is_main_process
 
 logger = get_logger(__name__)
 
-class SDXLTrainer(BaseRouter):
+class SDXLTrainer(BaseTrainer):
     """SDXL-specific trainer that handles model saving and training method delegation."""
     
     def __init__(
