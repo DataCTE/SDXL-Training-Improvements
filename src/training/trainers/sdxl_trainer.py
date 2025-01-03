@@ -36,6 +36,32 @@ class SDXLTrainer(BaseTrainer):
         # Get gradient accumulation steps from config
         self.gradient_accumulation_steps = config.training.gradient_accumulation_steps
         
+        # Initialize specific training method
+        if config.training.method.lower() == "ddpm":
+            from .methods.ddpm_trainer import DDPMTrainer
+            self.trainer = DDPMTrainer(
+                model=model,
+                optimizer=optimizer,
+                train_dataloader=train_dataloader,
+                device=device,
+                wandb_logger=wandb_logger,
+                config=config,
+                **kwargs
+            )
+        elif config.training.method.lower() == "flow_matching":
+            from .methods.flow_matching_trainer import FlowMatchingTrainer
+            self.trainer = FlowMatchingTrainer(
+                model=model,
+                optimizer=optimizer,
+                train_dataloader=train_dataloader,
+                device=device,
+                wandb_logger=wandb_logger,
+                config=config,
+                **kwargs
+            )
+        else:
+            raise ValueError(f"Unsupported training method: {config.training.method}")
+    
     def train(self, num_epochs: int):
         """Delegate training to the specific trainer implementation."""
         if not hasattr(self, 'trainer'):
