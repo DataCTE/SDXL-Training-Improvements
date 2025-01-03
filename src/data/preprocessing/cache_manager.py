@@ -33,14 +33,29 @@ class CacheManager:
             max_cache_size: Maximum number of entries to keep
             device: Default device for loading tensors
         """
-        # Core setup
-        self.max_cache_size = max_cache_size
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._lock = threading.Lock()
-        
-        # Directory setup
-        self.cache_dir = convert_windows_path(cache_dir)
+        # Initialize base attributes first
+        self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.max_cache_size = max_cache_size
+        self.device = device
+        self.config = config
+        
+        # Initialize buckets before rebuild_cache_index is called
+        self.buckets = generate_buckets(config) if config else []
+        
+        # Add tag cache setup
+        self.tags_dir = self.cache_dir / "tags"
+        self.tags_dir.mkdir(exist_ok=True)
+        self.tag_index_path = self.tags_dir / "tag_weights_index.json"
+        self.tag_cache = {}  # Memory cache for tag weights
+        
+        # Now safe to call rebuild_cache_index since buckets is initialized
+        self.rebuild_cache_index()
+        
+        logger.info(f"Cache initialized at {self.cache_dir}")
+        
+        # Core setup
+        self._lock = threading.Lock()
         
         # Create subdirectories
         self.latents_dir = self.cache_dir / "latents"
@@ -63,15 +78,6 @@ class CacheManager:
                 self.rebuild_cache_index()
         
         logger.info(f"Cache initialized at {self.cache_dir}")
-        
-        # Add tag cache setup
-        self.tags_dir = self.cache_dir / "tags"
-        self.tags_dir.mkdir(exist_ok=True)
-        self.tag_index_path = self.tags_dir / "tag_weights_index.json"
-        self.tag_cache = {}  # Memory cache for tag weights
-
-        self.config = config
-        self.buckets = generate_buckets(config) if config else []
 
     # Cache Initialization Methods
     def _initialize_cache(self):
