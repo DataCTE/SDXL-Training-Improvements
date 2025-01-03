@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     """Generate bucket dimensions from config in pixel space."""
     image_config = config.global_config.image
-    buckets = set()  # Use set to prevent duplicates
+    buckets = []  # Change from set to list to maintain order
     
     # Work in pixel space first (no division by 8)
     for dims in image_config.supported_dims:
@@ -29,13 +29,15 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
             if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
                 # Store in latent space (divide by 8 at final step)
                 w_latent, h_latent = w // 8, h // 8
-                buckets.add((w_latent, h_latent))
-                # Also add the flipped dimension if valid
+                buckets.append((w_latent, h_latent))
+                # Also add the flipped dimension if valid and not already present
                 if h != w and validate_aspect_ratio(h, w, image_config.max_aspect_ratio):
-                    buckets.add((h_latent, w_latent))
+                    flipped = (h_latent, w_latent)
+                    if flipped not in buckets:  # Only add if not already present
+                        buckets.append(flipped)
     
-    # Convert to sorted list (sort by area then width)
-    buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))
+    # No sorting needed - maintain order from config
+    # buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))  # Remove this line
     
     # Log the actual pixel dimensions for verification
     if logger.isEnabledFor(logging.INFO):
