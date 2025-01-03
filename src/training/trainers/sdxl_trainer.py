@@ -7,6 +7,7 @@ from src.core.logging import WandbLogger, get_logger
 from src.data.config import Config
 from src.training.trainers.base_router import BaseRouter
 from src.core.distributed import is_main_process
+from src.data.utils.paths import convert_windows_path
 
 logger = get_logger(__name__)
 
@@ -47,24 +48,19 @@ class SDXLTrainer(BaseRouter):
         return self.trainer.train(num_epochs)
     
     def save_checkpoint(self, epoch: int, is_final: bool = False):
-        """Save checkpoint in diffusers format using save_pretrained with safetensors."""
+        """Save checkpoint using model's native save functionality."""
         if not is_main_process():
             return
             
-        from src.data.utils.paths import convert_windows_path
-        
         # Convert base path
         base_path = "final_checkpoint" if is_final else f"checkpoint_{epoch}"
         path = convert_windows_path(base_path)
         save_path = Path(path)
         
         try:
-            # Save model weights in safetensors format
+            # Save model using its native save method
             logger.info(f"Saving model checkpoint to {save_path}")
-            self.model.save_pretrained(
-                str(save_path),
-                safe_serialization=True
-            )
+            self.model.save_pretrained(str(save_path), safe_serialization=True)
             
             # Save optimizer state
             optimizer_path = save_path / "optimizer.pt"

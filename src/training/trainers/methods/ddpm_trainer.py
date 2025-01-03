@@ -220,13 +220,7 @@ class DDPMTrainer(SDXLTrainer):
                     if avg_epoch_loss < best_loss:
                         best_loss = avg_epoch_loss
                         if is_main_process():
-                            save_checkpoint(
-                                model=self.model,
-                                optimizer=self.optimizer,
-                                epoch=epoch + 1,
-                                config=self.config,
-                                is_final=False
-                            )
+                            self.save_checkpoint(epoch + 1, is_final=False)
                             logger.info(f"Saved checkpoint for epoch {epoch + 1} with loss {best_loss:.4f}")
                     
                     # Clear CUDA cache between epochs
@@ -241,13 +235,7 @@ class DDPMTrainer(SDXLTrainer):
             
             # Save final checkpoint
             if is_main_process():
-                save_checkpoint(
-                    model=self.model,
-                    optimizer=self.optimizer,
-                    epoch=num_epochs,
-                    config=self.config,
-                    is_final=True
-                )
+                self.save_checkpoint(num_epochs, is_final=True)
                 logger.info("Saved final checkpoint")
 
     def _execute_training_step(self, batch, accumulate: bool = False, is_last_accumulation_step: bool = True):

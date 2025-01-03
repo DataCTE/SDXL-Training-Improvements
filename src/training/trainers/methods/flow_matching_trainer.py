@@ -10,7 +10,7 @@ from collections import defaultdict
 import time
 
 from src.core.logging import get_logger, MetricsLogger
-from src.training.trainers.sdxl_trainer import SDXLTrainer, save_checkpoint
+from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
 from src.core.distributed import is_main_process
@@ -126,6 +126,7 @@ class FlowMatchingTrainer(SDXLTrainer):
         
         # Initialize progress tracking
         global_step = 0
+        best_loss = float('inf')
         progress_bar = tqdm(
             total=total_steps,
             disable=not is_main_process(),
@@ -138,9 +139,12 @@ class FlowMatchingTrainer(SDXLTrainer):
             for epoch in range(num_epochs):
                 logger.info(f"Starting epoch {epoch + 1}/{num_epochs}")
                 self.model.train()
+                
                 # Track accumulated loss
+                epoch_loss = 0.0
                 accumulated_loss = 0.0
                 accumulated_metrics = defaultdict(float)
+                valid_steps = 0
                 
                 for step, batch in enumerate(self.train_dataloader):
                     step_start_time = time.time()
@@ -162,6 +166,8 @@ class FlowMatchingTrainer(SDXLTrainer):
                     
                     # Accumulate loss and metrics
                     accumulated_loss += loss.item()
+                    epoch_loss += loss.item()
+                    valid_steps += 1
                     for k, v in metrics.items():
                         accumulated_metrics[k] += v
                         
@@ -205,11 +211,31 @@ class FlowMatchingTrainer(SDXLTrainer):
                     global_step += 1
                     progress_bar.update(1)
                 
+                # Compute epoch average loss
+                if valid_steps > 0:
+                    avg_epoch_loss = epoch_loss / valid_steps
+                    
+                    # Save checkpoint if loss improved
+                    if avg_epoch_loss < best_loss:
+                        best_loss = avg_epoch_loss
+                        if is_main_process():
+                            self.save_checkpoint(epoch + 1, is_final=False)
+                            logger.info(f"Saved checkpoint for epoch {epoch + 1} with loss {best_loss:.4f}")
+                
+                # Clear CUDA cache between epochs
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    
         except Exception as e:
-            logger.error(f"Training failed at epoch {epoch + 1}, step {step + 1}", exc_info=True)
+            logger.error(f"Training failed at epoch {epoch + 1}", exc_info=True)
             raise
         finally:
             progress_bar.close()
+            
+            # Save final checkpoint
+            if is_main_process():
+                self.save_checkpoint(num_epochs, is_final=True)
+                logger.info("Saved final checkpoint")
 
     def _execute_training_step(self, batch, accumulate: bool = False, is_last_accumulation_step: bool = True):
         """Execute single training step with gradient accumulation support."""
