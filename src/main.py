@@ -18,6 +18,7 @@ from src.core.memory import torch_sync
 from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.models import StableDiffusionXL
+from src.models.base import ModelType
 from src.training.trainers import BaseRouter, save_checkpoint
 
 logger = get_logger(__name__)
@@ -60,7 +61,7 @@ def main():
             model = StableDiffusionXL.from_pretrained(
                 config.model.pretrained_model_name,
                 device=device,
-                model_type=config.model.model_type
+                model_type=ModelType[config.model.model_type.upper()]
             )
             
             dataset = create_dataset(config=config, model=model)
