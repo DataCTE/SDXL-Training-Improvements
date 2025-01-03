@@ -1,4 +1,4 @@
-"""Main orchestration script for SDXL fine-tuning with 100x speedups."""
+"""Main orchestration script for SDXL fine-tuning """
 import os
 import multiprocessing as mp
 import torch.cuda
@@ -20,6 +20,9 @@ from src.data.dataset import create_dataset
 from src.models import StableDiffusionXL
 from src.models.base import ModelType
 from src.training.trainers import BaseRouter, save_checkpoint
+
+# Import our custom optimizers
+from src.training.optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 
 # Setup enhanced logging first
 logger, tensor_logger = setup_logging(
@@ -74,8 +77,22 @@ def main():
             dataset = create_dataset(config=config, model=model)
             train_dataloader = DataLoader(dataset, **config.training.dataloader_kwargs)
             
-            optimizer_class = getattr(torch.optim, config.optimizer.class_name)
-            optimizer = optimizer_class(model.parameters(), **config.optimizer.kwargs)
+            # Get optimizer class from our custom implementations
+            optimizer_map = {
+                "AdamWBF16": AdamWBF16,
+                "AdamWScheduleFreeKahan": AdamWScheduleFreeKahan,
+                "SOAP": SOAP
+            }
+            
+            optimizer_class = optimizer_map.get(config.optimizer.class_name)
+            if optimizer_class is None:
+                raise ValueError(f"Unsupported optimizer: {config.optimizer.class_name}")
+            
+            # Create optimizer instance
+            optimizer = optimizer_class(
+                model.parameters(),
+                **config.optimizer.kwargs
+            )
             
             wandb_logger = WandbLogger(config) if config.global_config.logging.use_wandb else None
 
