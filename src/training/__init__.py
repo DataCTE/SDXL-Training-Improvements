@@ -1,5 +1,3 @@
-from diffusers import DDPMScheduler
-from src.main import create_trainer
 from src.training.trainers.sdxl_trainer import SDXLTrainer, save_checkpoint
 from src.training.trainers.base_router import BaseRouter
 from src.training.trainers.methods.ddpm_trainer import DDPMTrainer
@@ -14,9 +12,6 @@ from src.training.schedulers import (
 )
 
 __all__ = [
-    # Main trainer factory
-    "create_trainer",
-    
     # Trainer implementations
     "SDXLTrainer",
     "save_checkpoint",
@@ -35,8 +30,5 @@ __all__ = [
     "get_karras_sigmas",
     "get_sigmas", 
     "get_scheduler_parameters",
-    "get_add_time_ids",
-    
-    # External components
-    "DDPMScheduler"
+    "get_add_time_ids"
 ]
