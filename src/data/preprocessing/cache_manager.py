@@ -6,7 +6,7 @@ import torch
 import threading
 from typing import Dict, Optional, Union, Any, List, Tuple
 from src.core.logging import get_logger
-from src.data.utils.paths import convert_windows_path, is_windows_path
+from src.data.utils.paths import convert_windows_path
 import os
 from PIL import Image
 import numpy as np
