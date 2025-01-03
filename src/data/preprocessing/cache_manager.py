@@ -264,3 +264,44 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to load tag index: {e}")
             return None
+
+    def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
+        """Verify cache integrity and rebuild if needed."""
+        logger.info("Verifying cache integrity...")
+        
+        # Check uncached images
+        uncached = self.get_uncached_paths(image_paths)
+        missing_count = len(uncached)
+        
+        if missing_count > 0:
+            logger.warning(
+                f"Found {missing_count} uncached images "
+                f"({missing_count/len(image_paths)*100:.1f}% of dataset)"
+            )
+        
+        # Verify existing cache entries
+        invalid_entries = []
+        for path in image_paths:
+            cache_key = self.get_cache_key(path)
+            entry = self.cache_index["entries"].get(cache_key)
+            
+            if entry and not self._validate_cache_entry(entry):
+                invalid_entries.append(path)
+            
+        if invalid_entries:
+            logger.warning(f"Found {len(invalid_entries)} invalid cache entries")
+        
+        # Update cache index
+        if uncached or invalid_entries:
+            logger.info("Rebuilding cache index...")
+            self.rebuild_cache_index()
+        
+        # Update statistics
+        self.cache_index["stats"]["total_entries"] = len(self.cache_index["entries"])
+        self.cache_index["last_updated"] = time.time()
+        self._save_index()
+        
+        logger.info(
+            f"Cache verification complete. "
+            f"Valid entries: {len(self.cache_index['entries'])}"
+        )
