@@ -10,6 +10,7 @@ from PIL import Image
 import logging
 from src.core.logging.base import LogConfig
 from src.data.config import Config
+from src.training.optimizers.base import BaseOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -175,8 +176,7 @@ class WandbLogger:
     def log_model(
         self,
         model: torch.nn.Module,
-        criterion: Optional[torch.nn.Module] = None,
-        optimizer: Optional[torch.optim.Optimizer] = None,
+        optimizer: Optional[BaseOptimizer] = None,
         step: Optional[int] = None,
         commit: bool = True
     ) -> None:
@@ -185,16 +185,21 @@ class WandbLogger:
             return
             
         try:
-            # Only log model once
             if not hasattr(self, 'model_logged') or not self.model_logged:
-                # Log model architecture as config
+                # Log model info
                 model_config = {
                     'model_parameters': sum(p.numel() for p in model.parameters()),
                     'model_structure': str(model),
                 }
+                
+                # Add optimizer info if provided
+                if optimizer:
+                    model_config['optimizer'] = optimizer.__class__.__name__
+                    model_config['optimizer_state'] = str(optimizer.state_dict().keys())
+                
                 wandb.config.update({'model': model_config}, allow_val_change=True)
                 
-                # Log initial parameter statistics
+                # Log parameter stats
                 param_stats = {
                     f"parameters/{name}_norm": param.norm().item()
                     for name, param in model.named_parameters()
