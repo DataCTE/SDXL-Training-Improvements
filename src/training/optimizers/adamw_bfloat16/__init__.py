@@ -13,8 +13,8 @@ should be suitable for different backends.
 """
 
 import torch
-from torch.optim.optimizer import Optimizer
 from src.core.types import DataType
+from src.training.optimizers.base import BaseOptimizer
 
 from .stochastic import (
     add_stochastic_,
@@ -22,7 +22,7 @@ from .stochastic import (
 )
 
 
-class AdamWBF16(Optimizer):
+class AdamWBF16(BaseOptimizer):
     decay_threshold = 5e-3
 
     def __init__(

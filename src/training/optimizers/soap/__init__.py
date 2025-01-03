@@ -3,12 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 
 from itertools import chain
+from src.training.optimizers.base import BaseOptimizer
 
 # Parts of the code are modifications of Pytorch's AdamW optimizer
 # Parts of the code are modifications of code from https://github.com/jiaweizzhao/GaLore/blob/master/galore_torch/galore_projector.py
 
 
-class SOAP(optim.Optimizer):
+class SOAP(BaseOptimizer):
     """
     Implements SOAP algorithm (https://arxiv.org/abs/2409.11321).
 
@@ -60,19 +61,19 @@ class SOAP(optim.Optimizer):
         data_format: str = "channels_first",
         correct_bias: bool = True,
     ):
-        defaults = {
-            "lr": lr,
-            "betas": betas,
-            "shampoo_beta": shampoo_beta,
-            "eps": eps,
-            "weight_decay": weight_decay,
-            "precondition_frequency": precondition_frequency,
-            "max_precond_dim": max_precond_dim,
-            "merge_dims": merge_dims,
-            "precondition_1d": precondition_1d,
-            "normalize_grads": normalize_grads,
-            "correct_bias": correct_bias,
-        }
+        """Initialize SOAP optimizer."""
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            precondition_frequency=precondition_frequency,
+            max_precond_dim=max_precond_dim,
+            merge_dims=merge_dims,
+            precondition_1d=precondition_1d,
+            normalize_grads=normalize_grads,
+            correct_bias=correct_bias,
+        )
         super().__init__(params, defaults)
         self._data_format = data_format
 
