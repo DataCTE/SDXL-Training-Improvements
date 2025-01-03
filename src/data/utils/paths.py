@@ -83,10 +83,15 @@ def load_data_from_directory(data_dir: Union[str, List[str]]) -> Tuple[List[str]
     for directory in data_dir:
         logger.info(f"Processing directory: {directory}")
         
+        # Convert Windows paths if needed
+        directory = str(convert_windows_path(directory))
+        
         # Collect all image files for this directory
         dir_image_paths = []
         for ext in ['*.jpg', '*.jpeg', '*.png', '*.webp']:
             pattern = os.path.join(directory, ext)
+            # Convert pattern for glob
+            pattern = str(Path(pattern))
             found_paths = glob.glob(pattern)
             dir_image_paths.extend([str(p) for p in found_paths])
             logger.debug(f"Found {len(found_paths)} files with extension {ext}")
@@ -95,6 +100,8 @@ def load_data_from_directory(data_dir: Union[str, List[str]]) -> Tuple[List[str]
         
         # Process each image in this directory
         for img_path in dir_image_paths:
+            # Convert Windows paths if needed
+            img_path = str(convert_windows_path(img_path))
             txt_path = os.path.splitext(img_path)[0] + '.txt'
             try:
                 with open(txt_path, 'r', encoding='utf-8') as f:
