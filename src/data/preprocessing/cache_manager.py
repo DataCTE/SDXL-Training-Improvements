@@ -269,6 +269,9 @@ class CacheManager:
         """Verify cache integrity and rebuild if needed."""
         logger.info("Verifying cache integrity...")
         
+        # Create image-caption mapping
+        image_captions = dict(zip(image_paths, captions))
+        
         # Check uncached images
         uncached = self.get_uncached_paths(image_paths)
         missing_count = len(uncached)
@@ -288,6 +291,17 @@ class CacheManager:
             if entry and not self._validate_cache_entry(entry):
                 invalid_entries.append(path)
             
+            # Update caption in metadata if needed
+            if entry and entry.get("metadata_path"):
+                try:
+                    with open(entry["metadata_path"], 'r') as f:
+                        metadata = json.load(f)
+                    metadata["caption"] = image_captions[path]
+                    with open(entry["metadata_path"], 'w') as f:
+                        json.dump(metadata, f)
+                except Exception as e:
+                    logger.warning(f"Failed to update caption for {path}: {e}")
+        
         if invalid_entries:
             logger.warning(f"Found {len(invalid_entries)} invalid cache entries")
         
