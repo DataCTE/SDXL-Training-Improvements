@@ -18,6 +18,20 @@ class ModelConfig:
     timestep_bias_min: float = 0.0
     timestep_bias_max: float = 1.0
 
+    @property
+    def kwargs(self) -> dict:
+        """Get model configuration parameters."""
+        return {
+            "pretrained_model_name": self.pretrained_model_name,
+            "model_type": self.model_type,
+            "num_timesteps": self.num_timesteps,
+            "sigma_min": self.sigma_min,
+            "sigma_max": self.sigma_max,
+            "timestep_bias_strategy": self.timestep_bias_strategy,
+            "timestep_bias_min": self.timestep_bias_min,
+            "timestep_bias_max": self.timestep_bias_max
+        }
+
 @dataclass
 class OptimizerConfig:
     learning_rate: float = 1e-6
@@ -174,6 +188,18 @@ class DataConfig:
     random_flip: bool = True
     tokenizer_max_length: int = 77
 
+    @property
+    def kwargs(self) -> dict:
+        """Get data configuration parameters."""
+        return {
+            "train_data_dir": self.train_data_dir,
+            "validation_data_dir": self.validation_data_dir,
+            "image_size": self.image_size,
+            "center_crop": self.center_crop,
+            "random_flip": self.random_flip,
+            "tokenizer_max_length": self.tokenizer_max_length
+        }
+
 @dataclass
 class GlobalConfig:
     """Global configuration settings."""
@@ -190,6 +216,18 @@ class TagWeightingConfig:
     max_weight: float = 3.0
     default_weight: float = 1.0
     smoothing_factor: float = 0.05
+
+    @property
+    def kwargs(self) -> dict:
+        """Get tag weighting configuration parameters."""
+        return {
+            "enable_tag_weighting": self.enable_tag_weighting,
+            "use_cache": self.use_cache,
+            "min_weight": self.min_weight,
+            "max_weight": self.max_weight,
+            "default_weight": self.default_weight,
+            "smoothing_factor": self.smoothing_factor
+        }
 
 @dataclass
 class Config:
