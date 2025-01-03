@@ -17,15 +17,7 @@ class BaseOptimizer(ABC):
             defaults: Dict containing default values of optimization options
         """
         self.defaults = defaults
-        self._param_groups = list(params)
-        
-        # Initialize state dict for optimizer
         self.state: Dict[torch.Tensor, Dict[str, Any]] = {}
-        
-        # Add parameters to param_groups
-        if isinstance(params, torch.Tensor):
-            raise TypeError("params argument should be an iterable of Tensors or dicts")
-            
         self.param_groups = []
         
         param_groups = list(params)
