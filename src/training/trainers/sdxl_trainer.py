@@ -36,10 +36,10 @@ class SDXLTrainer(BaseTrainer):
         # Get gradient accumulation steps from config
         self.gradient_accumulation_steps = config.training.gradient_accumulation_steps
         
-        # Initialize specific training method
+        # Initialize specific training method through composition
         if config.training.method.lower() == "ddpm":
             from .methods.ddpm_trainer import DDPMTrainer
-            self.trainer = DDPMTrainer(
+            self.method_trainer = DDPMTrainer(
                 model=model,
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,

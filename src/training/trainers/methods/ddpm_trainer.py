@@ -18,28 +18,26 @@ from src.data.config import Config
 
 logger = get_logger(__name__)
 
-class DDPMTrainer(SDXLTrainer):
+class DDPMTrainer:
     """DDPM-specific trainer implementation."""
     
     def __init__(
         self,
-        model: StableDiffusionXL,
-        optimizer: torch.optim.Optimizer,
+        model,
+        optimizer,
         train_dataloader: torch.utils.data.DataLoader,
         device: torch.device,
         wandb_logger=None,
         config: Optional[Config] = None,
         **kwargs
     ):
-        super().__init__(
-            model=model,
-            optimizer=optimizer,
-            train_dataloader=train_dataloader,
-            device=device,
-            wandb_logger=wandb_logger,
-            config=config,
-            **kwargs
-        )
+        # Direct initialization instead of using super()
+        self.model = model
+        self.optimizer = optimizer
+        self.train_dataloader = train_dataloader
+        self.device = device
+        self.wandb_logger = wandb_logger
+        self.config = config
         
         # Remove tag weight caching since weights now come from dataset
         self.default_weight = config.tag_weighting.default_weight
