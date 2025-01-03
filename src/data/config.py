@@ -27,6 +27,16 @@ class OptimizerConfig:
     epsilon: float = 1e-8
     optimizer_type: str = "adamw_bf16"  # or "adamw", "adamw_bf16", "adamw_schedule_free_kahan", "SOAP"
 
+    @property
+    def kwargs(self) -> dict:
+        """Get optimizer configuration parameters."""
+        return {
+            "lr": self.learning_rate,
+            "weight_decay": self.weight_decay,
+            "betas": (self.beta1, self.beta2),
+            "eps": self.epsilon
+        }
+
 @dataclass
 class SchedulerConfig:
     """Noise scheduler configuration."""
@@ -42,9 +52,20 @@ class SchedulerConfig:
     sample_max_value: float = 1.0
     rescale_betas_zero_snr: bool = True
 
-    def to_dict(self) -> dict:
-        """Convert config to dictionary, only exposing rescale_betas_zero_snr."""
+    @property
+    def kwargs(self) -> dict:
+        """Get scheduler configuration parameters."""
         return {
+            "num_train_timesteps": self.num_train_timesteps,
+            "beta_start": self.beta_start,
+            "beta_end": self.beta_end,
+            "beta_schedule": self.beta_schedule,
+            "clip_sample": self.clip_sample,
+            "steps_offset": self.steps_offset,
+            "timestep_spacing": self.timestep_spacing,
+            "thresholding": self.thresholding,
+            "dynamic_thresholding_ratio": self.dynamic_thresholding_ratio,
+            "sample_max_value": self.sample_max_value,
             "rescale_betas_zero_snr": self.rescale_betas_zero_snr
         }
 
@@ -71,6 +92,18 @@ class TrainingConfig:
     debug_mode: bool = False
     save_final_model: bool = True
 
+    @property
+    def dataloader_kwargs(self) -> dict:
+        """Get DataLoader configuration."""
+        return {
+            "batch_size": self.batch_size,
+            "num_workers": self.num_workers,
+            "pin_memory": self.pin_memory,
+            "shuffle": True,
+            "drop_last": True,  # Important for stable training
+            "persistent_workers": True if self.num_workers > 0 else False
+        }
+
 @dataclass
 class ImageConfig:
     """Image processing configuration."""
@@ -93,6 +126,17 @@ class CacheConfig:
     cache_latents: bool = True
     cache_text_embeddings: bool = True
 
+    @property
+    def kwargs(self) -> dict:
+        """Get cache configuration parameters."""
+        return {
+            "cache_dir": self.cache_dir,
+            "max_cache_size": self.max_cache_size,
+            "use_cache": self.use_cache,
+            "cache_latents": self.cache_latents,
+            "cache_text_embeddings": self.cache_text_embeddings
+        }
+
 @dataclass
 class LoggingConfig:
     use_wandb: bool = False
@@ -104,6 +148,22 @@ class LoggingConfig:
     file_level: str = "DEBUG"
     capture_warnings: bool = True
     log_every: int = 10
+
+    @property
+    def kwargs(self) -> dict:
+        """Get logging configuration parameters."""
+        return {
+            "log_dir": self.log_dir,
+            "filename": self.filename,
+            "console_level": self.console_level,
+            "file_level": self.file_level,
+            "capture_warnings": self.capture_warnings,
+            "wandb": {
+                "use_wandb": self.use_wandb,
+                "project": self.wandb_project,
+                "entity": self.wandb_entity
+            }
+        }
 
 @dataclass
 class DataConfig:
