@@ -27,18 +27,27 @@ CONFIG_PATH = Path("src/config.yaml")
 def setup_environment():
     """Setup distributed training environment."""
     try:
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
             init_process_group(backend="nccl")
             setup_distributed()
         yield
     finally:
-        cleanup_distributed()
+        if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
+            cleanup_distributed()
         torch_sync()
 
 def main():
     """Main training entry point."""
     print("Starting training script...")
     mp.set_start_method('spawn', force=True)
+    
+    # Set default distributed training environment variables
+    if "RANK" not in os.environ:
+        os.environ["RANK"] = "0"
+    if "WORLD_SIZE" not in os.environ:
+        os.environ["WORLD_SIZE"] = "1"
+    if "LOCAL_RANK" not in os.environ:
+        os.environ["LOCAL_RANK"] = "0"
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
