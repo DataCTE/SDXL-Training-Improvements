@@ -37,19 +37,24 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     return buckets
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]], config: Config) -> Tuple[int, int]:
-    """Find closest bucket for given dimensions."""
+    """Find closest bucket for given dimensions with aspect ratio tolerance."""
     w, h = original_size[0] // 8, original_size[1] // 8
     target_area = w * h
     target_ratio = w / h
+    
+    # Allow 10% tolerance for aspect ratio and area matching
+    aspect_tolerance = 0.1
+    area_tolerance = 0.1
     
     # Default to target size from config if no buckets match
     if not buckets:
         logger.warning("No buckets configured, using default target size")
         return tuple(d // 8 for d in config.global_config.image.target_size)
     
+    # Find bucket with closest aspect ratio and area within tolerances
     return min(buckets, key=lambda b: (
-        abs(b[0] * b[1] - target_area) / target_area + 
-        abs((b[0]/b[1]) - target_ratio)
+        abs(b[0] * b[1] - target_area) / target_area * (1 - area_tolerance) + 
+        abs((b[0]/b[1]) - target_ratio) * (1 - aspect_tolerance)
     ))
 
 def group_images_by_bucket(
@@ -66,21 +71,21 @@ def group_images_by_bucket(
     
     for idx, path in enumerate(tqdm(image_paths, desc="Grouping images")):
         try:
-            cache_key = cache_manager.get_cache_key(path)
-            cached_data = cache_manager.load_tensors(cache_key)
+            img = Image.open(path)
+            # Find nearest bucket dimensions
+            bucket = compute_bucket_dims(img.size, buckets, config)
+            # Convert back to pixel space (multiply by 8)
+            target_size = (bucket[0] * 8, bucket[1] * 8)
             
-            if cached_data and "vae_latents" in cached_data:
-                latents = cached_data["vae_latents"]
-                dims = (latents.shape[2] * 8, latents.shape[1] * 8)
-                bucket = compute_bucket_dims(dims, buckets, config)
-            else:
-                # For uncached images, use original image dimensions
-                img = Image.open(path)
-                bucket = compute_bucket_dims(img.size, buckets, config)
+            # Store bucket assignment for resizing during VAE encoding
+            cache_key = cache_manager.get_cache_key(path)
+            if cache_manager.cache_index["entries"].get(cache_key):
+                cache_manager.cache_index["entries"][cache_key]["bucket_dims"] = target_size
+            
             bucket_indices[bucket].append(idx)
+            
         except Exception as e:
             logger.warning(f"Error processing {path}: {e}")
-            # Use target size as fallback
             default_bucket = tuple(d // 8 for d in config.global_config.image.target_size)
             bucket_indices[default_bucket].append(idx)
     
