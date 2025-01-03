@@ -15,6 +15,7 @@ should be suitable for different backends.
 import torch
 from src.core.types import DataType
 from src.training.optimizers.base import BaseOptimizer
+from typing import Dict, Any, Iterator
 
 from .stochastic import (
     add_stochastic_,
@@ -53,6 +54,33 @@ class AdamWBF16(BaseOptimizer):
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         defaults = dict(betas=betas, eps=eps, weight_decay=weight_decay, lr=lr)
         super().__init__(params, defaults)
+
+    @property
+    def param_groups(self) -> Iterator[dict]:
+        """Returns an iterator over parameter groups."""
+        return iter(self._param_groups)
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Returns the optimizer state as a dict."""
+        return {
+            'state': self.state,
+            'param_groups': self.param_groups
+        }
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """Loads the optimizer state."""
+        self.state = state_dict['state']
+        self._param_groups = state_dict['param_groups']
+
+    def zero_grad(self, set_to_none: bool = False) -> None:
+        """Clears the gradients of all optimized parameters."""
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        p.grad.zero_()
 
     @torch.no_grad()
     def step(self, zero_grad: bool = False):
