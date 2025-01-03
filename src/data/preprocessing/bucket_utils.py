@@ -1,5 +1,5 @@
 """Bucket calculation utilities for SDXL training."""
-from typing import List, Tuple, Dict, TYPE_CHECKING
+from typing import List, Tuple, Dict, TYPE_CHECKING, Optional
 import logging
 from collections import defaultdict
 from tqdm import tqdm
@@ -36,7 +36,7 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     
     return buckets
 
-def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]], config: Config) -> Tuple[int, int]:
+def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]], config: Optional[Config] = None) -> Tuple[int, int]:
     """Find closest bucket for given dimensions with aspect ratio tolerance."""
     w, h = original_size[0] // 8, original_size[1] // 8
     target_area = w * h
@@ -48,6 +48,8 @@ def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int,
     
     # Default to target size from config if no buckets match
     if not buckets:
+        if config is None:
+            raise ValueError("No buckets and no config provided")
         logger.warning("No buckets configured, using default target size")
         return tuple(d // 8 for d in config.global_config.image.target_size)
     
@@ -72,8 +74,8 @@ def group_images_by_bucket(
     for idx, path in enumerate(tqdm(image_paths, desc="Grouping images")):
         try:
             img = Image.open(path)
-            # Find nearest bucket dimensions
-            bucket = compute_bucket_dims(img.size, buckets, config)
+            # Find nearest bucket dimensions with config
+            bucket = compute_bucket_dims(img.size, buckets)  # Remove config parameter as it's only needed for fallback
             # Convert back to pixel space (multiply by 8)
             target_size = (bucket[0] * 8, bucket[1] * 8)
             
