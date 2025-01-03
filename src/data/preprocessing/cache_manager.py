@@ -221,14 +221,16 @@ class CacheManager:
                 temp_path.unlink()
             raise e
 
-    def get_tag_statistics_path(self) -> Path:
-        """Get path for tag statistics file."""
+    def get_tag_index_path(self) -> Path:
+        """Get path for tag index directory."""
         tags_dir = self.cache_dir / "tags"
         tags_dir.mkdir(exist_ok=True)
-        return tags_dir / "statistics.json"
+        return tags_dir
+
+    def get_tag_statistics_path(self) -> Path:
+        """Get path for tag statistics file."""
+        return self.get_tag_index_path() / "statistics.json"
 
     def get_image_tags_path(self) -> Path:
         """Get path for image tags file."""
-        tags_dir = self.cache_dir / "tags"
-        tags_dir.mkdir(exist_ok=True)
-        return tags_dir / "image_tags.json"
+        return self.get_tag_index_path() / "image_tags.json"

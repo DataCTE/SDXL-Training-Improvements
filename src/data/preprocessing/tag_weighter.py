@@ -409,7 +409,9 @@ def preprocess_dataset_tags(
         
     # Create and initialize tag weighter
     image_captions = dict(zip(image_paths, captions))
-    index_path = config.cache_manager.get_tag_index_path()
+    
+    # Use statistics path as the main index
+    index_path = config.cache_manager.get_tag_statistics_path()
     
     logger.info("Processing tags and creating index...")
     weighter = create_tag_weighter_with_index(
