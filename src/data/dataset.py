@@ -605,7 +605,10 @@ class AspectBucketDataset(Dataset):
 
     def _log_bucket_statistics(self):
         """Log statistics about bucket distribution using bucket_utils."""
-        log_bucket_statistics(self.bucket_indices)
+        log_bucket_statistics(
+            bucket_indices=self.bucket_indices,
+            total_images=len(self.image_paths)
+        )
 
 def create_dataset(
     config: Config,
