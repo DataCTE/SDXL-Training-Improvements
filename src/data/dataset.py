@@ -600,7 +600,6 @@ class AspectBucketDataset(Dataset):
         """Group images by bucket dimensions."""
         return group_images_by_bucket(
             image_paths=self.image_paths,
-            captions=self.captions,
             cache_manager=self.cache_manager
         )
 
