@@ -3,7 +3,7 @@ from typing import List, Tuple, Dict, TYPE_CHECKING, Optional
 import logging
 from collections import defaultdict
 from tqdm import tqdm
-from src.data.config import Config
+from src.data.config import ImageConfig
 import torch
 
 if TYPE_CHECKING:
