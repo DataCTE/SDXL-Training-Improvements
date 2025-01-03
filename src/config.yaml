@@ -73,14 +73,20 @@ global_config:
   # Image processing settings
   image:
     supported_dims:
-      - [1024, 1024]   # Square
-      - [1024, 1536]   # Portrait
-      - [1536, 1024]   # Landscape
-    max_aspect_ratio: 2.0  # Maximum allowed aspect ratio deviation
-    target_size: [1024, 1024]  # Target image size for training
-    max_size: [1536, 1536]    # Maximum allowed image dimensions
-    min_size: [512, 512]      # Minimum allowed image dimensions
-    bucket_step: 64           # Step size for aspect ratio buckets
+      - [640, 1536]   # 0.42 ratio
+      - [768, 1344]   # 0.57 ratio
+      - [832, 1216]   # 0.68 ratio
+      - [896, 1152]   # 0.78 ratio
+      - [1024, 1024]  # 1.0 ratio (square)
+      - [1152, 896]   # 1.29 ratio
+      - [1216, 832]   # 1.46 ratio
+      - [1344, 768]   # 1.75 ratio
+      - [1536, 640]   # 2.4 ratio
+    max_aspect_ratio: 2.4  # Match the most extreme ratio
+    target_size: [1024, 1024]  # Default square
+    max_size: [1536, 1536]    # Maximum in any dimension
+    min_size: [640, 640]      # Minimum in any dimension
+    bucket_step: 64           # For intermediate sizes
 
 # Tag weighting configuration
 tag_weighting:

@@ -16,46 +16,28 @@ def get_bucket_dims_from_latents(latent_shape: Tuple[int, ...]) -> Tuple[int, in
     _, h, w = latent_shape
     return (w, h)  # Return latent dimensions directly, don't multiply by 8
 
-def generate_buckets(config: Optional[Config]) -> List[Tuple[int, int]]:
-    """Generate bucket sizes in VAE latent space (H/8, W/8)."""
-    if not config:
-        # Return default buckets if no config provided
-        default_buckets = [
-            (64, 64),    # 512x512 
-            (64, 96),    # 512x768
-            (96, 64),    # 768x512
-            (128, 128),  # 1024x1024
-            (128, 192),  # 1024x1536
-            (192, 128),  # 1536x1024
-        ]
-        logger.warning("No config provided, using default buckets")
-        return default_buckets
-        
+def generate_buckets(config: "ImageConfig") -> List[Tuple[int, int]]:
+    """Generate bucket dimensions from config."""
     buckets = []
     
-    # Convert config dimensions to latent space (divide by 8)
-    min_size = (config.global_config.image.min_size[0] // 8,
-                config.global_config.image.min_size[1] // 8)
-    max_size = (config.global_config.image.max_size[0] // 8,
-                config.global_config.image.max_size[1] // 8)
-    step = max(config.global_config.image.bucket_step // 8, 1)
+    # Add supported dimensions from config
+    for dims in config.supported_dims:
+        # Convert to latent dimensions
+        buckets.append((dims[0] // 8, dims[1] // 8))
     
-    # Convert supported dims to latent space
-    supported_latent_dims = [
-        (w // 8, h // 8) 
-        for w, h in config.global_config.image.supported_dims
-    ]
-    buckets.extend(supported_latent_dims)
+    # Add intermediate buckets based on bucket_step
+    step = config.bucket_step // 8  # Convert step to latent space
+    min_w, min_h = config.min_size[0] // 8, config.min_size[1] // 8
+    max_w, max_h = config.max_size[0] // 8, config.max_size[1] // 8
     
-    # Generate additional buckets in latent space
-    for h in range(min_size[1], max_size[1] + step, step):
-        for w in range(min_size[0], max_size[0] + step, step):
-            if max(w/h, h/w) <= config.global_config.image.max_aspect_ratio:
-                bucket = (w, h)  # Already in latent space
+    for w in range(min_w, max_w + 1, step):
+        for h in range(min_h, max_h + 1, step):
+            if validate_aspect_ratio(w, h, config.max_aspect_ratio):
+                bucket = (w, h)
                 if bucket not in buckets:
                     buckets.append(bucket)
     
-    return sorted(buckets)
+    return sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))  # Sort by area, then width
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
     """Convert original size to latent dimensions and find closest bucket."""
@@ -106,86 +88,59 @@ def get_latent_bucket_key(latents: "torch.Tensor") -> Tuple[int, int]:
 
 def group_images_by_bucket(
     image_paths: List[str], 
-    captions: List[str],
     cache_manager: "CacheManager",
     auto_rebuild: bool = True
 ) -> Dict[Tuple[int, int], List[int]]:
-    """Group image indices by their VAE latent dimensions to ensure compatible batches."""
+    """Group images by their latent dimensions, handling first runs and partial caches."""
     bucket_indices = defaultdict(list)
+    uncached_paths = cache_manager.get_uncached_paths(image_paths)
     
-    # First pass - check cache status
-    missing_count = 0
-    for image_path in image_paths:
-        cache_key = cache_manager.get_cache_key(image_path)
-        if cache_key not in cache_manager.cache_index["entries"]:
-            missing_count += 1
-    
-    # If there are missing entries and auto_rebuild is enabled
-    if missing_count > 0:
+    # Handle uncached images
+    if uncached_paths:
         if auto_rebuild:
-            logger.warning(
-                f"Found {missing_count} uncached images. "
-                "Rebuilding cache before proceeding..."
-            )
-            cache_manager.verify_and_rebuild_cache(image_paths, captions)
+            logger.info(f"Found {len(uncached_paths)} uncached images - rebuilding cache...")
+            cache_manager.rebuild_cache_index()
         else:
             logger.warning(
-                f"Found {missing_count} uncached images. "
+                f"Found {len(uncached_paths)} uncached images. "
                 "Run cache verification/rebuild before training."
             )
     
-    # Group images by bucket
-    logger.info("Grouping images by VAE latent dimensions...")
+    # Generate buckets from config
+    image_config = cache_manager.config.global_config.image
+    buckets = generate_buckets(image_config)
+    default_bucket = (image_config.target_size[0] // 8, image_config.target_size[1] // 8)
+    
+    # Process each image
     for idx, image_path in enumerate(tqdm(image_paths, desc="Grouping images")):
         cache_key = cache_manager.get_cache_key(image_path)
         cache_entry = cache_manager.cache_index["entries"].get(cache_key)
         
-        if not cache_entry:
+        if image_path in uncached_paths or not cache_entry:
+            bucket_indices[default_bucket].append(idx)
             continue
             
         try:
             cached_data = cache_manager.load_tensors(cache_key)
-            if cached_data is None or "vae_latents" not in cached_data:
-                continue
-            
-            # Validate latent dimensions
-            latents = cached_data["vae_latents"]
-            if len(latents.shape) != 3 or latents.shape[0] != 4:
-                continue
-                
-            # Group by actual latent dimensions
-            latent_bucket = get_latent_bucket_key(latents)
-            bucket_indices[latent_bucket].append(idx)
-            
-            # Store latent dimensions in cache
-            if cache_entry.get("latent_dims") != latent_bucket:
-                cache_entry["latent_dims"] = latent_bucket
-                cache_entry["needs_save"] = True
-                cache_manager.cache_index["entries"][cache_key] = cache_entry
-                cache_manager.cache_index["needs_save"] = True
-                
+            if cached_data and "vae_latents" in cached_data:
+                latents = cached_data["vae_latents"]
+                actual_dims = get_latent_bucket_key(latents)
+                bucket_dims = compute_bucket_dims(
+                    (actual_dims[0] * 8, actual_dims[1] * 8),
+                    buckets
+                )
+                bucket_indices[bucket_dims].append(idx)
+            else:
+                bucket_indices[default_bucket].append(idx)
         except Exception as e:
             logger.warning(f"Failed to process {image_path}: {e}")
-            continue
+            bucket_indices[default_bucket].append(idx)
     
-    if not bucket_indices:
-        raise RuntimeError("No valid images found in cache. Please preprocess the dataset first.")
-    
-    # Save any updates to cache index
-    if cache_manager.cache_index.get("needs_save", False):
-        cache_manager._save_index()
-    
-    # Log bucket distribution
-    total_images = sum(len(indices) for indices in bucket_indices.values())
-    logger.info(f"\nFound {len(bucket_indices)} distinct latent dimension groups:")
-    for (w, h), indices in sorted(bucket_indices.items(), key=lambda x: len(x[1]), reverse=True):
-        logger.info(f"Latent dims {w}x{h}: {len(indices)} images ({len(indices)/total_images*100:.1f}%)")
-    
+    log_bucket_statistics(bucket_indices, len(image_paths))
     return dict(bucket_indices)
 
-def log_bucket_statistics(bucket_indices: Dict[Tuple[int, int], List[int]]):
+def log_bucket_statistics(bucket_indices: Dict[Tuple[int, int], List[int]], total_images: int):
     """Log statistics about bucket distribution."""
-    total_images = sum(len(indices) for indices in bucket_indices.values())
     logger.info(f"\nBucket statistics ({total_images} total images):")
     
     for bucket_dims, indices in sorted(
