@@ -9,6 +9,7 @@ import wandb
 from PIL import Image
 import logging
 from src.core.logging.base import LogConfig
+from src.data.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -25,47 +26,67 @@ class WandbLogger:
     
     def __init__(
         self,
-        project: str,
+        config: Optional[Config] = None,
+        project: Optional[str] = None,
         name: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
-        dir: Optional[Union[str, Path]] = None,
         tags: Optional[list] = None,
         notes: Optional[str] = None,
         resume: bool = False,
-        log_config: Optional[LogConfig] = None
+        log_config: Optional[LogConfig] = None,
     ):
         """Initialize W&B logger.
         
         Args:
-            project: W&B project name
-            name: Run name
-            config: Configuration dictionary
-            dir: Output directory
-            tags: Run tags
-            notes: Run notes
+            config: Main configuration object
+            project: Override project name (default: from config)
+            name: Override run name (default: from config)
+            tags: Override run tags (default: from config)
+            notes: Override run notes
             resume: Whether to resume previous run
-            log_config: Optional logging configuration
+            log_config: Legacy logging configuration
         """
         self.enabled = True
         self.model_logged = False
         
-        # Use log_config if provided
-        if log_config:
-            project = log_config.wandb_project
-            name = log_config.wandb_name
-            tags = log_config.wandb_tags
-            notes = log_config.wandb_notes
-            
         try:
             if not self.enabled:
                 logger.warning("W&B logging disabled")
                 return
+
+            # Priority: log_config > explicit params > config > defaults
+            wandb_config = {}
+            
+            # 1. Start with defaults from Config class
+            default_config = Config()
+            wandb_project = default_config.global_config.logging.wandb_project
+            wandb_entity = default_config.global_config.logging.wandb_entity
+            
+            # 2. Update from provided config if available
+            if config:
+                wandb_project = config.global_config.logging.wandb_project
+                wandb_entity = config.global_config.logging.wandb_entity
+                wandb_config = config.to_dict() if hasattr(config, 'to_dict') else {}
+            
+            # 3. Update from explicit parameters
+            if project:
+                wandb_project = project
+            
+            # 4. Update from log_config if provided (legacy support)
+            if log_config:
+                if hasattr(log_config, 'wandb_project'):
+                    wandb_project = log_config.wandb_project
+                if hasattr(log_config, 'wandb_name'):
+                    name = log_config.wandb_name
+                if hasattr(log_config, 'wandb_tags'):
+                    tags = log_config.wandb_tags
+                if hasattr(log_config, 'wandb_notes'):
+                    notes = log_config.wandb_notes
                 
             self.run = wandb.init(
-                project=project,
+                project=wandb_project,
+                entity=wandb_entity,
                 name=name,
-                config=config,
-                dir=dir,
+                config=wandb_config,
                 tags=tags,
                 notes=notes,
                 resume=resume
@@ -82,7 +103,7 @@ class WandbLogger:
                 exc_info=True,
                 extra={
                     'error': str(e),
-                    'project': project,
+                    'project': wandb_project,
                     'enabled': self.enabled
                 }
             )
