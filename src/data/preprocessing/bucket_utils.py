@@ -13,52 +13,61 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 def generate_buckets(config: Config) -> List[Tuple[int, int]]:
-    """Generate bucket dimensions from config."""
+    """Generate bucket dimensions from config in pixel space."""
     image_config = config.global_config.image
     buckets = set()  # Use set to prevent duplicates
     
-    # Add supported dimensions from config (keeping float precision until final conversion)
+    # Work in pixel space first (no division by 8)
     for dims in image_config.supported_dims:
-        # Keep as floats for more precise calculations
-        w, h = dims[0] / 8.0, dims[1] / 8.0
-        # Convert to ints only at final step
-        w_int, h_int = int(round(w)), int(round(h))
+        w, h = dims[0], dims[1]  # Keep original dimensions
         
-        if validate_aspect_ratio(w_int, h_int, image_config.max_aspect_ratio):
-            buckets.add((w_int, h_int))
-            # Also add the flipped dimension if it's valid and different
-            if h_int != w_int and validate_aspect_ratio(h_int, w_int, image_config.max_aspect_ratio):
-                buckets.add((h_int, w_int))
+        if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
+            # Store in latent space (divide by 8 at final step)
+            w_latent, h_latent = w // 8, h // 8
+            buckets.add((w_latent, h_latent))
+            # Also add the flipped dimension if valid
+            if h != w and validate_aspect_ratio(h, w, image_config.max_aspect_ratio):
+                buckets.add((h_latent, w_latent))
     
-    # Convert to sorted list
+    # Convert to sorted list (sort by area then width)
     buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))
+    
+    # Log the actual pixel dimensions for verification
+    if logger.isEnabledFor(logging.INFO):
+        logger.info("\nConfigured buckets (pixel space):")
+        for w, h in buckets:
+            logger.info(f"- {w*8}x{h*8} (latent: {w}x{h}, ratio {(w*8)/(h*8):.2f})")
+    
     return buckets
 
 def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]], config: Optional[Config] = None) -> Tuple[int, int]:
     """Find closest bucket for given dimensions with aspect ratio tolerance."""
-    # Keep precision by using floats for initial calculations
-    w, h = original_size[0] / 8.0, original_size[1] / 8.0
+    # Work in pixel space
+    w, h = original_size[0], original_size[1]
     target_area = w * h
     target_ratio = w / h
     
-    # Allow 10% tolerance for aspect ratio and area matching
-    aspect_tolerance = 0.1
-    area_tolerance = 0.1
+    # Convert buckets to pixel space for comparison
+    pixel_buckets = [(b[0] * 8, b[1] * 8) for b in buckets]
     
     if not buckets:
         if config is None:
             raise ValueError("No buckets and no config provided")
         logger.warning("No buckets configured, using default target size")
-        # Round instead of integer division
-        return tuple(int(round(d / 8.0)) for d in config.global_config.image.target_size)
+        default_size = config.global_config.image.target_size
+        return (default_size[0] // 8, default_size[1] // 8)
     
-    # Find bucket with closest aspect ratio and area
-    closest_bucket = min(buckets, key=lambda b: (
-        abs(b[0] * b[1] - target_area) / target_area * (1 - area_tolerance) + 
-        abs((b[0]/b[1]) - target_ratio) * (1 - aspect_tolerance)
-    ))
+    # Find closest bucket in pixel space
+    closest_bucket_idx = min(
+        range(len(pixel_buckets)),
+        key=lambda i: (
+            abs(pixel_buckets[i][0] * pixel_buckets[i][1] - target_area) / target_area +
+            abs((pixel_buckets[i][0]/pixel_buckets[i][1]) - target_ratio)
+        )
+    )
     
-    return closest_bucket
+    # Return the latent dimensions
+    return buckets[closest_bucket_idx]
 
 def group_images_by_bucket(
     image_paths: List[str], 
