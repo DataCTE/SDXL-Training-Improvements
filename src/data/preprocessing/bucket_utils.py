@@ -5,6 +5,7 @@ from collections import defaultdict
 from tqdm import tqdm
 from src.data.config import Config
 import torch
+from PIL import Image
 
 if TYPE_CHECKING:
     from src.data.preprocessing.cache_manager import CacheManager
@@ -14,19 +15,19 @@ logger = logging.getLogger(__name__)
 def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     """Generate bucket dimensions from config."""
     image_config = config.global_config.image
-    buckets = []
+    buckets = set()  # Use set to prevent duplicates
     
     # Add supported dimensions from config (converting to latent space dimensions)
     for dims in image_config.supported_dims:
         # Convert pixel dimensions to latent dimensions (divide by 8)
         w, h = dims[0] // 8, dims[1] // 8
         if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
-            buckets.append((w, h))
-            # Also add the flipped dimension if it's valid
+            buckets.add((w, h))
+            # Also add the flipped dimension if it's valid and different
             if h != w and validate_aspect_ratio(h, w, image_config.max_aspect_ratio):
-                buckets.append((h, w))
+                buckets.add((h, w))
     
-    # Sort buckets by area and width for consistent ordering
+    # Convert to sorted list
     buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))
     
     logger.info("\nConfigured buckets:")
@@ -35,11 +36,16 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
     
     return buckets
 
-def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
+def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]], config: Config) -> Tuple[int, int]:
     """Find closest bucket for given dimensions."""
     w, h = original_size[0] // 8, original_size[1] // 8
     target_area = w * h
     target_ratio = w / h
+    
+    # Default to target size from config if no buckets match
+    if not buckets:
+        logger.warning("No buckets configured, using default target size")
+        return tuple(d // 8 for d in config.global_config.image.target_size)
     
     return min(buckets, key=lambda b: (
         abs(b[0] * b[1] - target_area) / target_area + 
@@ -54,7 +60,9 @@ def group_images_by_bucket(
     bucket_indices = defaultdict(list)
     config = cache_manager.config
     buckets = generate_buckets(config)
-    default_bucket = tuple(d // 8 for d in config.global_config.image.target_size)
+    
+    if not buckets:
+        raise ValueError("No valid buckets generated from config")
     
     for idx, path in enumerate(tqdm(image_paths, desc="Grouping images")):
         try:
@@ -64,12 +72,16 @@ def group_images_by_bucket(
             if cached_data and "vae_latents" in cached_data:
                 latents = cached_data["vae_latents"]
                 dims = (latents.shape[2] * 8, latents.shape[1] * 8)
-                bucket = compute_bucket_dims(dims, buckets)
-                bucket_indices[bucket].append(idx)
+                bucket = compute_bucket_dims(dims, buckets, config)
             else:
-                bucket_indices[default_bucket].append(idx)
+                # For uncached images, use original image dimensions
+                img = Image.open(path)
+                bucket = compute_bucket_dims(img.size, buckets, config)
+            bucket_indices[bucket].append(idx)
         except Exception as e:
             logger.warning(f"Error processing {path}: {e}")
+            # Use target size as fallback
+            default_bucket = tuple(d // 8 for d in config.global_config.image.target_size)
             bucket_indices[default_bucket].append(idx)
     
     log_bucket_statistics(bucket_indices, len(image_paths))
