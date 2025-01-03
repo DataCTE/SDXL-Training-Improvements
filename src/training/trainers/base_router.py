@@ -14,14 +14,14 @@ class BaseRouter(ABC):
     
     # Map model types to their trainer modules
     TRAINER_MAP = {
-        ModelType.SDXL: "src.training.trainers.sdxl_trainer",
-        #ModelType.SD: "src.training.trainers.sd_trainer",
-        #ModelType.IF: "src.training.trainers.if_trainer",
-        # Add more model types as needed
+        ModelType.SDXL: "src.training.trainers.sdxl_trainer.SDXLTrainer",
+        #ModelType.SD: "src.training.trainers.sd_trainer.SDTrainer",
+        #ModelType.IF: "src.training.trainers.if_trainer.IFTrainer",
     }
     
-    def __init__(
-        self,
+    @classmethod
+    def create(
+        cls,
         model,
         optimizer,
         train_dataloader: DataLoader,
@@ -30,73 +30,34 @@ class BaseRouter(ABC):
         config: Optional[Config] = None,
         **kwargs
     ):
-        self.model = model
-        self.optimizer = optimizer
-        self.train_dataloader = train_dataloader
-        self.device = device
-        self.wandb_logger = wandb_logger
-        self.config = config
-        
-        # Dynamically get the appropriate trainer
-        self.trainer = self._get_model_trainer()
-
-    def _get_model_trainer(self):
-        """Dynamically import and initialize the appropriate trainer based on model type."""
+        """Factory method to create the appropriate trainer."""
         try:
             # Get model type from config
-            model_type = ModelType[self.config.model.model_type.upper()]
+            model_type = ModelType[config.model.model_type.upper()]
             
-            # Get trainer module path
-            trainer_module_path = self.TRAINER_MAP.get(model_type)
-            if not trainer_module_path:
+            # Get trainer class path
+            trainer_path = cls.TRAINER_MAP.get(model_type)
+            if not trainer_path:
                 raise ValueError(f"Unsupported model type: {model_type}")
             
-            # Dynamically import trainer module
-            module_path, class_name = trainer_module_path.rsplit('.', 1)
+            # Import trainer class
+            module_path, class_name = trainer_path.rsplit('.', 1)
             trainer_module = import_module(module_path)
             trainer_class = getattr(trainer_module, class_name)
             
-            logger.info(f"Initializing {trainer_class.__name__} for model type: {model_type}")
+            logger.info(f"Creating {trainer_class.__name__} for model type: {model_type}")
             
-            # Initialize trainer
+            # Create trainer instance
             return trainer_class(
-                model=self.model,
-                optimizer=self.optimizer,
-                train_dataloader=self.train_dataloader,
-                device=self.device,
-                wandb_logger=self.wandb_logger,
-                config=self.config
+                model=model,
+                optimizer=optimizer,
+                train_dataloader=train_dataloader,
+                device=device,
+                wandb_logger=wandb_logger,
+                config=config,
+                **kwargs
             )
             
         except Exception as e:
-            logger.error(f"Failed to initialize trainer: {str(e)}", exc_info=True)
-            raise
-
-    def train(self, num_epochs: int):
-        """Route training to the appropriate model trainer."""
-        try:
-            logger.info("Starting training process...")
-            
-            # Validate configuration
-            if not self.config:
-                raise ValueError("Configuration is required for training")
-                
-            # Log training parameters
-            logger.info(f"Training for {num_epochs} epochs")
-            logger.info(f"Using device: {self.device}")
-            logger.info(f"Model type: {self.config.model.model_type}")
-            logger.info(f"Training method: {self.config.training.method}")
-            
-            # Route to appropriate trainer
-            self.trainer.train(num_epochs)
-            
-            logger.info("Training completed successfully")
-            
-        except Exception as e:
-            logger.error(f"Training failed: {str(e)}", exc_info=True)
-            raise
-
-    @abstractmethod
-    def save_checkpoint(self, epoch: int, is_final: bool = False):
-        """Save checkpoint implementation specific to each model architecture."""
-        pass 
+            logger.error(f"Failed to create trainer: {str(e)}", exc_info=True)
+            raise 
