@@ -11,7 +11,6 @@ import os
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
-from src.data.preprocessing.bucket_utils import compute_bucket_dims, generate_buckets
 from src.data.config import Config
 import hashlib
 logger = get_logger(__name__)
@@ -27,7 +26,7 @@ class CacheManager:
         device: Optional[torch.device] = None
     ):
         """Initialize cache manager."""
-        self.cache_dir = Path(cache_dir)
+        self.cache_dir = Path(convert_windows_path(cache_dir))  # Convert path for WSL
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache_size = max_cache_size
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
