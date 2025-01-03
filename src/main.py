@@ -83,7 +83,7 @@ def main():
     mp.set_start_method('spawn', force=True)
     
     try:
-        # Load config
+        # Load config as single source of truth
         config = Config.from_yaml(CONFIG_PATH)
         logger, _ = setup_logging(config.global_config.logging)
         
@@ -92,12 +92,9 @@ def main():
             device = setup_device_and_logging(config)
             model = setup_model(config, device)
             
-            # Create dataset
-            image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+            # Create dataset using config
             dataset = create_dataset(
                 config=config,
-                image_paths=image_paths,
-                captions=captions,
                 model=model,
                 verify_cache=True
             )

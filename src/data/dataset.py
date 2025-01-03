@@ -13,7 +13,7 @@ from PIL import Image
 import numpy as np
 
 from src.core.logging import get_logger
-from src.data.utils.paths import convert_windows_path, is_windows_path, convert_paths
+from src.data.utils.paths import convert_windows_path, is_windows_path, load_data_from_directory
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXL
 from src.data.preprocessing import (
@@ -610,22 +610,11 @@ class AspectBucketDataset(Dataset):
 
 def create_dataset(
     config: Config,
-    image_paths: List[str],
-    captions: List[str],
     model: Optional[StableDiffusionXL] = None,
-    tag_weighter: Optional["TagWeighter"] = None,
     verify_cache: bool = True
 ) -> AspectBucketDataset:
-    """Create and initialize dataset instance with optional cache verification.
+    """Create dataset using config values with proper fallbacks."""
     
-    Args:
-        config: Training configuration
-        image_paths: List of image paths to process
-        captions: List of corresponding captions
-        model: Optional SDXL model for processing
-        tag_weighter: Optional tag weighting system
-        verify_cache: Whether to verify and rebuild cache before creating dataset
-    """
     # Initialize cache manager with config
     cache_manager = CacheManager(
         cache_dir=config.global_config.cache.cache_dir,
@@ -633,9 +622,11 @@ def create_dataset(
         max_cache_size=config.global_config.cache.max_cache_size
     )
     
+    # Load data paths from config
+    image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+    
     # Verify and rebuild cache if needed
     if verify_cache:
-        # Pass both image_paths and captions to verify_and_rebuild_cache
         cache_manager.verify_and_rebuild_cache(image_paths, captions)
     
     # Create dataset with all components
@@ -644,6 +635,5 @@ def create_dataset(
         image_paths=image_paths,
         captions=captions,
         model=model,
-        tag_weighter=tag_weighter,
         cache_manager=cache_manager
     )
