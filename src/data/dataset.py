@@ -40,7 +40,8 @@ class AspectBucketDataset(Dataset):
         is_train: bool = True,
         device: Optional[torch.device] = None,
         device_id: Optional[int] = None,
-        cache_manager: Optional["CacheManager"] = None
+        cache_manager: Optional["CacheManager"] = None,
+        transform: Optional[bool] = None
     ):
         """Initialize dataset with preprocessing capabilities."""
         super().__init__()
@@ -486,7 +487,6 @@ class AspectBucketDataset(Dataset):
         self, 
         img_tensor: torch.Tensor,
         original_size: Tuple[int, int],
-        config: Config,
         image_path: Union[str, Path]
     ) -> Dict[str, Any]:
         """Process image tensor ensuring VAE-compatible dimensions."""
@@ -507,7 +507,7 @@ class AspectBucketDataset(Dataset):
             "crop_coords": (0, 0)
         }
 
-    def _process_single_image(self, image_path: Union[str, Path], config: Config) -> Optional[Dict[str, Any]]:
+    def _process_single_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
         """Process a single image with aspect ratio bucketing and VAE encoding."""
         try:
             if torch.cuda.is_available():
@@ -540,35 +540,35 @@ class AspectBucketDataset(Dataset):
             processed = self._process_image_tensor(
                 img_tensor=img_tensor,
                 original_size=original_size,
-                config=config,
                 image_path=image_path
             )
             
             if processed is None:
                 return None
             
-            # Encode with VAE
-            with torch.no_grad():
-                pixel_values = processed["pixel_values"].unsqueeze(0)
-                vae_latents = self.vae.encode(pixel_values).latent_dist.sample()
-                vae_latents = vae_latents * self.vae.config.scaling_factor
-            
-            processed["vae_latents"] = vae_latents.squeeze(0)
+            # Encode with VAE if model is available
+            if self.model and hasattr(self.model, 'vae'):
+                with torch.no_grad():
+                    pixel_values = processed["pixel_values"].unsqueeze(0)
+                    vae_latents = self.model.vae.encode(pixel_values).latent_dist.sample()
+                    vae_latents = vae_latents * self.model.vae.config.scaling_factor
+                processed["vae_latents"] = vae_latents.squeeze(0)
             
             # Cache the processed data
-            self.cache_manager.save_latents(
-                tensors={
-                    "vae_latents": processed["vae_latents"],
-                },
-                image_path=image_path,
-                metadata={
-                    "original_size": processed["original_size"],
-                    "target_size": processed["target_size"],
-                    "latent_size": processed["latent_size"],
-                    "crop_coords": processed["crop_coords"],
-                    "timestamp": processed["timestamp"]
-                }
-            )
+            if "vae_latents" in processed:
+                self.cache_manager.save_latents(
+                    tensors={
+                        "vae_latents": processed["vae_latents"],
+                    },
+                    image_path=image_path,
+                    metadata={
+                        "original_size": processed["original_size"],
+                        "target_size": processed["target_size"],
+                        "latent_size": processed["latent_size"],
+                        "crop_coords": processed["crop_coords"],
+                        "timestamp": processed["timestamp"]
+                    }
+                )
             
             return processed
             
@@ -623,16 +623,32 @@ def create_dataset(
     image_paths: List[str],
     captions: List[str],
     model: Optional[StableDiffusionXL] = None,
-    tag_weighter: Optional["TagWeighter"] = None
+    tag_weighter: Optional["TagWeighter"] = None,
+    verify_cache: bool = True
 ) -> AspectBucketDataset:
-    """Create and initialize dataset instance."""
+    """Create and initialize dataset instance with optional cache verification.
+    
+    Args:
+        config: Training configuration
+        image_paths: List of image paths to process
+        captions: List of corresponding captions
+        model: Optional SDXL model for processing
+        tag_weighter: Optional tag weighting system
+        verify_cache: Whether to verify and rebuild cache before creating dataset
+    """
     # Initialize cache manager with config
     cache_manager = CacheManager(
         cache_dir=config.global_config.cache.cache_dir,
-        config=config,  # Pass config here
+        config=config,
         max_cache_size=config.global_config.cache.max_cache_size
     )
     
+    # Verify and rebuild cache if needed
+    if verify_cache:
+        # Pass both image_paths and captions to verify_and_rebuild_cache
+        cache_manager.verify_and_rebuild_cache(image_paths, captions)
+    
+    # Create dataset with all components
     return AspectBucketDataset(
         config=config,
         image_paths=image_paths,

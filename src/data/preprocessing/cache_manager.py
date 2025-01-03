@@ -594,3 +594,85 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to load tag index: {e}")
             return None
+
+    def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str], force_rebuild: bool = False) -> None:
+        """Verify cache integrity and rebuild missing entries.
+        
+        Args:
+            image_paths: List of image paths to verify/cache
+            captions: List of corresponding captions
+            force_rebuild: If True, regenerate all latents regardless of cache status
+        """
+        logger.info("Verifying cache integrity...")
+        
+        # Track statistics
+        stats = {
+            "total": len(image_paths),
+            "missing": 0,
+            "invalid": 0,
+            "processed": 0,
+            "skipped": 0
+        }
+        
+        # Create processing queue
+        to_process = []
+        to_process_captions = []
+        
+        # Verify existing entries
+        for img_path, caption in tqdm(zip(image_paths, captions), desc="Verifying cache entries", total=len(image_paths)):
+            cache_key = self.get_cache_key(img_path)
+            needs_processing = force_rebuild
+            
+            if not force_rebuild:
+                cache_entry = self.cache_index["entries"].get(cache_key)
+                if not cache_entry:
+                    stats["missing"] += 1
+                    needs_processing = True
+                elif not self._validate_and_clean_cache_entry(
+                    Path(cache_entry["tensors_path"]),
+                    Path(cache_entry["metadata_path"]),
+                    cache_key
+                ):
+                    stats["invalid"] += 1
+                    needs_processing = True
+            
+            if needs_processing:
+                to_process.append(img_path)
+                to_process_captions.append(caption)
+            else:
+                stats["skipped"] += 1
+        
+        # Process missing/invalid entries
+        if to_process:
+            logger.info(f"Processing {len(to_process)} images...")
+            from src.data.dataset import AspectBucketDataset  # Import here to avoid circular dependency
+            
+            # Create temporary dataset for processing
+            temp_dataset = AspectBucketDataset(
+                config=self.config,
+                image_paths=to_process,
+                captions=to_process_captions,
+                cache_manager=self,
+                transform=None,  # No additional transforms needed for caching
+                device=self.device
+            )
+            
+            # Process images
+            for idx in tqdm(range(len(temp_dataset)), desc="Generating latents"):
+                try:
+                    # This will trigger latent generation and caching
+                    _ = temp_dataset[idx]
+                    stats["processed"] += 1
+                except Exception as e:
+                    logger.error(f"Failed to process image {to_process[idx]}: {e}")
+                    stats["invalid"] += 1
+        
+        # Log final statistics
+        logger.info("\nCache verification complete:")
+        logger.info(f"Total images: {stats['total']}")
+        logger.info(f"Previously cached: {stats['skipped']}")
+        logger.info(f"Newly processed: {stats['processed']}")
+        logger.info(f"Failed/invalid: {stats['invalid']}")
+        
+        # Rebuild index one final time
+        self.rebuild_cache_index()
