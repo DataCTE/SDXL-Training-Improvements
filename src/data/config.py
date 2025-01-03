@@ -34,22 +34,68 @@ class ModelConfig:
 
 @dataclass
 class OptimizerConfig:
+    """Optimizer configuration with support for custom optimizers."""
     learning_rate: float = 1e-6
     weight_decay: float = 0.01
     beta1: float = 0.9
     beta2: float = 0.999
     epsilon: float = 1e-8
-    optimizer_type: str = "adamw_bf16"  # or "adamw", "adamw_bf16", "adamw_schedule_free_kahan", "SOAP"
+    optimizer_type: str = "adamw_bf16"  # "adamw_bf16", "adamw_schedule_free_kahan", "soap"
+    
+    # Schedule-free specific options
+    warmup_steps: int = 0
+    kahan_sum: bool = True
+    correct_bias: bool = True
+    
+    # SOAP specific options
+    precondition_frequency: int = 10
+    shampoo_beta: float = 0.95
+    max_precond_dim: int = 10000
+    precondition_1d: bool = False
+    merge_dims: bool = False
+    normalize_grads: bool = False
+    data_format: str = "channels_first"
+
+    @property
+    def class_name(self) -> str:
+        """Map optimizer_type to optimizer class."""
+        optimizer_map = {
+            "adamw_bf16": "AdamWBF16",
+            "adamw_schedule_free_kahan": "AdamWScheduleFreeKahan",
+            "soap": "SOAP"
+        }
+        if self.optimizer_type.lower() not in optimizer_map:
+            raise ValueError(f"Unsupported optimizer type: {self.optimizer_type}")
+        return optimizer_map[self.optimizer_type.lower()]
 
     @property
     def kwargs(self) -> dict:
-        """Get optimizer configuration parameters."""
-        return {
+        """Get optimizer configuration parameters based on type."""
+        base_kwargs = {
             "lr": self.learning_rate,
             "weight_decay": self.weight_decay,
             "betas": (self.beta1, self.beta2),
-            "eps": self.epsilon
+            "eps": self.epsilon,
+            "correct_bias": self.correct_bias
         }
+        
+        if self.optimizer_type == "adamw_schedule_free_kahan":
+            base_kwargs.update({
+                "warmup_steps": self.warmup_steps,
+                "kahan_sum": self.kahan_sum
+            })
+        elif self.optimizer_type == "soap":
+            base_kwargs.update({
+                "precondition_frequency": self.precondition_frequency,
+                "shampoo_beta": self.shampoo_beta,
+                "max_precond_dim": self.max_precond_dim,
+                "precondition_1d": self.precondition_1d,
+                "merge_dims": self.merge_dims,
+                "normalize_grads": self.normalize_grads,
+                "data_format": self.data_format
+            })
+            
+        return base_kwargs
 
 @dataclass
 class SchedulerConfig:
