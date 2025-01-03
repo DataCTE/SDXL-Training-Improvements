@@ -42,8 +42,7 @@ from .training import (
     get_karras_sigmas,
     get_sigmas,
     get_scheduler_parameters,
-    get_add_time_ids,
-    create_trainer,
+    get_add_time_ids,   
     save_checkpoint
 )
 
@@ -93,6 +92,5 @@ __all__: List[str] = [
     "get_sigmas",
     "get_scheduler_parameters",
     "get_add_time_ids",
-    "create_trainer",
     "save_checkpoint"
 ]
