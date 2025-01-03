@@ -22,6 +22,7 @@ class BaseTrainer(ABC):
         config: Optional[Config] = None,
         **kwargs
     ):
+        super().__init__()
         self.model = model
         self.optimizer = optimizer
         self.train_dataloader = train_dataloader
