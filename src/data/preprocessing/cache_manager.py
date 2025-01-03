@@ -13,6 +13,7 @@ import numpy as np
 from tqdm import tqdm
 from src.data.preprocessing.bucket_utils import compute_bucket_dims, generate_buckets
 from src.data.config import Config
+import hashlib
 logger = get_logger(__name__)
 
 class CacheManager:
@@ -25,15 +26,7 @@ class CacheManager:
         max_cache_size: int = 10000,
         device: Optional[torch.device] = None
     ):
-        """Initialize cache manager.
-        
-        Args:
-            cache_dir: Base directory for cache storage
-            config: Configuration object
-            max_cache_size: Maximum number of entries to keep
-            device: Default device for loading tensors
-        """
-        # Initialize base attributes first
+        """Initialize cache manager."""
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache_size = max_cache_size
@@ -49,517 +42,164 @@ class CacheManager:
         self.latents_dir.mkdir(exist_ok=True)
         self.metadata_dir.mkdir(exist_ok=True)
         
-        # Add tag cache setup
-        self.tags_dir = self.cache_dir / "tags"
-        self.tags_dir.mkdir(exist_ok=True)
-        self.tag_index_path = self.tags_dir / "tag_weights_index.json"
-        self.tag_cache = {}  # Memory cache for tag weights
-        
-        # Initialize buckets before rebuild_cache_index is called
-        self.buckets = generate_buckets(config)  # Will use default buckets if config is None
-        
         # Initialize cache state
         self.index_path = self.cache_dir / "cache_index.json"
-        
-        # Rebuild index if needed
-        if not self.index_path.exists():
-            self.rebuild_cache_index()
-        else:
-            try:
-                with open(self.index_path) as f:
-                    self.cache_index = json.load(f)
-            except Exception as e:
-                logger.warning(f"Failed to load cache index: {e}. Rebuilding...")
-                self.rebuild_cache_index()
-        
-        logger.info(f"Cache initialized at {self.cache_dir} with {len(self.buckets)} buckets")
-
-    # Cache Initialization Methods
-    def _initialize_cache(self):
-        """Initialize or load cache state."""
-        self.index_path = self.cache_dir / "cache_index.json"
-        
-        if self.index_path.exists():
-            try:
-                with open(self.index_path) as f:
-                    self.cache_index = json.load(f)
-            except Exception as e:
-                logger.error(f"Failed to load cache index: {e}")
-                self._create_new_index()
-        else:
-            self._create_new_index()
-
-    def _create_new_index(self):
-        """Create new cache index structure."""
-        self.cache_index = {
-            "version": "1.0",
-            "created_at": time.time(),
-            "last_updated": time.time(),
-            "entries": {},
-            "stats": {
-                "total_entries": 0,
-                "latents_size": 0,
-                "last_cleanup": None
-            }
-        }
-        self._save_index()
-
-    # Core Cache Operations
-    def save_latents(self, tensors: Dict[str, torch.Tensor], original_path: Union[str, Path], metadata: Dict[str, Any], bucket_dims: Optional[Tuple[int, int]] = None) -> bool:
-        """Save VAE encoded latents and other tensors to cache."""
-        cache_key = self.get_cache_key(original_path)
-        tensors_path = self.latents_dir / f"{cache_key}.pt"
-        metadata_path = self.metadata_dir / f"{cache_key}.json"
-        
-        try:
-            # Save all tensors to CPU
-            tensors_to_save = {
-                "vae_latents": tensors["vae_latents"].cpu(),
-                "prompt_embeds": tensors["prompt_embeds"].cpu(),
-                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu(),
-                "time_ids": tensors["time_ids"].cpu()
-            }
-            
-            # Save tensors
-            if not self._save_tensor_file(tensors_to_save, tensors_path):
-                return False
-                
-            full_metadata = {
-                "original_path": str(original_path),
-                "created_at": time.time(),
-                "bucket_dims": bucket_dims,  # Add bucket dimensions to metadata
-                **metadata
-            }
-            
-            with open(metadata_path, 'w') as f:
-                json.dump(full_metadata, f)
-            
-            with self._lock:
-                self.cache_index["entries"][cache_key] = {
-                    "tensors_path": str(tensors_path),
-                    "metadata_path": str(metadata_path),
-                    "created_at": time.time(),
-                    "is_valid": True,
-                    "last_checked": time.time(),
-                    "bucket_dims": bucket_dims  # Add bucket dimensions to index
-                }
-                self._update_stats()
-                
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to save tensors to cache: {e}")
-            return False
-
-    def load_tensors(self, cache_key: str, device: Optional[torch.device] = None) -> Optional[Dict[str, Any]]:
-        """Load cached tensors with validation."""
-        try:
-            entry = self.cache_index["entries"].get(cache_key)
-            if not entry or not entry.get("is_valid", False):
-                return None
-
-            tensor_path = Path(entry["tensors_path"])
-            metadata_path = Path(entry["metadata_path"])
-            
-            if not self._validate_and_clean_cache_entry(tensor_path, metadata_path, cache_key):
-                return None
-
-            device = device or self.device
-            
-            # Load tensors with proper error handling
-            try:
-                tensors = torch.load(tensor_path, map_location=device)
-            except Exception as e:
-                logger.error(f"Failed to load tensor file {tensor_path}: {e}")
-                self._invalidate_cache_entry(cache_key)
-                return None
-
-            # Load metadata with proper error handling
-            try:
-                with open(metadata_path) as f:
-                    metadata = json.load(f)
-            except Exception as e:
-                logger.error(f"Failed to load metadata file {metadata_path}: {e}")
-                self._invalidate_cache_entry(cache_key)
-                return None
-
-            # Validate required keys
-            required_keys = {
-                "tensors": {"vae_latents", "prompt_embeds", "pooled_prompt_embeds", "time_ids"},
-                "metadata": {"original_size", "crop_coords", "target_size"}
-            }
-            
-            if not all(k in tensors for k in required_keys["tensors"]):
-                logger.error(f"Missing required tensor keys in {tensor_path}")
-                self._invalidate_cache_entry(cache_key)
-                return None
-            
-            if not all(k in metadata for k in required_keys["metadata"]):
-                logger.error(f"Missing required metadata keys in {metadata_path}")
-                self._invalidate_cache_entry(cache_key)
-                return None
-
-            return {
-                "metadata": metadata,
-                **tensors
-            }
-
-        except Exception as e:
-            logger.error(f"Unexpected error loading cache for {cache_key}: {str(e)}")
-            self._invalidate_cache_entry(cache_key)
-            return None
-
-    # Helper Methods
-    def get_cache_key(self, path: Union[str, Path]) -> str:
-        """Generate cache key from path using ultra-fast string operations."""
-        path_str = str(path)
-        
-        # Find last directory separator
-        last_sep = max(path_str.rfind('/'), path_str.rfind('\\'))
-        if last_sep == -1:
-            second_last_sep = -1
-        else:
-            second_last_sep = max(
-                path_str.rfind('/', 0, last_sep),
-                path_str.rfind('\\', 0, last_sep)
-            )
-        
-        # Find extension dot
-        dot_pos = path_str.rfind('.')
-        
-        # Extract parts directly using string slicing
-        dir_name = path_str[second_last_sep + 1:last_sep]
-        file_name = path_str[last_sep + 1:dot_pos]
-        
-        return f"{dir_name}_{file_name}"
-
-    def load_image_to_tensor(self, image_path: Union[str, Path], device: Optional[torch.device] = None) -> Tuple[torch.Tensor, Tuple[int, int]]:
-        """Load and convert image to tensor with proper device placement."""
-        try:
-            device = device or self.device
-            img = Image.open(image_path).convert('RGB')
-            w, h = img.size
-            
-            # Convert to tensor efficiently
-            img_tensor = torch.from_numpy(np.array(img)).float().to(device) / 255.0
-            img_tensor = img_tensor.permute(2, 0, 1)  # Convert to CxHxW
-            
-            return img_tensor, (w, h)
-            
-        except Exception as e:
-            logger.error(f"Failed to load image {image_path}: {e}")
-            return None
-
-    # File Operations
-    def _save_tensor_file(self, tensors: Dict[str, torch.Tensor], path: Path) -> bool:
-        """Common tensor saving logic."""
-        try:
-            torch.save(tensors, path)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save tensors: {e}")
-            return False
-
-    def _load_tensor_file(self, path: Path, device: torch.device) -> Optional[Dict[str, torch.Tensor]]:
-        """Common tensor loading logic."""
-        try:
-            return torch.load(path, map_location=device)
-        except Exception as e:
-            logger.error(f"Failed to load tensors: {e}")
-            return None
-
-    # Cache Management
-    def _save_index(self) -> None:
-        """Save cache index to disk with proper error handling."""
-        try:
-            temp_path = self.index_path.with_suffix('.tmp')
-            
-            with open(temp_path, 'w') as f:
-                json.dump({
-                    "version": self.cache_index["version"],
-                    "created_at": self.cache_index["created_at"],
-                    "last_updated": time.time(),
-                    "entries": self.cache_index["entries"],
-                    "stats": self.cache_index["stats"]
-                }, f, indent=2)
-            
-            temp_path.replace(self.index_path)
-            
-        except Exception as e:
-            logger.error(f"Failed to save cache index: {e}")
-            if temp_path.exists():
-                temp_path.unlink()
-            raise
-
-    def _update_stats(self):
-        """Update cache statistics."""
-        cache_size = self._get_cache_size()
-        stats = {
-            "total_entries": len(self.cache_index["entries"]),
-            "latents_size": cache_size,
-            "last_updated": time.time()
-        }
-        self.cache_index["stats"].update(stats)
-
-    def _get_cache_size(self) -> int:
-        """Get total size of cached files."""
-        return sum(os.path.getsize(str(p)) for p in self.latents_dir.glob("*.pt"))
-
-    def cleanup(self, max_age: Optional[float] = None):
-        """Optimized cleanup with batch processing."""
-        try:
-            with self._lock:
-                current_time = time.time()
-                keys_to_remove = set()
-                
-                # Batch process entries
-                for key, entry in self.cache_index["entries"].items():
-                    if (max_age and (current_time - entry["created_at"]) > max_age) or \
-                       (not Path(entry["tensors_path"]).exists() or not Path(entry["metadata_path"]).exists()):
-                        keys_to_remove.add(key)
-                
-                if not keys_to_remove:
-                    return
-                
-                # Batch delete files
-                for key in keys_to_remove:
-                    entry = self.cache_index["entries"][key]
-                    try:
-                        os.remove(entry["tensors_path"])
-                        os.remove(entry["metadata_path"])
-                    except OSError:
-                        pass
-                    del self.cache_index["entries"][key]
-                
-                # Single stats update
-                self._update_stats()
-                self.cache_index["stats"]["last_cleanup"] = current_time
-                self._save_index()
-                
-                logger.info(f"Cleaned up {len(keys_to_remove)} cache entries")
-                
-        except Exception as e:
-            logger.error(f"Cache cleanup failed: {e}")
-
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.cleanup()
-
-    def is_cached(self, path: Union[str, Path]) -> bool:
-        """Check if path is already cached and valid.
-        
-        Optimized version that minimizes file system operations and uses
-        in-memory checks where possible.
-        """
-        cache_key = self.get_cache_key(path)
-        
-        # Quick dictionary lookup first
-        if cache_key not in self.cache_index["entries"]:
-            return False
-        
-        entry = self.cache_index["entries"][cache_key]
-        
-        # Use cached validity status if recently checked
-        if "is_valid" in entry and time.time() - entry.get("last_checked", 0) < 300:  # Cache for 5 minutes
-            return entry["is_valid"]
-        
-        # Check files exist and are non-empty
-        tensors_path = Path(entry["tensors_path"])
-        metadata_path = Path(entry["metadata_path"])
-        
-        try:
-            is_valid = (
-                tensors_path.exists() and 
-                metadata_path.exists() and 
-                tensors_path.stat().st_size > 0 and  # Check file is not empty
-                metadata_path.stat().st_size > 0
-            )
-        except Exception:
-            is_valid = False
-        
-        # Cache the validity status
-        with self._lock:
-            entry["is_valid"] = is_valid
-            entry["last_checked"] = time.time()
-            
-            if not is_valid:
-                del self.cache_index["entries"][cache_key]
-                self._save_index()
-        
-        return is_valid
-
-    def _invalidate_cache_entry(self, cache_key: str) -> None:
-        """Invalidate and clean up a cache entry."""
-        with self._lock:
-            if cache_key in self.cache_index["entries"]:
-                entry = self.cache_index["entries"][cache_key]
-                # Try to clean up files
-                try:
-                    Path(entry["tensors_path"]).unlink(missing_ok=True)
-                    Path(entry["metadata_path"]).unlink(missing_ok=True)
-                except Exception:
-                    pass
-                # Remove from index
-                del self.cache_index["entries"][cache_key]
-                self._save_index()
-
-    def are_all_paths_cached(self, paths: List[Union[str, Path]]) -> bool:
-        """Quickly check if all paths exist in cache index without file system checks."""
-        try:
-            # Convert all paths to cache keys
-            cache_keys = {self.get_cache_key(path) for path in paths}
-            
-            # Check if all keys exist in cache index
-            all_cached = all(
-                key in self.cache_index["entries"] and 
-                self.cache_index["entries"][key].get("is_valid", False)
-                for key in cache_keys
-            )
-            
-            if all_cached:
-                logger.info("All images found in cache index")
-                return True
-                
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error checking cache index: {e}")
-            return False
+        self.rebuild_cache_index()
 
     def rebuild_cache_index(self) -> None:
-        """Rebuild cache index from existing files in cache directories."""
-        if not self.buckets:
-            logger.warning("No buckets available for cache rebuild. Generating from config...")
-            self.buckets = generate_buckets(self.config)
-            
-        logger.info("Rebuilding cache index from existing files...")
-        
-        # Create new index structure
+        """Rebuild cache index from disk as source of truth."""
         new_index = {
             "version": "1.0",
             "created_at": time.time(),
             "last_updated": time.time(),
             "entries": {},
-            "stats": {"total_entries": 0, "latents_size": 0, "last_cleanup": None}
+            "stats": {"total_entries": 0, "latents_size": 0}
         }
         
         # Scan latents directory
-        latents_files = list(self.latents_dir.glob("*.pt"))
-        logger.info(f"Found {len(latents_files)} existing latent files. Rebuilding index...")
-        
-        for latents_path in tqdm(latents_files, desc="Rebuilding cache index"):
-            try:
-                metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
-                if not (latents_path.exists() and metadata_path.exists()):
-                    continue
+        for latents_path in self.latents_dir.glob("*.pt"):
+            metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
+            
+            if not (latents_path.exists() and metadata_path.exists()):
+                continue
                 
+            try:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
-                original_path = metadata.get("original_path")
-                original_size = metadata.get("original_size")
-                bucket_dims = metadata.get("bucket_dims")
                 
-                # Compute bucket dims if missing using AspectBucketDataset's method
-                if not bucket_dims and original_size:
-                    bucket_dims = compute_bucket_dims(original_size, self.buckets)
-                
-                if original_path:
-                    cache_key = self.get_cache_key(original_path)
-                    new_index["entries"][cache_key] = {
-                        "tensors_path": str(latents_path),
-                        "metadata_path": str(metadata_path),
-                        "created_at": metadata.get("created_at", time.time()),
-                        "is_valid": True,
-                        "last_checked": time.time(),
-                        "bucket_dims": bucket_dims
-                    }
+                cache_key = self.get_cache_key(metadata["original_path"])
+                new_index["entries"][cache_key] = {
+                    "tensors_path": str(latents_path),
+                    "metadata_path": str(metadata_path),
+                    "created_at": metadata.get("created_at", time.time()),
+                    "bucket_dims": metadata.get("bucket_dims"),
+                    "is_valid": True
+                }
             except Exception as e:
                 logger.warning(f"Failed to process cache file {latents_path}: {e}")
-                continue
         
-        # Update stats and save
-        new_index["stats"]["total_entries"] = len(new_index["entries"])
-        new_index["stats"]["latents_size"] = sum(
-            os.path.getsize(str(p)) for p in latents_files if p.exists()
-        )
         self.cache_index = new_index
         self._save_index()
+
+    def get_uncached_paths(self, image_paths: List[str]) -> List[str]:
+        """Get list of paths that need processing."""
+        uncached = []
+        for path in image_paths:
+            cache_key = self.get_cache_key(path)
+            cache_entry = self.cache_index["entries"].get(cache_key)
+            
+            if not cache_entry or not self._validate_cache_entry(cache_entry):
+                uncached.append(path)
+                
+        return uncached
+
+    def save_latents(
+        self, 
+        tensors: Dict[str, torch.Tensor],
+        path: Union[str, Path],
+        metadata: Dict[str, Any],
+        bucket_dims: Optional[Tuple[int, int]] = None
+    ) -> bool:
+        """Save processed tensors and metadata to cache."""
+        cache_key = self.get_cache_key(path)
+        tensors_path = self.latents_dir / f"{cache_key}.pt"
+        metadata_path = self.metadata_dir / f"{cache_key}.json"
         
-        logger.info(f"Cache index rebuilt with {len(new_index['entries'])} valid entries")
-
-    def _validate_and_clean_cache_entry(self, tensor_path: Path, metadata_path: Path, cache_key: str) -> bool:
-        """Validate cache entry files and clean up if invalid."""
         try:
-            # Check if both files exist and are non-empty
-            if not (tensor_path.exists() and metadata_path.exists()):
-                self._invalidate_cache_entry(cache_key)
-                return False
-
-            # Check file sizes
-            if tensor_path.stat().st_size == 0 or metadata_path.stat().st_size == 0:
-                self._invalidate_cache_entry(cache_key)
-                return False
-
-            # Try to load metadata to verify it's valid JSON
-            try:
-                with open(metadata_path) as f:
-                    metadata = json.load(f)
-                    if not isinstance(metadata, dict):
-                        raise ValueError("Metadata is not a dictionary")
-            except Exception:
-                self._invalidate_cache_entry(cache_key)
-                return False
-
-            # Try to load tensor file header to verify it's valid
-            try:
-                torch.load(tensor_path, map_location="cpu", weights_only=True)
-            except Exception:
-                self._invalidate_cache_entry(cache_key)
-                return False
-
+            # Save tensors
+            torch.save({k: v.cpu() for k, v in tensors.items()}, tensors_path)
+            
+            # Save metadata
+            full_metadata = {
+                "original_path": str(path),
+                "created_at": time.time(),
+                "bucket_dims": bucket_dims,
+                **metadata
+            }
+            with open(metadata_path, 'w') as f:
+                json.dump(full_metadata, f)
+            
+            # Update index
+            with self._lock:
+                self.cache_index["entries"][cache_key] = {
+                    "tensors_path": str(tensors_path),
+                    "metadata_path": str(metadata_path),
+                    "created_at": time.time(),
+                    "bucket_dims": bucket_dims,
+                    "is_valid": True
+                }
+                self._save_index()
+            
             return True
-
+            
         except Exception as e:
-            logger.error(f"Error validating cache entry {cache_key}: {e}")
-            self._invalidate_cache_entry(cache_key)
+            logger.error(f"Failed to save to cache: {e}")
             return False
 
-    def get_tag_dir(self) -> Path:
-        """Get path to tag directory."""
-        tag_dir = self.cache_dir / "tags"
-        tag_dir.mkdir(parents=True, exist_ok=True)
-        return tag_dir
+    def load_tensors(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Load cached tensors and metadata."""
+        entry = self.cache_index["entries"].get(cache_key)
+        if not entry or not self._validate_cache_entry(entry):
+            return None
+            
+        try:
+            tensors = torch.load(entry["tensors_path"], map_location=self.device)
+            with open(entry["metadata_path"]) as f:
+                metadata = json.load(f)
+            return {"metadata": metadata, **tensors}
+        except Exception as e:
+            logger.error(f"Failed to load cache entry: {e}")
+            return None
 
-    def get_tag_index_path(self) -> Path:
-        """Get path to tag index file."""
-        return self.get_tag_dir() / "tag_index.json"
+    def _validate_cache_entry(self, entry: Dict[str, Any]) -> bool:
+        """Validate cache entry files exist and are valid."""
+        return (
+            Path(entry["tensors_path"]).exists() and
+            Path(entry["metadata_path"]).exists() and
+            entry.get("is_valid", False)
+        )
+
+    def _save_index(self) -> None:
+        """Save cache index to disk atomically."""
+        temp_path = self.index_path.with_suffix('.tmp')
+        try:
+            with open(temp_path, 'w') as f:
+                json.dump(self.cache_index, f, indent=2)
+            temp_path.replace(self.index_path)
+        except Exception as e:
+            logger.error(f"Failed to save cache index: {e}")
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def get_cache_key(self, path: Union[str, Path]) -> str:
+        """Generate cache key from path."""
+        path_str = str(path)
+        return hashlib.md5(path_str.encode()).hexdigest()
 
     def save_tag_index(self, index_data: Dict[str, Any], index_path: Optional[Path] = None) -> bool:
-        """Save tag index with atomic write and proper structure."""
+        """Save tag index with split files for better performance."""
         try:
-            if index_path is None:
-                index_path = self.get_tag_index_path()
+            # Split data into statistics and image tags
+            statistics_data = {
+                "metadata": index_data["metadata"],
+                "statistics": index_data["statistics"]
+            }
+            image_tags_data = {
+                "images": index_data["images"]
+            }
             
-            # Validate index structure
-            required_keys = {"metadata", "statistics", "images"}
-            if not all(k in index_data for k in required_keys):
-                raise ValueError(f"Missing required keys in index data: {required_keys - set(index_data.keys())}")
+            # Save statistics
+            stats_path = self.get_tag_statistics_path()
+            self._atomic_json_save(stats_path, statistics_data)
             
-            # Create temp file for atomic write
-            temp_path = index_path.with_suffix('.tmp')
-            
-            # Write with proper formatting
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2, ensure_ascii=False)
-            
-            # Atomic rename
-            temp_path.replace(index_path)
+            # Save image tags
+            tags_path = self.get_image_tags_path()
+            self._atomic_json_save(tags_path, image_tags_data)
             
             # Update cache index
             with self._lock:
-                self.cache_index["tag_index_path"] = str(index_path)
+                self.cache_index["tag_stats_path"] = str(stats_path)
+                self.cache_index["image_tags_path"] = str(tags_path)
                 self.cache_index["tag_index_updated"] = time.time()
                 self._save_index()
             
@@ -567,112 +207,28 @@ class CacheManager:
             
         except Exception as e:
             logger.error(f"Failed to save tag index: {e}")
-            if 'temp_path' in locals() and temp_path.exists():
-                temp_path.unlink()
             return False
 
-    def load_tag_index(self, index_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-        """Load and validate tag index data."""
+    def _atomic_json_save(self, path: Path, data: Dict[str, Any]) -> None:
+        """Save JSON data atomically with proper formatting."""
+        temp_path = path.with_suffix('.tmp')
         try:
-            if index_path is None:
-                index_path = self.get_tag_index_path()
-            
-            if not index_path.exists():
-                return None
-            
-            with open(index_path, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
-            
-            # Validate structure
-            required_keys = {"metadata", "statistics", "images"}
-            if not all(k in index_data for k in required_keys):
-                logger.error(f"Invalid tag index structure in {index_path}")
-                return None
-            
-            return index_data
-            
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            temp_path.replace(path)
         except Exception as e:
-            logger.error(f"Failed to load tag index: {e}")
-            return None
+            if temp_path.exists():
+                temp_path.unlink()
+            raise e
 
-    def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str], force_rebuild: bool = False) -> None:
-        """Verify cache integrity and rebuild missing entries.
-        
-        Args:
-            image_paths: List of image paths to verify/cache
-            captions: List of corresponding captions
-            force_rebuild: If True, regenerate all latents regardless of cache status
-        """
-        logger.info("Verifying cache integrity...")
-        
-        # Track statistics
-        stats = {
-            "total": len(image_paths),
-            "missing": 0,
-            "invalid": 0,
-            "processed": 0,
-            "skipped": 0
-        }
-        
-        # Create processing queue
-        to_process = []
-        to_process_captions = []
-        
-        # Verify existing entries
-        for img_path, caption in tqdm(zip(image_paths, captions), desc="Verifying cache entries", total=len(image_paths)):
-            cache_key = self.get_cache_key(img_path)
-            needs_processing = force_rebuild
-            
-            if not force_rebuild:
-                cache_entry = self.cache_index["entries"].get(cache_key)
-                if not cache_entry:
-                    stats["missing"] += 1
-                    needs_processing = True
-                elif not self._validate_and_clean_cache_entry(
-                    Path(cache_entry["tensors_path"]),
-                    Path(cache_entry["metadata_path"]),
-                    cache_key
-                ):
-                    stats["invalid"] += 1
-                    needs_processing = True
-            
-            if needs_processing:
-                to_process.append(img_path)
-                to_process_captions.append(caption)
-            else:
-                stats["skipped"] += 1
-        
-        # Process missing/invalid entries
-        if to_process:
-            logger.info(f"Processing {len(to_process)} images...")
-            from src.data.dataset import AspectBucketDataset  # Import here to avoid circular dependency
-            
-            # Create temporary dataset for processing
-            temp_dataset = AspectBucketDataset(
-                config=self.config,
-                image_paths=to_process,
-                captions=to_process_captions,
-                cache_manager=self,
-                transform=None,  # No additional transforms needed for caching
-                device=self.device
-            )
-            
-            # Process images
-            for idx in tqdm(range(len(temp_dataset)), desc="Generating latents"):
-                try:
-                    # This will trigger latent generation and caching
-                    _ = temp_dataset[idx]
-                    stats["processed"] += 1
-                except Exception as e:
-                    logger.error(f"Failed to process image {to_process[idx]}: {e}")
-                    stats["invalid"] += 1
-        
-        # Log final statistics
-        logger.info("\nCache verification complete:")
-        logger.info(f"Total images: {stats['total']}")
-        logger.info(f"Previously cached: {stats['skipped']}")
-        logger.info(f"Newly processed: {stats['processed']}")
-        logger.info(f"Failed/invalid: {stats['invalid']}")
-        
-        # Rebuild index one final time
-        self.rebuild_cache_index()
+    def get_tag_statistics_path(self) -> Path:
+        """Get path for tag statistics file."""
+        tags_dir = self.cache_dir / "tags"
+        tags_dir.mkdir(exist_ok=True)
+        return tags_dir / "statistics.json"
+
+    def get_image_tags_path(self) -> Path:
+        """Get path for image tags file."""
+        tags_dir = self.cache_dir / "tags"
+        tags_dir.mkdir(exist_ok=True)
+        return tags_dir / "image_tags.json"

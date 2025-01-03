@@ -370,118 +370,104 @@ class AspectBucketDataset(Dataset):
         return torch.tensor([time_ids], device=device, dtype=dtype)
 
     def _precompute_latents(self) -> None:
-        """Process entire dataset in chunks of 1000 images, with progress tracking."""
+        """Process uncached images and store their latents."""
         total_images = len(self.image_paths)
         
-        # Quick check of cache index first
-        if self.cache_manager.are_all_paths_cached(self.image_paths):
-            logger.info("All images already in cache index. Skipping preprocessing.")
-            return
-        
-        # If not all in cache index, do detailed scanning
-        logger.info("Checking detailed cache status for all images...")
-        uncached_paths = []
-        for path in tqdm(self.image_paths, desc="Checking cache"):
-            if not self.cache_manager.is_cached(path):
-                uncached_paths.append(path)
+        # Get list of paths that need processing from cache manager
+        uncached_paths = self.cache_manager.get_uncached_paths(self.image_paths)
         
         if not uncached_paths:
-            logger.info("All images already cached. Skipping preprocessing.")
+            logger.info("All images already in cache. Skipping preprocessing.")
             return
         
         logger.info(f"Found {len(uncached_paths)} uncached images. Starting preprocessing...")
         
-        # Process uncached images in chunks
+        # Get corresponding captions for uncached paths
+        uncached_captions = [self.captions[self.image_paths.index(p)] for p in uncached_paths]
+        
+        # Process in chunks
         chunk_size = 1000
-        total_chunks = (len(uncached_paths) + chunk_size - 1) // chunk_size
+      
         
-        # Create overall progress bar for chunks
-        chunk_pbar = tqdm(
-            total=total_chunks,
-            desc="Processing dataset chunks",
-            unit="chunk",
-            position=0,
-            leave=True
-        )
-        
-        processed_count = 0
-        failed_images = []
-        
-        for chunk_idx in range(total_chunks):
-            start_idx = chunk_idx * chunk_size
-            end_idx = min(start_idx + chunk_size, len(uncached_paths))
-            chunk_paths = uncached_paths[start_idx:end_idx]
-            
-            # Process images in smaller batches
-            batch_size = 8
-            
-            # Create progress bar for current chunk
-            batch_pbar = tqdm(
-                total=len(chunk_paths),
-                desc=f"Chunk {chunk_idx + 1}/{total_chunks}",
-                unit="img",
-                position=1,
-                leave=False
-            )
-            
-            for batch_start in range(0, len(chunk_paths), batch_size):
-                batch_end = min(batch_start + batch_size, len(chunk_paths))
-                batch_paths = chunk_paths[batch_start:batch_end]
-                batch_captions = [self.captions[self.image_paths.index(p)] for p in batch_paths]
+        with tqdm(total=len(uncached_paths), desc="Processing images") as pbar:
+            for chunk_start in range(0, len(uncached_paths), chunk_size):
+                chunk_end = min(chunk_start + chunk_size, len(uncached_paths))
+                chunk_paths = uncached_paths[chunk_start:chunk_end]
+                chunk_captions = uncached_captions[chunk_start:chunk_end]
                 
-                processed_items = self.process_image_batch(
-                    image_paths=batch_paths,
-                    captions=batch_captions,
-                    config=self.config
-                )
-                
-                # Track successful and failed processing
-                for item, path in zip(processed_items, batch_paths):
-                    if item is not None:
-                        processed_count += 1
-                    else:
-                        failed_images.append(path)
-                
-                batch_pbar.update(len(batch_paths))
-                
-                # Clear CUDA cache periodically
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                # Process in smaller batches for memory efficiency
+                batch_size = 8
+                for batch_start in range(0, len(chunk_paths), batch_size):
+                    batch_end = min(batch_start + batch_size, len(chunk_paths))
+                    batch_paths = chunk_paths[batch_start:batch_end]
+                    batch_captions = chunk_captions[batch_start:batch_end]
+                    
+                    try:
+                        # Load and process images
+                        for path, caption in zip(batch_paths, batch_captions):
+                            # Load image
+                            img = Image.open(path).convert('RGB')
+                            img_tensor = torch.from_numpy(np.array(img)).float() / 255.0
+                            img_tensor = img_tensor.permute(2, 0, 1).to(self.device)
+                            
+                            # Get bucket dimensions
+                            bucket_dims = compute_bucket_dims(img.size, self.buckets)
+                            
+                            # Encode with VAE
+                            with torch.no_grad():
+                                vae_latents = self.model.vae.encode(
+                                    img_tensor.unsqueeze(0)
+                                ).latent_dist.sample()
+                                vae_latents = vae_latents * self.model.vae.config.scaling_factor
+                            
+                            # Encode text
+                            text_output = self.encode_prompt(
+                                batch={"text": [caption]},
+                                proportion_empty_prompts=0.0
+                            )
+                            
+                            # Compute time ids
+                            time_ids = self._compute_time_ids(
+                                original_size=img.size,
+                                crops_coords_top_left=(0, 0),
+                                target_size=(bucket_dims[0]*8, bucket_dims[1]*8)
+                            )
+                            
+                            # Save to cache
+                            self.cache_manager.save_latents(
+                                tensors={
+                                    "vae_latents": vae_latents.squeeze(0),
+                                    "prompt_embeds": text_output["prompt_embeds"][0],
+                                    "pooled_prompt_embeds": text_output["pooled_prompt_embeds"][0],
+                                    "time_ids": time_ids
+                                },
+                                path=path,
+                                metadata={
+                                    "original_size": img.size,
+                                    "crop_coords": (0, 0),
+                                    "target_size": (bucket_dims[0]*8, bucket_dims[1]*8),
+                                    "text": caption
+                                },
+                                bucket_dims=bucket_dims
+                            )
+                            
+                            pbar.update(1)
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to process batch: {e}")
+                        continue
+                    
+                    # Clear CUDA cache periodically
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
             
-            batch_pbar.close()
-            chunk_pbar.update(1)
-            
-            # Log progress after each chunk
+            # Log final statistics
             logger.info(
-                f"Processed {processed_count}/{len(uncached_paths)} images "
-                f"({len(failed_images)} failures)"
+                f"\nPrecomputing complete:\n"
+                f"- Total images: {total_images}\n"
+                f"- Already cached: {total_images - len(uncached_paths)}\n"
+                f"- Processed: {len(uncached_paths)}\n"
             )
-        
-        chunk_pbar.close()
-        
-        # Final summary
-        success_rate = (processed_count / len(uncached_paths)) * 100 if uncached_paths else 100
-        logger.info(
-            f"\nPrecomputing complete:\n"
-            f"- Total images: {total_images}\n"
-            f"- Already cached: {total_images - len(uncached_paths)}\n"
-            f"- Needed processing: {len(uncached_paths)}\n"
-            f"- Successfully processed: {processed_count}\n"
-            f"- Failed: {len(failed_images)}\n"
-            f"- Success rate: {success_rate:.2f}%"
-        )
-        
-        if failed_images:
-            logger.warning(
-                f"Failed to process {len(failed_images)} images. "
-                "These will be skipped during training."
-            )
-            # Log failed images to file
-            log_dir = Path(self.config.global_config.logging.log_dir)
-            failed_log = log_dir / "failed_images.txt"
-            with open(failed_log, 'w') as f:
-                f.write('\n'.join(failed_images))
-            logger.info(f"Failed image paths logged to: {failed_log}")
 
     def _process_image_tensor(
         self, 
