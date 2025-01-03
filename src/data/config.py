@@ -40,7 +40,7 @@ class OptimizerConfig:
     beta1: float = 0.9
     beta2: float = 0.999
     epsilon: float = 1e-8
-    optimizer_type: str = "adamw_bf16"  # "adamw_bf16", "adamw_schedule_free_kahan", "soap"
+    optimizer_type: str = "adamw_bf16"
     
     # Schedule-free specific options
     warmup_steps: int = 0
@@ -71,21 +71,31 @@ class OptimizerConfig:
     @property
     def kwargs(self) -> dict:
         """Get optimizer configuration parameters based on type."""
+        # Base parameters for all optimizers
         base_kwargs = {
             "lr": self.learning_rate,
             "weight_decay": self.weight_decay,
             "betas": (self.beta1, self.beta2),
-            "eps": self.epsilon,
-            "correct_bias": self.correct_bias
+            "eps": self.epsilon
         }
         
-        if self.optimizer_type == "adamw_schedule_free_kahan":
-            base_kwargs.update({
+        # Add specific parameters based on optimizer type
+        if self.optimizer_type == "adamw_bf16":
+            # AdamWBF16 only uses base parameters
+            return base_kwargs
+            
+        elif self.optimizer_type == "adamw_schedule_free_kahan":
+            return {
+                **base_kwargs,
                 "warmup_steps": self.warmup_steps,
-                "kahan_sum": self.kahan_sum
-            })
+                "kahan_sum": self.kahan_sum,
+                "correct_bias": self.correct_bias
+            }
+            
         elif self.optimizer_type == "soap":
-            base_kwargs.update({
+            return {
+                **base_kwargs,
+                "correct_bias": self.correct_bias,
                 "precondition_frequency": self.precondition_frequency,
                 "shampoo_beta": self.shampoo_beta,
                 "max_precond_dim": self.max_precond_dim,
@@ -93,7 +103,7 @@ class OptimizerConfig:
                 "merge_dims": self.merge_dims,
                 "normalize_grads": self.normalize_grads,
                 "data_format": self.data_format
-            })
+            }
             
         return base_kwargs
 
