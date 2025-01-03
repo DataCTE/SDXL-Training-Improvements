@@ -143,9 +143,10 @@ class CacheManager:
             return None
             
         try:
-            tensors = torch.load(entry["tensors_path"], map_location=self.device)
+            # Load and create copies of tensors and metadata
+            tensors = {k: v.clone() for k, v in torch.load(entry["tensors_path"], map_location=self.device).items()}
             with open(entry["metadata_path"]) as f:
-                metadata = json.load(f)
+                metadata = json.loads(f.read())  # Creates a new dict
             return {"metadata": metadata, **tensors}
         except Exception as e:
             logger.error(f"Failed to load cache entry: {e}")
