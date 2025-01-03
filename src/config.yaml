@@ -73,20 +73,21 @@ global_config:
   # Image processing settings
   image:
     supported_dims:
-      - [640, 1536]   # 0.42 ratio
-      - [768, 1344]   # 0.57 ratio
-      - [832, 1216]   # 0.68 ratio
-      - [896, 1152]   # 0.78 ratio
-      - [1024, 1024]  # 1.0 ratio (square)
-      - [1152, 896]   # 1.29 ratio
-      - [1216, 832]   # 1.46 ratio
-      - [1344, 768]   # 1.75 ratio
-      - [1536, 640]   # 2.4 ratio
-    max_aspect_ratio: 2.4  # Match the most extreme ratio
-    target_size: [1024, 1024]  # Default square
-    max_size: [1536, 1536]    # Maximum in any dimension
-    min_size: [640, 640]      # Minimum in any dimension
-    bucket_step: 64           # For intermediate sizes
+      # Primary SDXL aspect ratios (all within 589k-1.04M pixels)
+      - [640, 1536]   # 983k pixels
+      - [768, 1344]   # 1032k pixels
+      - [832, 1216]   # 1012k pixels
+      - [896, 1152]   # 1032k pixels
+      - [1024, 1024]  # 1048k pixels (square)
+      - [1152, 896]   # 1032k pixels
+      - [1216, 832]   # 1012k pixels
+      - [1344, 768]   # 1032k pixels
+      - [1536, 640]   # 983k pixels
+    max_aspect_ratio: 2.4      # Matches 1536/640
+    target_size: [1024, 1024]  # SDXL optimal square
+    max_size: [1536, 1536]     # SDXL max dimension
+    min_size: [384, 384]       # SDXL minimum useful size
+    bucket_step: 64            # Required for SDXL to avoid 6N IndexError
 
 # Tag weighting configuration
 tag_weighting:
