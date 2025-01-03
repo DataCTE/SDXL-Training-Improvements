@@ -40,7 +40,7 @@ class SDXLTrainer(BaseTrainer):
         # Initialize specific training method through composition
         if config.training.method.lower() == "ddpm":
             from .methods.ddpm_trainer import DDPMTrainer
-            self.method_trainer = DDPMTrainer(
+            self.trainer = DDPMTrainer(
                 model=model,
                 optimizer=optimizer,
                 train_dataloader=train_dataloader,
@@ -65,13 +65,11 @@ class SDXLTrainer(BaseTrainer):
     
     def train(self, num_epochs: int):
         """Delegate training to the specific trainer implementation."""
-        if not hasattr(self, 'trainer'):
-            # If this is a subclass (like DDPMTrainer), execute its own train method
-            return super().train(num_epochs)
-        
-        # Otherwise delegate to the specific trainer
-        logger.info(f"Delegating training to {self.trainer.__class__.__name__}")
-        return self.trainer.train(num_epochs)
+        if hasattr(self, 'trainer'):
+            logger.info(f"Starting training with {self.trainer.__class__.__name__}")
+            return self.trainer.train(num_epochs)
+        else:
+            raise ValueError("No training method initialized")
     
     def save_checkpoint(self, save_path: Path, is_final: bool = False):
         """Save checkpoint in diffusers format using save_pretrained with safetensors."""

@@ -67,14 +67,14 @@ def main():
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {device}", extra={'success': True})
             
-            # Initialize model
+            # Initialize model and dataset in one step
             model = StableDiffusionXL.from_pretrained(
                 config.model.pretrained_model_name,
                 device=device,
                 model_type=ModelType[config.model.model_type.upper()]
             )
             
-            # Create dataset and dataloader
+            # Use create_dataset function which handles both dataset creation and model initialization
             dataset = create_dataset(config=config, model=model)
             train_dataloader = DataLoader(dataset, **config.training.dataloader_kwargs)
             logger.info(f"Created dataloader with {len(train_dataloader)} batches")
