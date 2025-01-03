@@ -71,23 +71,50 @@ def get_wsl_drive_mount() -> Optional[str]:
     return None
 
 def load_data_from_directory(data_dir: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
-    """Load image paths and captions from data directory."""
+    """Load image paths and captions from data directory.
+    
+    Returns copies of paths and captions to prevent dataset corruption.
+    """
     # Handle single directory or list of directories
     if isinstance(data_dir, str):
         data_dir = [data_dir]
-        
+    
+    # Create new lists for storing paths and captions    
     image_paths = []
     captions = []
     
     for directory in data_dir:
-        # Collect image files
+        dir_image_paths = []
+        # Collect image files for this directory
         for ext in ['*.jpg', '*.jpeg', '*.png', '*.webp']:
-            image_paths.extend(glob.glob(os.path.join(directory, ext)))
+            # Use str() to create new string objects
+            dir_image_paths.extend([str(p) for p in glob.glob(os.path.join(directory, ext))])
         
-        # Load corresponding captions (assuming same name with .txt extension)
-        for img_path in image_paths:
+        # Load corresponding captions for this directory's images
+        dir_captions = []
+        for img_path in dir_image_paths:
             txt_path = os.path.splitext(img_path)[0] + '.txt'
-            with open(txt_path, 'r', encoding='utf-8') as f:
-                captions.append(f.read().strip())
+            try:
+                with open(txt_path, 'r', encoding='utf-8') as f:
+                    # Create new string object for caption
+                    caption = str(f.read().strip())
+                    dir_captions.append(caption)
+                # Only add copies of paths if caption was successfully loaded
+                image_paths.append(str(img_path))
+                captions.append(caption)
+            except Exception as e:
+                logger.warning(f"Failed to load caption for {img_path}: {e}")
+                continue
     
+    if not image_paths:
+        logger.error("No valid image-caption pairs found in directories: %s", data_dir)
+        raise ValueError("No valid image-caption pairs found")
+    
+    # Create final copies of lists to ensure complete isolation
+    image_paths = image_paths.copy()
+    captions = captions.copy()
+    
+    logger.info(f"Loaded {len(image_paths)} image-caption pairs from {len(data_dir)} directories")
+    
+    # Return copies of everything to ensure complete isolation
     return image_paths, captions
