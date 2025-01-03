@@ -106,33 +106,54 @@ def get_latent_bucket_key(latents: "torch.Tensor") -> Tuple[int, int]:
 
 def group_images_by_bucket(
     image_paths: List[str], 
-    cache_manager: "CacheManager"
+    captions: List[str],
+    cache_manager: "CacheManager",
+    auto_rebuild: bool = True
 ) -> Dict[Tuple[int, int], List[int]]:
     """Group image indices by their VAE latent dimensions to ensure compatible batches."""
     bucket_indices = defaultdict(list)
     
+    # First pass - check cache status
+    missing_count = 0
+    for image_path in image_paths:
+        cache_key = cache_manager.get_cache_key(image_path)
+        if cache_key not in cache_manager.cache_index["entries"]:
+            missing_count += 1
+    
+    # If there are missing entries and auto_rebuild is enabled
+    if missing_count > 0:
+        if auto_rebuild:
+            logger.warning(
+                f"Found {missing_count} uncached images. "
+                "Rebuilding cache before proceeding..."
+            )
+            cache_manager.verify_and_rebuild_cache(image_paths, captions)
+        else:
+            logger.warning(
+                f"Found {missing_count} uncached images. "
+                "Run cache verification/rebuild before training."
+            )
+    
+    # Group images by bucket
     logger.info("Grouping images by VAE latent dimensions...")
     for idx, image_path in enumerate(tqdm(image_paths, desc="Grouping images")):
         cache_key = cache_manager.get_cache_key(image_path)
         cache_entry = cache_manager.cache_index["entries"].get(cache_key)
         
         if not cache_entry:
-            logger.warning(f"Missing cache entry for {image_path}, skipping")
             continue
             
         try:
             cached_data = cache_manager.load_tensors(cache_key)
             if cached_data is None or "vae_latents" not in cached_data:
-                logger.warning(f"Missing VAE latents for {image_path}, skipping")
                 continue
             
             # Validate latent dimensions
             latents = cached_data["vae_latents"]
             if len(latents.shape) != 3 or latents.shape[0] != 4:
-                logger.warning(f"Invalid latent shape {latents.shape} for {image_path}, skipping")
                 continue
                 
-            # Group by actual latent dimensions (H/8, W/8)
+            # Group by actual latent dimensions
             latent_bucket = get_latent_bucket_key(latents)
             bucket_indices[latent_bucket].append(idx)
             

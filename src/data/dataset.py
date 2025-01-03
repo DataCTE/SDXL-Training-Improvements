@@ -611,8 +611,12 @@ class AspectBucketDataset(Dataset):
         return self.buckets
 
     def _group_images_by_bucket(self) -> Dict[Tuple[int, int], List[int]]:
-        """Group image indices by their bucket dimensions using bucket_utils."""
-        return group_images_by_bucket(self.image_paths, self.cache_manager)
+        """Group images by bucket dimensions."""
+        return group_images_by_bucket(
+            image_paths=self.image_paths,
+            captions=self.captions,  # Pass captions here
+            cache_manager=self.cache_manager
+        )
 
     def _log_bucket_statistics(self):
         """Log statistics about bucket distribution using bucket_utils."""
