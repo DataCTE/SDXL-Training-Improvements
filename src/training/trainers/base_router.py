@@ -53,7 +53,7 @@ class BaseRouter:
             # Dynamically import trainer module
             module_path, class_name = trainer_module_path.rsplit('.', 1)
             trainer_module = import_module(module_path)
-            trainer_class = getattr(trainer_module, f"{model_type.value}Trainer")
+            trainer_class = getattr(trainer_module, class_name)
             
             logger.info(f"Initializing {trainer_class.__name__} for model type: {model_type}")
             
