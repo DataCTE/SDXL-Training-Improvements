@@ -176,7 +176,7 @@ class WandbLogger:
     def log_model(
         self,
         model: torch.nn.Module,
-        optimizer: Optional[BaseOptimizer] = None,
+        optimizer: Optional["BaseOptimizer"] = None,
         step: Optional[int] = None,
         commit: bool = True
     ) -> None:
@@ -185,6 +185,9 @@ class WandbLogger:
             return
             
         try:
+            # Import here to avoid circular imports
+            from src.training.optimizers.base import BaseOptimizer
+            
             if not hasattr(self, 'model_logged') or not self.model_logged:
                 # Log model info
                 model_config = {
@@ -192,8 +195,8 @@ class WandbLogger:
                     'model_structure': str(model),
                 }
                 
-                # Add optimizer info if provided
-                if optimizer:
+                # Add optimizer info if provided and valid type
+                if optimizer and isinstance(optimizer, BaseOptimizer):
                     model_config['optimizer'] = optimizer.__class__.__name__
                     model_config['optimizer_state'] = str(optimizer.state_dict().keys())
                 
