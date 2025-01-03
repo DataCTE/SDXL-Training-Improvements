@@ -67,15 +67,17 @@ def main():
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {device}", extra={'success': True})
             
-            # Initialize components using config
+            # Initialize model
             model = StableDiffusionXL.from_pretrained(
                 config.model.pretrained_model_name,
                 device=device,
                 model_type=ModelType[config.model.model_type.upper()]
             )
             
+            # Create dataset and dataloader
             dataset = create_dataset(config=config, model=model)
             train_dataloader = DataLoader(dataset, **config.training.dataloader_kwargs)
+            logger.info(f"Created dataloader with {len(train_dataloader)} batches")
             
             # Get optimizer class from our custom implementations
             optimizer_map = {
@@ -88,15 +90,15 @@ def main():
             if optimizer_class is None:
                 raise ValueError(f"Unsupported optimizer: {config.optimizer.class_name}")
             
-            # Create optimizer instance
             optimizer = optimizer_class(
                 model.parameters(),
                 **config.optimizer.kwargs
             )
             
+            # Initialize wandb logger
             wandb_logger = WandbLogger(config) if config.global_config.logging.use_wandb else None
-
-            # Use BaseRouter for architecture-agnostic training
+            
+            # Create trainer
             trainer = BaseRouter.create(
                 model=model,
                 optimizer=optimizer,
@@ -106,7 +108,16 @@ def main():
                 config=config
             )
             
+            # Start training loop
+            logger.info("Starting training loop...")
             trainer.train(num_epochs=config.training.num_epochs)
+            
+            # Save final model if configured
+            if config.training.save_final_model:
+                save_path = Path("outputs/models/final_model")
+                trainer.save_checkpoint(save_path)
+                logger.info(f"Saved final model to {save_path}")
+            
             logger.info("Training completed successfully", extra={'keyword': 'success'})
 
     except Exception as e:
