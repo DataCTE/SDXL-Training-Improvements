@@ -319,9 +319,9 @@ class AspectBucketDataset(Dataset):
                             "bucket_info": img_data["bucket_info"]  # Store complete bucket info
                         }
                         self.cache_manager.save_latents(
-                            tensors, 
-                            path, 
-                            metadata
+                            tensors=tensors,
+                            path=path,
+                            metadata=metadata
                         )
                         caption_idx += 1
                     
@@ -384,8 +384,8 @@ class AspectBucketDataset(Dataset):
                                 img = Image.open(path).convert('RGB')
                                 
                                 # Get bucket dimensions
-                                bucket_dims = compute_bucket_dims(img.size, self.buckets)
-                                target_size = (bucket_dims[0]*8, bucket_dims[1]*8)
+                                bucket_info = compute_bucket_dims(img.size, self.buckets)
+                                target_size = bucket_info.pixel_dims
                                 
                                 # Resize image to bucket dimensions
                                 img = img.resize(target_size, Image.Resampling.LANCZOS)
@@ -411,7 +411,7 @@ class AspectBucketDataset(Dataset):
                                 time_ids = self._compute_time_ids(
                                     original_size=img.size,
                                     crops_coords_top_left=(0, 0),
-                                    target_size=(bucket_dims[0]*8, bucket_dims[1]*8)
+                                    target_size=(bucket_info[0]*8, bucket_info[1]*8)
                                 )
                                 
                                 # Save to cache
@@ -426,10 +426,10 @@ class AspectBucketDataset(Dataset):
                                     metadata={
                                         "original_size": img.size,
                                         "crop_coords": (0, 0),
-                                        "target_size": (bucket_dims[0]*8, bucket_dims[1]*8),
-                                        "text": caption
-                                    },
-                                    bucket_dims=bucket_dims
+                                        "target_size": bucket_info.pixel_dims,
+                                        "text": caption,
+                                        "bucket_info": bucket_info
+                                    }
                                 )
                                 
                                 pbar.update(1)

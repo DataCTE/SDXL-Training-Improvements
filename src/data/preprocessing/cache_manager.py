@@ -37,6 +37,7 @@ class CacheManager:
         self.latents_dir = self.cache_dir / "latents"
         self.metadata_dir = self.cache_dir / "metadata"
         self.bucket_info_dir = self.cache_dir / "buckets" 
+        self.tag_dir = self.cache_dir / "tags"
         
         for directory in [self.latents_dir, self.metadata_dir, self.bucket_info_dir]:
             directory.mkdir(exist_ok=True)
