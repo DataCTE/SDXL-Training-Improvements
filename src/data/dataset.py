@@ -499,21 +499,18 @@ class AspectBucketDataset(Dataset):
             # Load image
             img_tensor, original_size = self.cache_manager.load_image_to_tensor(image_path, self.device)
             
-            # Get bucket dimensions (in latent space)
-            bucket_dims = compute_bucket_dims(original_size, self.buckets)
+            # Get both pixel and latent dimensions
+            pixel_dims, latent_dims = compute_bucket_dims(original_size, self.buckets)
             
-            # Convert to pixel space for resizing
-            target_size = (bucket_dims[0] * 8, bucket_dims[1] * 8)
-            
-            # Resize image
+            # Resize using pixel dimensions
             img_tensor = F.interpolate(
                 img_tensor.unsqueeze(0),
-                size=target_size,
+                size=pixel_dims,  # Use pixel dimensions for resizing
                 mode='bilinear',
                 align_corners=False
             ).squeeze(0)
             
-            # VAE encode (will automatically reduce to latent dimensions)
+            # VAE encode
             with torch.no_grad():
                 vae_latents = self.model.vae.encode(
                     img_tensor.unsqueeze(0)
@@ -523,8 +520,9 @@ class AspectBucketDataset(Dataset):
             return {
                 "vae_latents": vae_latents.squeeze(0),
                 "original_size": original_size,
-                "target_size": target_size,
-                "bucket_dims": bucket_dims
+                "target_size": pixel_dims,  # Store pixel dimensions
+                "bucket_dims": pixel_dims,   # Store pixel dimensions
+                "latent_dims": latent_dims   # Store latent dimensions separately
             }
             
         except Exception as e:
