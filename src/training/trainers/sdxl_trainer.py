@@ -72,17 +72,25 @@ class SDXLTrainer(BaseTrainer):
         else:
             raise ValueError("No training method initialized")
     
-    def save_checkpoint(self, save_path: Path, is_final: bool = False):
+    def save_checkpoint(self, epoch: int, is_final: bool = False):
         """Save checkpoint in diffusers format using save_pretrained with safetensors."""
         if not is_main_process():
             return
             
         from src.data.utils.paths import convert_windows_path
         
-        # Convert base path
-        base_path = "final_checkpoint" if is_final else str(save_path)
-        path = convert_windows_path(base_path)
-        save_path = Path(path)
+        # Create outputs directory structure
+        outputs_dir = Path("outputs")
+        outputs_dir.mkdir(exist_ok=True)
+        
+        # Create checkpoint directory name
+        if is_final:
+            save_dir = outputs_dir / "final_checkpoint"
+        else:
+            save_dir = outputs_dir / f"checkpoint-{epoch:04d}"
+        
+        # Convert and create path
+        save_path = Path(convert_windows_path(str(save_dir)))
         save_path.mkdir(parents=True, exist_ok=True)
         
         try:
