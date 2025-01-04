@@ -406,52 +406,58 @@ class AspectBucketDataset(Dataset):
         except Exception as e:
             logger.error(f"Failed to precompute latents: {e}")
 
-    def _process_image_tensor(
-        self, 
-        img_tensor: torch.Tensor,
-        original_size: Tuple[int, int],
-        image_path: Union[str, Path]
-    ) -> Dict[str, Any]:
-        """Process image tensor ensuring VAE-compatible dimensions."""
-        # Get bucket info with proper dimensions
-        bucket_info = compute_bucket_dims(original_size, self.buckets)
+    def _prepare_image_tensor(
+        self,
+        img: Image.Image,
+        target_size: Tuple[int, int]
+    ) -> torch.Tensor:
+        """Prepare image tensor for VAE encoding.
         
-        return {
-            "pixel_values": img_tensor.clone(),
-            "original_size": original_size,
-            "target_size": bucket_info.pixel_dims,
-            "latent_size": bucket_info.latent_dims,
-            "path": str(image_path),
-            "timestamp": time.time(),
-            "crop_coords": (0, 0),
-            "bucket_info": bucket_info  # This will be handled separately by cache_manager
-        }
+        Args:
+            img: PIL Image to process
+            target_size: Target dimensions (width, height)
+            
+        Returns:
+            Normalized tensor ready for VAE
+        """
+        # Resize image to target dimensions
+        if img.size != target_size:
+            img = img.resize(target_size, Image.Resampling.LANCZOS)
+        
+        # Convert to tensor and normalize
+        img_tensor = torch.from_numpy(np.array(img)).float()
+        img_tensor = img_tensor / 127.5 - 1.0  # Normalize to [-1, 1]
+        
+        # Rearrange dimensions to [C, H, W]
+        img_tensor = img_tensor.permute(2, 0, 1)
+        
+        # Move to correct device and dtype
+        img_tensor = img_tensor.to(
+            device=self.device,
+            dtype=self.vae.dtype if hasattr(self, 'vae') else torch.float32
+        )
+        
+        return img_tensor
 
     def _process_single_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
         """Process a single image with enhanced bucket handling."""
         try:
-            img_tensor, original_size = self.cache_manager.load_image_to_tensor(
-                image_path, 
-                self.device
-            )
+            # Load image
+            img = Image.open(image_path).convert('RGB')
+            original_size = img.size
             
             # Get bucket info
             bucket_info = compute_bucket_dims(original_size, self.buckets)
             
-            # Resize using pixel dimensions
-            img_tensor = F.interpolate(
-                img_tensor.unsqueeze(0),
-                size=bucket_info.pixel_dims,
-                mode='bilinear',
-                align_corners=False
-            ).squeeze(0)
+            # Prepare image tensor
+            img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
             
             # VAE encode
             with torch.no_grad():
-                vae_latents = self.model.vae.encode(
+                vae_latents = self.vae.encode(
                     img_tensor.unsqueeze(0)
                 ).latent_dist.sample()
-                vae_latents = vae_latents * self.model.vae.config.scaling_factor
+                vae_latents = vae_latents * self.vae.config.scaling_factor
             
             # Validate VAE latents shape
             expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])  # VAE shape is (C, H, W)
@@ -473,7 +479,6 @@ class AspectBucketDataset(Dataset):
         except Exception as e:
             logger.error(f"Failed to process image {image_path}: {e}")
             return None
-
 
     def get_aspect_buckets(self) -> List[BucketInfo]:
         """Return cached buckets."""
