@@ -4,23 +4,28 @@ import os
 # Set environment variables before any other imports
 def setup_training_env():
     """Setup training environment variables."""
-    if "RANK" not in os.environ:
-        os.environ["RANK"] = "0"
-    if "WORLD_SIZE" not in os.environ:
-        os.environ["WORLD_SIZE"] = "1"
-    if "LOCAL_RANK" not in os.environ:
-        os.environ["LOCAL_RANK"] = "0"
-    if "MASTER_ADDR" not in os.environ:
-        os.environ["MASTER_ADDR"] = "localhost"
-    if "MASTER_PORT" not in os.environ:
-        os.environ["MASTER_PORT"] = "29500"  # Set default port
+    # Ensure these are set before ANY imports or initialization
+    os.environ.setdefault("RANK", "0")
+    os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ.setdefault("LOCAL_RANK", "0")
+    os.environ.setdefault("MASTER_ADDR", "localhost")
+    os.environ.setdefault("MASTER_PORT", "29500")
+    
+    # Disable accelerate's automatic initialization
+    os.environ["ACCELERATE_DISABLE_RICH"] = "1"
+    os.environ["ACCELERATE_USE_RICH"] = "0"
+    
+    # Force PyTorch to use spawn method
+    import multiprocessing as mp
+    try:
+        mp.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
 
-# Set environment variables before any other imports
+# Call setup before anything else
 setup_training_env()
 
 # Now import other modules
-import multiprocessing as mp
-import torch.cuda
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -76,10 +81,12 @@ def setup_environment():
                         os.environ["MASTER_PORT"] = str(port)
                         init_process_group(backend="nccl")
                         setup_distributed()
+                        logger.info("Successfully initialized distributed training")
                         break
                     except Exception as e:
                         if _ == max_tries - 1:
                             raise RuntimeError(f"Failed to initialize distributed training after {max_tries} attempts") from e
+                        logger.warning(f"Port {port} failed, trying another...")
                         continue
         yield
     finally:
@@ -91,12 +98,6 @@ def setup_environment():
 def main():
     """Main training entry point."""
     logger.info("Starting training script...", extra={'keyword': 'start'})
-    
-    # Set multiprocessing start method
-    try:
-        mp.set_start_method('spawn', force=True)
-    except RuntimeError:
-        pass  # Already set
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
@@ -114,8 +115,11 @@ def main():
             
             # Use create_dataset function which handles both dataset creation and model initialization
             dataset = create_dataset(config=config, model=model)
-            train_dataloader = DataLoader(dataset, **config.training.dataloader_kwargs)
-            logger.info(f"Created dataloader with {len(train_dataloader)} batches")
+            train_dataloader = DataLoader(
+                dataset, 
+                **config.training.dataloader_kwargs,
+                multiprocessing_context='spawn'  # Force spawn for all workers
+            )
             
             # Get optimizer class from our custom implementations
             optimizer_map = {
