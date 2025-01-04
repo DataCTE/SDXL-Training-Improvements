@@ -306,7 +306,8 @@ class AspectBucketDataset(Dataset):
                     # Add caption to processed data
                     result = {
                         **img_data,
-                        "text": caption
+                        "text": caption,
+                        "bucket_info": img_data["bucket_info"]  # Ensure bucket info is passed through
                     }
                     
                     # Save to cache if enabled
@@ -506,6 +507,15 @@ class AspectBucketDataset(Dataset):
                     img_tensor.unsqueeze(0)
                 ).latent_dist.sample()
                 vae_latents = vae_latents * self.model.vae.config.scaling_factor
+            
+            # Validate VAE latents shape
+            expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])  # VAE shape is (C, H, W)
+            if vae_latents.shape[1:] != expected_shape[1:]:  # Only check spatial dimensions
+                logger.warning(
+                    f"VAE latent shape mismatch for {image_path}: "
+                    f"expected {expected_shape}, got {vae_latents.shape}"
+                )
+                return None
             
             return {
                 "vae_latents": vae_latents.squeeze(0),
