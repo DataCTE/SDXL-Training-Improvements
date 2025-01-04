@@ -83,23 +83,28 @@ def group_images_by_bucket(
     """Group images by bucket dimensions using cache."""
     bucket_indices = defaultdict(list)
     config = cache_manager.config
+    
+    # Generate buckets once and store them
     buckets = generate_buckets(config)
     
     if not buckets:
         raise ValueError("No valid buckets generated from config")
     
+    logger.setLevel(logging.WARNING)  # Temporarily disable INFO logging
+    
     for idx, path in enumerate(tqdm(image_paths, desc="Grouping images")):
         try:
-            img = Image.open(path)
-            # Find nearest bucket dimensions with config
-            bucket = compute_bucket_dims(img.size, buckets)  # Remove config parameter as it's only needed for fallback
-            # Convert back to pixel space (multiply by 8)
-            target_size = (bucket[0] * 8, bucket[1] * 8)
-            
-            # Store bucket assignment for resizing during VAE encoding
+            # Check if already cached
             cache_key = cache_manager.get_cache_key(path)
-            if cache_manager.cache_index["entries"].get(cache_key):
-                cache_manager.cache_index["entries"][cache_key]["bucket_dims"] = target_size
+            cached_entry = cache_manager.cache_index["entries"].get(cache_key)
+            
+            if cached_entry and cached_entry.get("bucket_dims"):
+                # Use cached bucket dimensions
+                bucket = (cached_entry["bucket_dims"][0] // 8, cached_entry["bucket_dims"][1] // 8)
+            else:
+                # Compute new bucket dimensions
+                img = Image.open(path)
+                bucket = compute_bucket_dims(img.size, buckets)
             
             bucket_indices[bucket].append(idx)
             
@@ -108,7 +113,7 @@ def group_images_by_bucket(
             default_bucket = tuple(d // 8 for d in config.global_config.image.target_size)
             bucket_indices[default_bucket].append(idx)
     
-    log_bucket_statistics(bucket_indices, len(image_paths))
+    logger.setLevel(logging.INFO)  # Restore INFO logging
     return dict(bucket_indices)
 
 def log_bucket_statistics(bucket_indices: Dict[Tuple[int, int], List[int]], total_images: int):

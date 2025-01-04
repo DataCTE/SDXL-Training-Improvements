@@ -82,11 +82,19 @@ class AspectBucketDataset(Dataset):
         self.buckets = generate_buckets(config)
         logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
         
-        # Group images by bucket
-        self.bucket_indices = self._group_images_by_bucket()
-        
-        # Log bucket statistics
-        self._log_bucket_statistics()
+        # Group images by bucket only if not already cached
+        uncached_paths = cache_manager.get_uncached_paths(image_paths)
+        if uncached_paths:
+            # Initial grouping for uncached images
+            self.bucket_indices = self._group_images_by_bucket()
+            self._log_bucket_statistics()
+            
+            # Precompute latents (this will save bucket information to cache)
+            self._precompute_latents()
+        else:
+            # Load bucket assignments from cache
+            self.bucket_indices = self._load_bucket_indices_from_cache()
+            self._log_bucket_statistics()
 
     # Core Dataset Methods
     def __len__(self) -> int:
@@ -603,6 +611,26 @@ class AspectBucketDataset(Dataset):
             bucket_indices=self.bucket_indices,
             total_images=len(self.image_paths)
         )
+
+    def _load_bucket_indices_from_cache(self) -> Dict[Tuple[int, int], List[int]]:
+        """Load bucket assignments from cache metadata."""
+        bucket_indices = defaultdict(list)
+        
+        for idx, path in enumerate(self.image_paths):
+            cache_key = self.cache_manager.get_cache_key(path)
+            entry = self.cache_manager.cache_index["entries"].get(cache_key)
+            
+            if entry and entry.get("bucket_dims"):
+                # Convert from pixel space to latent space
+                bucket = (entry["bucket_dims"][0] // 8, entry["bucket_dims"][1] // 8)
+                bucket_indices[bucket].append(idx)
+            else:
+                logger.warning(f"Missing bucket information for {path}")
+                # Use default bucket as fallback
+                default_bucket = tuple(d // 8 for d in self.config.global_config.image.target_size)
+                bucket_indices[default_bucket].append(idx)
+        
+        return dict(bucket_indices)
 
 def create_dataset(
     config: Config,
