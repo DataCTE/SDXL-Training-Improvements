@@ -13,7 +13,7 @@ import numpy as np
 from tqdm import tqdm
 from src.data.config import Config
 import hashlib
-from src.data.preprocessing.bucket_utils import BucketInfo, BucketDimensions
+from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
 logger = get_logger(__name__)
 
 class CacheManager:
