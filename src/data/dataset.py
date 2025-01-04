@@ -295,29 +295,18 @@ class AspectBucketDataset(Dataset):
             return [None] * len(image_paths)
 
     # Helper Methods
-    def _compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
+    def _compute_time_ids(
+        self,
+        original_size: Tuple[int, int],
+        target_size: Tuple[int, int]
+    ) -> torch.Tensor:
         """Compute time embeddings for SDXL."""
-        # Ensure inputs are proper tuples
-        if not isinstance(original_size, (tuple, list)):
-            original_size = (original_size, original_size)
-        if not isinstance(crops_coords_top_left, (tuple, list)):
-            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
-        if not isinstance(target_size, (tuple, list)):
-            target_size = (target_size, target_size)
+        # Compute time ids following SDXL format
+        time_ids = torch.tensor([
+            list(original_size) + list(target_size) + [0, 0],  # Add crop coords as 0,0
+        ])
         
-        # Combine all values into a single list
-        time_ids = [
-            original_size[0],    # Original height
-            original_size[1],    # Original width
-            crops_coords_top_left[0],  # Crop top
-            crops_coords_top_left[1],  # Crop left
-            target_size[0],     # Target height
-            target_size[1],     # Target width
-        ]
-        
-        # Create tensor with proper device and dtype
-        device = device or self.device
-        return torch.tensor([time_ids], device=device, dtype=dtype)
+        return time_ids.to(device=self.device, dtype=torch.float32)
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents for both DDPM and Flow Matching."""
@@ -470,9 +459,13 @@ class AspectBucketDataset(Dataset):
             
             return {
                 "vae_latents": vae_latents.squeeze(0),
+                "time_ids": self._compute_time_ids(
+                    original_size=original_size,
+                    target_size=bucket_info.pixel_dims
+                ),
                 "original_size": original_size,
-                "target_size": bucket_info.pixel_dims,
                 "crop_coords": (0, 0),
+                "target_size": bucket_info.pixel_dims,
                 "bucket_info": bucket_info
             }
             
