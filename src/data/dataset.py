@@ -51,17 +51,14 @@ class AspectBucketDataset(Dataset):
         self.is_train = is_train
         self._setup_device(device, device_id)
         
-        # Tag weighting
-        self.tag_weighter = tag_weighter
-
-        # Model components
-        self.model = model
-        if model:
-            self.text_encoders = model.text_encoders
-            self.tokenizers = model.tokenizers
-            self.vae = model.vae
-
-        # Cache setup with rebuild
+        # Data initialization with path conversion
+        self.image_paths = [
+            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
+            for p in image_paths
+        ]
+        self.captions = captions
+        
+        # Cache setup
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         self.cache_manager = cache_manager or CacheManager(
             cache_dir=cache_dir,
@@ -69,32 +66,23 @@ class AspectBucketDataset(Dataset):
             max_cache_size=config.global_config.cache.max_cache_size,
             device=self.device
         )
-        self.cache_manager.rebuild_cache_index()
-
-        # Data initialization
-        self.image_paths = [
-            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
-            for p in image_paths
-        ]
-        self.captions = captions
-
-        # Generate buckets using utility function
-        self.buckets = generate_buckets(config)
+        
+        # Generate buckets using enhanced system
+        self.buckets = generate_buckets(config)  # Now returns List[BucketInfo]
         logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
         
-        # Group images by bucket only if not already cached
-        uncached_paths = cache_manager.get_uncached_paths(image_paths)
-        if uncached_paths:
-            # Initial grouping for uncached images
-            self.bucket_indices = self._group_images_by_bucket()
-            self._log_bucket_statistics()
-            
-            # Precompute latents (this will save bucket information to cache)
-            self._precompute_latents()
-        else:
-            # Load bucket assignments from cache
-            self.bucket_indices = self._load_bucket_indices_from_cache()
-            self._log_bucket_statistics()
+        # Initialize bucket indices
+        self.bucket_indices = self._load_bucket_indices_from_cache()
+        
+        # Model components
+        self.model = model
+        if model:
+            self.text_encoders = model.text_encoders
+            self.tokenizers = model.tokenizers
+            self.vae = model.vae
+        
+        # Tag weighting setup
+        self.tag_weighter = tag_weighter
 
     # Core Dataset Methods
     def __len__(self) -> int:
@@ -494,18 +482,21 @@ class AspectBucketDataset(Dataset):
         }
 
     def _process_single_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
-        """Process a single image with aspect ratio bucketing and VAE encoding."""
+        """Process a single image with enhanced bucket handling."""
         try:
             # Load image
-            img_tensor, original_size = self.cache_manager.load_image_to_tensor(image_path, self.device)
+            img_tensor, original_size = self.cache_manager.load_image_to_tensor(
+                image_path, 
+                self.device
+            )
             
-            # Get both pixel and latent dimensions
-            pixel_dims, latent_dims = compute_bucket_dims(original_size, self.buckets)
+            # Get bucket info with comprehensive dimensions
+            bucket_info = compute_bucket_dims(original_size, self.buckets)
             
             # Resize using pixel dimensions
             img_tensor = F.interpolate(
                 img_tensor.unsqueeze(0),
-                size=pixel_dims,  # Use pixel dimensions for resizing
+                size=bucket_info.pixel_dims,
                 mode='bilinear',
                 align_corners=False
             ).squeeze(0)
@@ -520,9 +511,17 @@ class AspectBucketDataset(Dataset):
             return {
                 "vae_latents": vae_latents.squeeze(0),
                 "original_size": original_size,
-                "target_size": pixel_dims,  # Store pixel dimensions
-                "bucket_dims": pixel_dims,   # Store pixel dimensions
-                "latent_dims": latent_dims   # Store latent dimensions separately
+                "target_size": bucket_info.pixel_dims,
+                "bucket_info": {  # Store complete bucket information
+                    "pixel_dims": bucket_info.pixel_dims,
+                    "latent_dims": bucket_info.latent_dims,
+                    "aspect_ratio": bucket_info.dimensions.aspect_ratio,
+                    "aspect_ratio_inverse": bucket_info.dimensions.aspect_ratio_inverse,
+                    "total_pixels": bucket_info.dimensions.total_pixels,
+                    "total_latents": bucket_info.dimensions.total_latents,
+                    "size_class": bucket_info.size_class,
+                    "aspect_class": bucket_info.aspect_class
+                }
             }
             
         except Exception as e:
@@ -577,23 +576,41 @@ class AspectBucketDataset(Dataset):
             total_images=len(self.image_paths)
         )
 
-    def _load_bucket_indices_from_cache(self) -> Dict[Tuple[int, int], List[int]]:
-        """Load bucket assignments from cache metadata."""
+    def _load_bucket_indices_from_cache(self) -> Dict[BucketInfo, List[int]]:
+        """Load bucket assignments from cache with enhanced bucket info."""
         bucket_indices = defaultdict(list)
         
         for idx, path in enumerate(self.image_paths):
-            cache_key = self.cache_manager.get_cache_key(path)
-            entry = self.cache_manager.cache_index["entries"].get(cache_key)
+            try:
+                cache_key = self.cache_manager.get_cache_key(path)
+                entry = self.cache_manager.cache_index["entries"].get(cache_key)
+                
+                if entry and "bucket_info" in entry:
+                    # Use full bucket info from cache
+                    cached_info = entry["bucket_info"]
+                    bucket = next(
+                        (b for b in self.buckets 
+                         if b.pixel_dims == tuple(cached_info["pixel_dims"])),
+                        None
+                    )
+                    if bucket:
+                        bucket_indices[bucket].append(idx)
+                    else:
+                        raise ValueError(f"Invalid bucket dimensions in cache for {path}")
+                else:
+                    # Use default bucket
+                    default_dims = tuple(self.config.global_config.image.target_size)
+                    default_bucket = next(
+                        (b for b in self.buckets if b.pixel_dims == default_dims),
+                        self.buckets[0]  # Fallback to first bucket if target size not found
+                    )
+                    bucket_indices[default_bucket].append(idx)
+                    logger.warning(f"Using default bucket for {path}")
             
-            if entry and entry.get("bucket_dims"):
-                # Convert from pixel space to latent space
-                bucket = (entry["bucket_dims"][0] // 8, entry["bucket_dims"][1] // 8)
-                bucket_indices[bucket].append(idx)
-            else:
-                logger.warning(f"Missing bucket information for {path}")
-                # Use default bucket as fallback
-                default_bucket = tuple(d // 8 for d in self.config.global_config.image.target_size)
-                bucket_indices[default_bucket].append(idx)
+            except Exception as e:
+                logger.error(f"Error loading bucket info for {path}: {e}")
+                # Use first bucket as ultimate fallback
+                bucket_indices[self.buckets[0]].append(idx)
         
         return dict(bucket_indices)
 

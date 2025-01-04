@@ -13,10 +13,11 @@ import numpy as np
 from tqdm import tqdm
 from src.data.config import Config
 import hashlib
+from src.data.preprocessing.bucket_utils import BucketInfo, BucketDimensions
 logger = get_logger(__name__)
 
 class CacheManager:
-    """Manages caching of preprocessed latents with WSL path support."""
+    """Manages caching of preprocessed latents with comprehensive bucket information."""
     
     def __init__(
         self,
@@ -25,23 +26,22 @@ class CacheManager:
         max_cache_size: int = 10000,
         device: Optional[torch.device] = None
     ):
-        """Initialize cache manager."""
-        self.cache_dir = Path(convert_windows_path(cache_dir))  # Convert path for WSL
+        """Initialize cache manager with bucket support."""
+        self.cache_dir = Path(convert_windows_path(cache_dir))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache_size = max_cache_size
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         
-        # Core setup
-        self._lock = threading.Lock()
-        
-        # Create subdirectories
+        # Create subdirectories with bucket organization
         self.latents_dir = self.cache_dir / "latents"
         self.metadata_dir = self.cache_dir / "metadata"
-        self.latents_dir.mkdir(exist_ok=True)
-        self.metadata_dir.mkdir(exist_ok=True)
+        self.bucket_info_dir = self.cache_dir / "buckets" 
         
-        # Initialize cache state
+        for directory in [self.latents_dir, self.metadata_dir, self.bucket_info_dir]:
+            directory.mkdir(exist_ok=True)
+        
+        self._lock = threading.Lock()
         self.index_path = self.cache_dir / "cache_index.json"
         self.rebuild_cache_index()
 
@@ -111,35 +111,57 @@ class CacheManager:
         tensors: Dict[str, torch.Tensor],
         path: Union[str, Path],
         metadata: Dict[str, Any],
-        bucket_dims: Optional[Tuple[int, int]] = None
+        bucket_info: Optional["BucketInfo"] = None  # Updated to use BucketInfo
     ) -> bool:
-        """Save processed tensors and metadata to cache."""
+        """Save processed tensors with comprehensive bucket information."""
         cache_key = self.get_cache_key(path)
         tensors_path = self.latents_dir / f"{cache_key}.pt"
         metadata_path = self.metadata_dir / f"{cache_key}.json"
+        bucket_info_path = self.bucket_info_dir / f"{cache_key}.json"
         
         try:
             # Save tensors
             torch.save({k: v.cpu() for k, v in tensors.items()}, tensors_path)
             
-            # Save metadata
+            # Save bucket information if provided
+            if bucket_info:
+                bucket_data = {
+                    "dimensions": {
+                        "width": bucket_info.dimensions.width,
+                        "height": bucket_info.dimensions.height,
+                        "width_latent": bucket_info.dimensions.width_latent,
+                        "height_latent": bucket_info.dimensions.height_latent,
+                        "aspect_ratio": bucket_info.dimensions.aspect_ratio,
+                        "aspect_ratio_inverse": bucket_info.dimensions.aspect_ratio_inverse,
+                        "total_pixels": bucket_info.dimensions.total_pixels,
+                        "total_latents": bucket_info.dimensions.total_latents
+                    },
+                    "pixel_dims": bucket_info.pixel_dims,
+                    "latent_dims": bucket_info.latent_dims,
+                    "bucket_index": bucket_info.bucket_index,
+                    "size_class": bucket_info.size_class,
+                    "aspect_class": bucket_info.aspect_class
+                }
+                self._atomic_json_save(bucket_info_path, bucket_data)
+            
+            # Save metadata with bucket reference
             full_metadata = {
                 "original_path": str(path),
                 "created_at": time.time(),
-                "bucket_dims": bucket_dims,
+                "bucket_info_path": str(bucket_info_path) if bucket_info else None,
                 **metadata
             }
-            with open(metadata_path, 'w') as f:
-                json.dump(full_metadata, f)
+            self._atomic_json_save(metadata_path, full_metadata)
             
-            # Update index
+            # Update index with comprehensive information
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
                     "tensors_path": str(tensors_path),
                     "metadata_path": str(metadata_path),
+                    "bucket_info_path": str(bucket_info_path) if bucket_info else None,
                     "created_at": time.time(),
-                    "bucket_dims": bucket_dims,
-                    "is_valid": True
+                    "is_valid": True,
+                    "bucket_dims": bucket_info.pixel_dims if bucket_info else None
                 }
                 self._save_index()
             
@@ -223,32 +245,6 @@ class CacheManager:
             logger.error(f"Failed to save tag index: {e}")
             return False
 
-    def _atomic_json_save(self, path: Path, data: Dict[str, Any]) -> None:
-        """Save JSON data atomically with proper formatting."""
-        temp_path = path.with_suffix('.tmp')
-        try:
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            temp_path.replace(path)
-        except Exception as e:
-            if temp_path.exists():
-                temp_path.unlink()
-            raise e
-
-    def get_tag_index_path(self) -> Path:
-        """Get path for tag index directory."""
-        tags_dir = self.cache_dir / "tags"
-        tags_dir.mkdir(exist_ok=True)
-        return tags_dir
-
-    def get_tag_statistics_path(self) -> Path:
-        """Get path for tag statistics file."""
-        return self.get_tag_index_path() / "statistics.json"
-
-    def get_image_tags_path(self) -> Path:
-        """Get path for image tags file."""
-        return self.get_tag_index_path() / "image_tags.json"
-
     def load_tag_index(self) -> Optional[Dict[str, Any]]:
         """Load tag index from split files."""
         try:
@@ -278,6 +274,32 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to load tag index: {e}")
             return None
+
+    def get_tag_index_path(self) -> Path:
+        """Get path for tag index directory."""
+        tags_dir = self.cache_dir / "tags"
+        tags_dir.mkdir(exist_ok=True)
+        return tags_dir
+
+    def get_tag_statistics_path(self) -> Path:
+        """Get path for tag statistics file."""
+        return self.get_tag_index_path() / "statistics.json"
+
+    def get_image_tags_path(self) -> Path:
+        """Get path for image tags file."""
+        return self.get_tag_index_path() / "image_tags.json"
+
+    def _atomic_json_save(self, path: Path, data: Dict[str, Any]) -> None:
+        """Save JSON data atomically with proper formatting."""
+        temp_path = path.with_suffix('.tmp')
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            temp_path.replace(path)
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise e
 
     def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
         """Verify cache integrity and rebuild if needed."""
@@ -333,3 +355,43 @@ class CacheManager:
             f"Cache verification complete. "
             f"Valid entries: {len(self.cache_index['entries'])}"
         )
+
+    def load_bucket_info(self, cache_key: str) -> Optional["BucketInfo"]:
+        """Load cached bucket information."""
+        entry = self.cache_index["entries"].get(cache_key)
+        if not entry or not entry.get("bucket_info_path"):
+            return None
+            
+        try:
+            bucket_info_path = Path(entry["bucket_info_path"])
+            if not bucket_info_path.exists():
+                return None
+                
+            with open(bucket_info_path, 'r') as f:
+                bucket_data = json.load(f)
+            
+            # Reconstruct BucketDimensions
+            dimensions = BucketDimensions(
+                width=bucket_data["dimensions"]["width"],
+                height=bucket_data["dimensions"]["height"],
+                width_latent=bucket_data["dimensions"]["width_latent"],
+                height_latent=bucket_data["dimensions"]["height_latent"],
+                aspect_ratio=bucket_data["dimensions"]["aspect_ratio"],
+                aspect_ratio_inverse=bucket_data["dimensions"]["aspect_ratio_inverse"],
+                total_pixels=bucket_data["dimensions"]["total_pixels"],
+                total_latents=bucket_data["dimensions"]["total_latents"]
+            )
+            
+            # Reconstruct BucketInfo
+            return BucketInfo(
+                dimensions=dimensions,
+                pixel_dims=tuple(bucket_data["pixel_dims"]),
+                latent_dims=tuple(bucket_data["latent_dims"]),
+                bucket_index=bucket_data["bucket_index"],
+                size_class=bucket_data["size_class"],
+                aspect_class=bucket_data["aspect_class"]
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to load bucket info: {e}")
+            return None
