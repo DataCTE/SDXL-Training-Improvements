@@ -90,165 +90,93 @@ class AspectBucketDataset(Dataset):
         return sum(len(indices) for indices in self.bucket_indices.values())
 
     def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
-        """Get item from same-sized bucket to ensure stackable tensors."""
+        """Get a single item with proper tensor formatting for both trainers."""
         try:
-            # Find which bucket this index belongs to
-            current_pos = 0
-            target_bucket = None
-            bucket_idx = 0
+            image_path = self.image_paths[idx]
+            caption = self.captions[idx] if self.captions else None
             
-            for bucket_dims, indices in self.bucket_indices.items():
-                if idx < current_pos + len(indices):
-                    target_bucket = bucket_dims
-                    bucket_idx = idx - current_pos
-                    break
-                current_pos += len(indices)
-            
-            if target_bucket is None:
-                return None
-            
-            # Get actual image index from bucket
-            image_idx = self.bucket_indices[target_bucket][bucket_idx]
-            image_path = self.image_paths[image_idx]
-            caption = self.captions[image_idx]
-            
-            # Get cache key and load cached data
+            # Load cached tensors
             cache_key = self.cache_manager.get_cache_key(image_path)
-            cache_entry = self.cache_manager.cache_index["entries"].get(cache_key)
-            
-            if not cache_entry or not cache_entry.get("metadata", {}).get("bucket_info"):
-                logger.warning(f"Missing cache entry or bucket info for {image_path}")
-                return None
-            
             cached_data = self.cache_manager.load_tensors(cache_key)
+            
             if cached_data is None:
-                logger.warning(f"Failed to load cached data for: {image_path}")
                 return None
             
-            # Get tag weight from tag index if available
-            tag_weight = 1.0  # Default weight
+            # Extract tensors and metadata
+            vae_latents = cached_data["vae_latents"]
+            prompt_embeds = cached_data["prompt_embeds"]
+            pooled_prompt_embeds = cached_data["pooled_prompt_embeds"]
+            time_ids = cached_data["time_ids"]
+            
+            # Prepare metadata
+            metadata = {
+                "original_size": cached_data["original_size"],
+                "crop_coords": cached_data["crop_coords"],
+                "target_size": cached_data["target_size"],
+                "text": caption,
+                "bucket_info": cached_data["bucket_info"]
+            }
+            
+            # Add tag weight if enabled
             if self.tag_weighter is not None:
-                try:
-                    # Try to get weight from tag index first
-                    tag_index = self.cache_manager.load_tag_index()
-                    if tag_index and "images" in tag_index and str(image_path) in tag_index["images"]:
-                        tag_weight = tag_index["images"][str(image_path)]["total_weight"]
-                    else:
-                        # Fall back to computing weight directly
-                        tag_weight = self.tag_weighter.get_caption_weight(caption)
-                except Exception as e:
-                    logger.warning(f"Failed to get tag weight for {image_path}: {e}")
+                metadata["tag_weight"] = self.tag_weighter.get_weight(image_path)
             
-            # Verify the latents match the bucket dimensions from cache
-            latents = cached_data["vae_latents"]
-            bucket_info = self.cache_manager.load_bucket_info(cache_key)
-            if not bucket_info:
-                logger.warning(f"Failed to load bucket info for {image_path}")
-                return None
-
-            expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])  # VAE shape is (C, H, W)
-
-            if latents.shape != expected_shape:
-                logger.warning(
-                    f"Latent shape mismatch for {image_path}: "
-                    f"expected {expected_shape}, got {latents.shape}"
-                )
-                return None
-            
-            # Validate required tensors
-            required_keys = {
-                "vae_latents", 
-                "prompt_embeds", 
-                "pooled_prompt_embeds", 
-                "time_ids"
-            }
-            if not all(k in cached_data for k in required_keys):
-                logger.warning(
-                    f"Missing required keys for {image_path}. "
-                    f"Found: {set(cached_data.keys())}, "
-                    f"Required: {required_keys}"
-                )
-                return None
-            
-            # Validate metadata
-            required_metadata = {
-                "original_size",
-                "crop_coords",
-                "target_size"
-            }
-            if not all(k in cached_data.get("metadata", {}) for k in required_metadata):
-                logger.warning(
-                    f"Missing required metadata for {image_path}. "
-                    f"Found: {set(cached_data.get('metadata', {}).keys())}, "
-                    f"Required: {required_metadata}"
-                )
-                return None
-            
-            # Return properly formatted data with tag weight and bucket info
+            # Return format compatible with both DDPM and Flow Matching
             return {
-                "vae_latents": cached_data["vae_latents"],
-                "prompt_embeds": cached_data["prompt_embeds"],
-                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
-                "time_ids": cached_data["time_ids"],
-                "metadata": {
-                    "original_size": cached_data["metadata"]["original_size"],
-                    "crop_coords": cached_data["metadata"]["crop_coords"],
-                    "target_size": cached_data["metadata"]["target_size"],
-                    "text": caption,
-                    "tag_weight": tag_weight,
-                    "bucket_info": bucket_info  # Add bucket info to metadata
-                }
+                # Core tensors needed by both trainers
+                "vae_latents": vae_latents,          # Shape: [C, H, W]
+                "prompt_embeds": prompt_embeds,      # Shape: [77, 2048]
+                "pooled_prompt_embeds": pooled_prompt_embeds,  # Shape: [1, 1280]
+                "time_ids": time_ids,                # Shape: [1, 6]
+                
+                # Metadata needed for conditioning
+                "metadata": metadata
             }
-        
+            
         except Exception as e:
-            logger.error(f"Failed to get item {idx}: {str(e)}", exc_info=True)
+            logger.error(f"Error loading item {idx}: {e}")
             return None
 
-    def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        """Collate batch of samples into training format for DDPM and Flow Matching."""
+    def collate_fn(self, batch: List[Dict[str, Any]]) -> Optional[Dict[str, torch.Tensor]]:
+        """Collate batch items for training."""
         try:
             # Filter None values
             valid_batch = [b for b in batch if b is not None]
-            
-            # If no valid samples, return None
             if len(valid_batch) == 0:
                 return None
             
-            # If at least minimum batch size
+            # Ensure minimum batch size
             min_batch_size = max(self.config.training.batch_size // 4, 1)
-            if len(valid_batch) >= min_batch_size:
-                # Common format for both DDPM and Flow Matching
-                batch_data = {
-                    # Core tensors needed by both trainers
-                    "vae_latents": torch.stack([example["vae_latents"] for example in valid_batch]),
-                    "prompt_embeds": torch.stack([example["prompt_embeds"] for example in valid_batch]),
-                    "pooled_prompt_embeds": torch.stack([example["pooled_prompt_embeds"] for example in valid_batch]),
-                    "time_ids": torch.stack([example["time_ids"] for example in valid_batch]),
-                    
-                    # Metadata needed for conditioning
-                    "original_size": [example["metadata"]["original_size"] for example in valid_batch],
-                    "crop_coords": [example["metadata"]["crop_coords"] for example in valid_batch],
-                    "target_size": [example["metadata"]["target_size"] for example in valid_batch],
-                    
-                    # Additional info
-                    "text": [example["metadata"]["text"] for example in valid_batch],
-                    "bucket_info": [example["metadata"]["bucket_info"] for example in valid_batch]
-                }
-
-                # Add tag weights if available
-                if "tag_weight" in valid_batch[0]["metadata"]:
-                    batch_data["tag_weights"] = torch.tensor(
-                        [example["metadata"]["tag_weight"] for example in valid_batch],
-                        dtype=torch.float32,
-                        device=self.device
-                    )
-
-                return batch_data
+            if len(valid_batch) < min_batch_size:
+                return None
             
-            return None
-
+            # Stack tensors
+            collated = {
+                "vae_latents": torch.stack([b["vae_latents"] for b in valid_batch]),
+                "prompt_embeds": torch.stack([b["prompt_embeds"] for b in valid_batch]),
+                "pooled_prompt_embeds": torch.stack([b["pooled_prompt_embeds"] for b in valid_batch]),
+                "time_ids": torch.stack([b["time_ids"] for b in valid_batch]),
+                
+                # Collect metadata
+                "original_size": [b["metadata"]["original_size"] for b in valid_batch],
+                "crop_coords": [b["metadata"]["crop_coords"] for b in valid_batch],
+                "target_size": [b["metadata"]["target_size"] for b in valid_batch],
+                "text": [b["metadata"]["text"] for b in valid_batch],
+                "bucket_info": [b["metadata"]["bucket_info"] for b in valid_batch]
+            }
+            
+            # Add tag weights if available
+            if "tag_weight" in valid_batch[0]["metadata"]:
+                collated["tag_weights"] = torch.tensor(
+                    [b["metadata"]["tag_weight"] for b in valid_batch],
+                    dtype=torch.float32,
+                    device=self.device
+                )
+            
+            return collated
+            
         except Exception as e:
-            logger.error(f"Failed to collate batch: {str(e)}")
+            logger.error(f"Collate failed: {e}")
             return None
 
     # Setup Methods
