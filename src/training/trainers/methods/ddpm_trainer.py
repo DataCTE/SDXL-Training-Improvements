@@ -297,17 +297,16 @@ class DDPMTrainer:
             vae_latents = batch["vae_latents"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
-            tag_weights = batch["tag_weights"].to(device=self.device, dtype=model_dtype)
             
-            # Get metadata and bucket info from batch
-            bucket_info = batch.get("bucket_info", None)  # Get bucket info directly
-            original_sizes = [info["original_size"] for info in bucket_info] if bucket_info else batch["original_size"]
-            target_sizes = [info["target_size"] for info in bucket_info] if bucket_info else batch["target_size"]
-            crop_coords = [info["crop_coords"] for info in bucket_info] if bucket_info else batch["crop_top_lefts"]
-            
+            # Get bucket info from batch
+            bucket_info = batch.get("bucket_info", [])
+            original_sizes = [(info.pixel_dims[1], info.pixel_dims[0]) for info in bucket_info]
+            target_sizes = [(info.dimensions.height, info.dimensions.width) for info in bucket_info]
+            crop_coords = batch.get("crop_coords", [(0, 0)] * len(bucket_info))
+
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
-                # Prepare time embeddings using metadata
+                # Prepare time embeddings using bucket metadata
                 batch_size = vae_latents.shape[0]
                 add_time_ids = torch.cat([
                     self.compute_time_ids(
@@ -318,95 +317,69 @@ class DDPMTrainer:
                         dtype=model_dtype
                     ) for orig_size, crop_coord, target_size in zip(original_sizes, crop_coords, target_sizes)
                 ])
-                add_time_ids = add_time_ids.to(device=self.device)
 
-                # Sample noise with proper scaling
-                noise = torch.randn_like(vae_latents, device=self.device, dtype=model_dtype)
-                noise = torch.clamp(noise, -20000.0, 20000.0)  # Clamp noise values
-                
-                # Sample timesteps with proper scaling
-                timesteps = torch.randint(
-                    0, self.noise_scheduler.config.num_train_timesteps, 
-                    (batch_size,), device=self.device
-                ).long()
+                # Sample noise with ZTSNR-compatible scaling
+                noise = torch.randn_like(vae_latents)
+                if self.config.model.use_ztsnr:
+                    noise = torch.clamp(noise * self.config.model.sigma_max, -20000.0, 20000.0)
 
-                # Add noise to latents with value checking and scaling
+                # Sample timesteps with proper scaling for ZTSNR
+                timesteps = self.noise_scheduler.sample_timesteps(batch_size, device=self.device)
+
+                # Add noise to latents with ZTSNR scaling
                 noisy_latents = self.noise_scheduler.add_noise(vae_latents, noise, timesteps)
-                
-                # Clamp noisy latents to prevent extreme values
-                noisy_latents = torch.clamp(noisy_latents, -20000.0, 20000.0)
-                
-                # Get model prediction with time embeddings
+                if self.config.model.use_ztsnr:
+                    noisy_latents = torch.clamp(noisy_latents, -20000.0, 20000.0)
+
+                # Get model prediction
                 model_pred = self.model.unet(
                     noisy_latents,
                     timesteps,
                     prompt_embeds,
-                    added_cond_kwargs={
-                        "text_embeds": pooled_prompt_embeds,
-                        "time_ids": add_time_ids
-                    }
+                    added_cond_kwargs={"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
                 ).sample
 
-                # Calculate base loss with consistent dtype and scaling
-                if self.config.training.prediction_type == "epsilon":
-                    target = noise
-                elif self.config.training.prediction_type == "v_prediction":
+                # Calculate target based on prediction type
+                if self.config.model.prediction_type == "v_prediction":
                     target = self.noise_scheduler.get_velocity(vae_latents, noise, timesteps)
                 else:
-                    raise ValueError(f"Unknown prediction type: {self.config.training.prediction_type}")
+                    target = noise
 
-                # Ensure both tensors are in the same dtype and properly scaled
-                model_pred = model_pred.to(dtype=model_dtype)
-                target = target.to(dtype=model_dtype)
+                # Apply MinSNR loss weighting if enabled
+                if self.config.model.min_snr_gamma is not None:
+                    snr = self.noise_scheduler.get_snr(timesteps)
+                    mse = F.mse_loss(model_pred, target, reduction="none")
+                    loss = mse * torch.minimum(
+                        snr,
+                        torch.ones_like(snr) * self.config.model.min_snr_gamma
+                    ).float()
+                    loss = loss.mean()
+                else:
+                    loss = F.mse_loss(model_pred, target)
 
-                # Clamp predictions and targets to prevent extreme values
-                model_pred = torch.clamp(model_pred, -20000.0, 20000.0)
-                target = torch.clamp(target, -20000.0, 20000.0)
-
-                # Calculate unweighted loss
-                base_loss = F.mse_loss(model_pred, target, reduction="none")  # Keep per-sample losses
-                
-                # Reshape weights to match loss dimensions
-                tag_weights = tag_weights.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
-                
-                # Apply tag weights to loss
-                weighted_loss = base_loss * tag_weights
-                
-                # Reduce to scalar loss
-                loss = weighted_loss.mean()
-                
                 # Ensure loss is finite and properly scaled
-                if torch.isnan(loss) or torch.isinf(loss):
+                if not torch.isfinite(loss):
                     logger.warning("Invalid loss detected - using fallback value")
                     loss = torch.tensor(1000.0, device=self.device, dtype=model_dtype)
                 else:
-                    # Clip loss to prevent explosion
                     loss = torch.clamp(loss, max=1000.0)
 
-                # Log metrics with tag weight statistics
                 metrics = {
                     "loss": loss.detach().item(),
                     "lr": self.optimizer.param_groups[0]["lr"],
                     "timestep_mean": timesteps.float().mean().item(),
-                    "weight_mean": tag_weights.mean().item(),
-                    "weight_std": tag_weights.std().item(),
-                    "weight_min": tag_weights.min().item(),
-                    "weight_max": tag_weights.max().item(),
-                    "base_loss_mean": base_loss.mean().item(),
-                    "weighted_loss_mean": weighted_loss.mean().item(),
+                    "noise_scale": noise.abs().mean().item(),
+                    "pred_scale": model_pred.abs().mean().item(),
                 }
-                
-                # Only calculate std if batch size > 1 to avoid warning
+
                 if batch_size > 1:
                     metrics["timestep_std"] = timesteps.float().std().item()
-                else:
-                    metrics["timestep_std"] = 0.0
-                
+
                 return {
                     "loss": loss,
                     "metrics": metrics
                 }
-                
+
         except Exception as e:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise
