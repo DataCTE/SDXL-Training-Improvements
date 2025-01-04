@@ -116,8 +116,8 @@ class AspectBucketDataset(Dataset):
             cache_key = self.cache_manager.get_cache_key(image_path)
             cache_entry = self.cache_manager.cache_index["entries"].get(cache_key)
             
-            if not cache_entry or not cache_entry.get("bucket_dims"):
-                logger.warning(f"Missing cache entry or bucket dims for {image_path}")
+            if not cache_entry or not cache_entry.get("metadata", {}).get("bucket_info"):
+                logger.warning(f"Missing cache entry or bucket info for {image_path}")
                 return None
             
             cached_data = self.cache_manager.load_tensors(cache_key)
