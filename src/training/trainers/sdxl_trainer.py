@@ -47,6 +47,7 @@ class SDXLTrainer(BaseTrainer):
                 device=device,
                 wandb_logger=wandb_logger,
                 config=config,
+                parent_trainer=self,
                 **kwargs
             )
         elif config.training.method.lower() == "flow_matching":

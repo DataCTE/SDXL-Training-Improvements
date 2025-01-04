@@ -29,15 +29,31 @@ class DDPMTrainer:
         device: torch.device,
         wandb_logger=None,
         config: Optional[Config] = None,
+        parent_trainer=None,  # Add parent trainer reference
         **kwargs
     ):
+        # Store parent trainer reference
+        self.parent_trainer = parent_trainer
+        
         # Direct initialization instead of using super()
         self.model = model
         self.optimizer = optimizer
-        self.train_dataloader = train_dataloader
         self.device = device
         self.wandb_logger = wandb_logger
         self.config = config
+        
+        # Create a new dataloader with proper multiprocessing settings
+        dataset = train_dataloader.dataset
+        self.train_dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=train_dataloader.batch_size,
+            shuffle=train_dataloader.dataset.is_train,
+            num_workers=config.training.num_workers,
+            pin_memory=True,
+            drop_last=True,
+            collate_fn=dataset.collate_fn if hasattr(dataset, 'collate_fn') else None,
+            multiprocessing_context='fork'  # Use fork context for better compatibility
+        )
         
         # Remove tag weight caching since weights now come from dataset
         self.default_weight = config.tag_weighting.default_weight
@@ -218,7 +234,8 @@ class DDPMTrainer:
                     if avg_epoch_loss < best_loss:
                         best_loss = avg_epoch_loss
                         if is_main_process():
-                            self.save_checkpoint(epoch + 1, is_final=False)
+                            # Call parent's save_checkpoint through the trainer reference
+                            self.parent_trainer.save_checkpoint(epoch + 1, is_final=False)
                             logger.info(f"Saved checkpoint for epoch {epoch + 1} with loss {best_loss:.4f}")
                     
                     # Clear CUDA cache between epochs
@@ -231,9 +248,9 @@ class DDPMTrainer:
         finally:
             progress_bar.close()
             
-            # Save final checkpoint
+            # Save final checkpoint through parent trainer
             if is_main_process():
-                self.save_checkpoint(num_epochs, is_final=True)
+                self.parent_trainer.save_checkpoint(num_epochs, is_final=True)
                 logger.info("Saved final checkpoint")
 
     def _execute_training_step(self, batch, accumulate: bool = False, is_last_accumulation_step: bool = True):
