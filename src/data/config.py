@@ -11,12 +11,15 @@ logger = logging.getLogger(__name__)
 class ModelConfig:
     pretrained_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
     model_type: str = "sdxl"
+    prediction_type: str = "v_prediction"  # Options: epsilon, v_prediction
     num_timesteps: int = 1000
     sigma_min: float = 0.002
-    sigma_max: float = 80.0
+    sigma_max: float = 20000.0  # Increased for ZTSNR
+    use_ztsnr: bool = True      # Enable Zero Terminal SNR
     timestep_bias_strategy: str = "none"
     timestep_bias_min: float = 0.0
     timestep_bias_max: float = 1.0
+    min_snr_gamma: Optional[float] = 5.0  # Added for MinSNR loss weighting
 
     @property
     def kwargs(self) -> dict:
@@ -24,12 +27,15 @@ class ModelConfig:
         return {
             "pretrained_model_name": self.pretrained_model_name,
             "model_type": self.model_type,
+            "prediction_type": self.prediction_type,
             "num_timesteps": self.num_timesteps,
             "sigma_min": self.sigma_min,
             "sigma_max": self.sigma_max,
+            "use_ztsnr": self.use_ztsnr,
             "timestep_bias_strategy": self.timestep_bias_strategy,
             "timestep_bias_min": self.timestep_bias_min,
-            "timestep_bias_max": self.timestep_bias_max
+            "timestep_bias_max": self.timestep_bias_max,
+            "min_snr_gamma": self.min_snr_gamma
         }
 
 @dataclass

@@ -2,12 +2,15 @@
 model:
   pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
   model_type: "sdxl"
+  prediction_type: "v_prediction"
   num_timesteps: 1000
   sigma_min: 0.002
-  sigma_max: 2000.0
+  sigma_max: 20000.0
+  use_ztsnr: true
   timestep_bias_strategy: "none"
   timestep_bias_min: 0.0
   timestep_bias_max: 1.0
+  min_snr_gamma: 5.0
 
 # Optimizer settings
 optimizer:
@@ -36,7 +39,10 @@ training:
   save_final_model: true
   method_config:
     scheduler:
-      rescale_betas_zero_snr: true  # Only expose this setting
+      rescale_betas_zero_snr: true
+      dynamic_thresholding_ratio: 0.995
+      sample_max_value: 20000.0
+      timestep_spacing: "leading"
 
 # Dataset configuration
 data:
