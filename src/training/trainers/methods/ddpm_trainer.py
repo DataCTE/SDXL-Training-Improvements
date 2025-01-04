@@ -44,12 +44,6 @@ class DDPMTrainer:
         self.wandb_logger = wandb_logger
         self.config = config
         
-        # Set multiprocessing start method to 'spawn'
-        try:
-            multiprocessing.set_start_method('spawn', force=True)
-        except RuntimeError:
-            pass  # Method already set
-        
         # Create a new dataloader with proper multiprocessing settings
         dataset = train_dataloader.dataset
         self.train_dataloader = torch.utils.data.DataLoader(

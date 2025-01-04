@@ -39,32 +39,41 @@ def setup_environment():
     """Setup distributed training environment."""
     try:
         if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
-            init_process_group(backend="nccl")
-            setup_distributed()
+            if not torch.distributed.is_initialized():
+                init_process_group(backend="nccl")
+                setup_distributed()
         yield
     finally:
         if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
-            cleanup_distributed()
+            if torch.distributed.is_initialized():
+                cleanup_distributed()
         torch_sync()
 
 def main():
     """Main training entry point."""
     logger.info("Starting training script...", extra={'keyword': 'start'})
+    
+    # Set multiprocessing start method first
     mp.set_start_method('spawn', force=True)
     
-    # Set default distributed training environment variables
+    # Set all required distributed training environment variables
     if "RANK" not in os.environ:
         os.environ["RANK"] = "0"
     if "WORLD_SIZE" not in os.environ:
         os.environ["WORLD_SIZE"] = "1"
     if "LOCAL_RANK" not in os.environ:
         os.environ["LOCAL_RANK"] = "0"
+    if "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"] = "localhost"
+    if "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"] = "29500"
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
         
+        # Modified setup_environment context
         with setup_environment():
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {device}", extra={'success': True})
             
             # Initialize model and dataset in one step
