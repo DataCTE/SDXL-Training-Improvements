@@ -290,92 +290,100 @@ class DDPMTrainer:
             raise
 
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-        """Training step with ZTSNR and v-prediction support."""
+        """Execute single training step with proper tensor handling."""
         try:
-            # Get model dtype from parameters
-            model_dtype = next(self.model.parameters()).dtype
+            # Validate batch contents
+            required_keys = {
+                "vae_latents", "prompt_embeds", "pooled_prompt_embeds", 
+                "time_ids", "metadata"
+            }
+            if not all(k in batch for k in required_keys):
+                missing = required_keys - set(batch.keys())
+                raise ValueError(f"Batch missing required keys: {missing}")
+
+            # Extract tensors and ensure proper device/dtype
+            vae_latents = batch["vae_latents"].to(self.device)  # [B, C, H, W]
+            prompt_embeds = batch["prompt_embeds"].to(self.device)  # [B, 77, 2048]
+            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device)  # [B, 1, 1280]
+            time_ids = batch["time_ids"].to(self.device)  # [B, 1, 6]
             
-            # Move batch data to device and dtype - now using cached time_ids
-            vae_latents = batch["vae_latents"].to(device=self.device, dtype=model_dtype)
-            prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
-            pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
-            time_ids = batch["time_ids"].to(device=self.device, dtype=model_dtype)  # Use cached time_ids
-            
-            # Get bucket info from batch
-            bucket_info = batch.get("bucket_info", [])
-            original_sizes = [(info.pixel_dims[1], info.pixel_dims[0]) for info in bucket_info]
-            target_sizes = [(info.dimensions.height, info.dimensions.width) for info in bucket_info]
-            crop_coords = batch.get("crop_coords", [(0, 0)] * len(bucket_info))
+            # Get batch size for metrics
+            batch_size = vae_latents.shape[0]
+            model_dtype = vae_latents.dtype
 
-            # Use context manager for mixed precision
-            with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
-                # Prepare time embeddings using bucket metadata
-                batch_size = vae_latents.shape[0]
-                add_time_ids = self.compute_time_ids(
-                    original_sizes=original_sizes,
-                    crop_coords=crop_coords,
-                    target_sizes=target_sizes,
-                    device=self.device,
-                    dtype=model_dtype
-                )
+            # Sample noise and timesteps
+            noise = torch.randn_like(vae_latents)
+            timesteps = self.noise_scheduler.sample_timesteps(batch_size, device=self.device)
 
-                # Generate noise
-                noise = torch.randn_like(vae_latents)
-                
-                # Sample timesteps using noise scheduler
-                timesteps = self.noise_scheduler.sample_timesteps(batch_size)
+            # Add noise according to timesteps
+            noisy_latents = self.noise_scheduler.add_noise(
+                vae_latents, 
+                noise, 
+                timesteps
+            )
 
-                # Add noise to latents using scheduler
-                noisy_latents = self.noise_scheduler.add_noise(vae_latents, noise, timesteps)
+            # Prepare conditioning
+            added_cond_kwargs = {
+                "text_embeds": pooled_prompt_embeds,
+                "time_ids": time_ids
+            }
 
-                # Get model prediction
-                model_pred = self.model.unet(
-                    noisy_latents,
-                    timesteps,
-                    prompt_embeds,
-                    added_cond_kwargs={"text_embeds": pooled_prompt_embeds, "time_ids": time_ids}  # Use cached time_ids
-                ).sample
+            # Get model prediction
+            model_pred = self.model.unet(
+                noisy_latents,
+                timesteps,
+                prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs
+            ).sample
 
-                # Calculate target based on prediction type
-                if self.config.model.prediction_type == "v_prediction":
-                    target = self.noise_scheduler.get_velocity(vae_latents, noise, timesteps)
-                else:
-                    target = noise
+            # Get target based on prediction type
+            if self.config.training.prediction_type == "epsilon":
+                target = noise
+            elif self.config.training.prediction_type == "v_prediction":
+                target = self.noise_scheduler.get_velocity(vae_latents, noise, timesteps)
+            else:
+                target = noise
 
-                # Apply MinSNR loss weighting if enabled
-                if self.config.model.min_snr_gamma is not None:
-                    snr = self.noise_scheduler.get_snr(timesteps)
-                    mse = F.mse_loss(model_pred, target, reduction="none")
-                    loss = mse * torch.minimum(
-                        snr,
-                        torch.ones_like(snr) * self.config.model.min_snr_gamma
-                    ).float()
-                    loss = loss.mean()
-                else:
-                    loss = F.mse_loss(model_pred, target)
+            # Apply MinSNR loss weighting if enabled
+            if self.config.model.min_snr_gamma is not None:
+                snr = self.noise_scheduler.get_snr(timesteps)
+                mse = F.mse_loss(model_pred, target, reduction="none")
+                loss = mse * torch.minimum(
+                    snr,
+                    torch.ones_like(snr) * self.config.model.min_snr_gamma
+                ).float()
+                loss = loss.mean()
+            else:
+                loss = F.mse_loss(model_pred, target)
 
-                # Ensure loss is finite and properly scaled
-                if not torch.isfinite(loss):
-                    logger.warning("Invalid loss detected - using fallback value")
-                    loss = torch.tensor(1000.0, device=self.device, dtype=model_dtype)
-                else:
-                    loss = torch.clamp(loss, max=1000.0)
+            # Handle tag weights if present
+            if "tag_weights" in batch:
+                tag_weights = batch["tag_weights"].to(self.device)
+                loss = loss * tag_weights.mean()
 
-                metrics = {
-                    "loss": loss.detach().item(),
-                    "lr": self.optimizer.param_groups[0]["lr"],
-                    "timestep_mean": timesteps.float().mean().item(),
-                    "noise_scale": noise.abs().mean().item(),
-                    "pred_scale": model_pred.abs().mean().item(),
-                }
+            # Ensure loss is finite and properly scaled
+            if not torch.isfinite(loss):
+                logger.warning("Invalid loss detected - using fallback value")
+                loss = torch.tensor(1000.0, device=self.device, dtype=model_dtype)
+            else:
+                loss = torch.clamp(loss, max=1000.0)
 
-                if batch_size > 1:
-                    metrics["timestep_std"] = timesteps.float().std().item()
+            metrics = {
+                "loss": loss.detach().item(),
+                "lr": self.optimizer.param_groups[0]["lr"],
+                "timestep_mean": timesteps.float().mean().item(),
+                "noise_scale": noise.abs().mean().item(),
+                "pred_scale": model_pred.abs().mean().item(),
+                "batch_size": batch_size
+            }
 
-                return {
-                    "loss": loss,
-                    "metrics": metrics
-                }
+            if batch_size > 1:
+                metrics["timestep_std"] = timesteps.float().std().item()
+
+            return {
+                "loss": loss,
+                "metrics": metrics
+            }
 
         except Exception as e:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
