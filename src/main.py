@@ -8,6 +8,8 @@ from pathlib import Path
 import torch
 from torch.distributed import init_process_group
 from torch.utils.data import DataLoader
+import socket
+import random
 
 # Core imports
 from src.core.logging import setup_logging, get_logger, WandbLogger
@@ -34,14 +36,33 @@ logger, tensor_logger = setup_logging(
 
 CONFIG_PATH = Path("src/config.yaml")
 
+def find_free_port():
+    """Find a free port to use for distributed training."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
+
 @contextmanager
 def setup_environment():
     """Setup distributed training environment."""
     try:
         if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
             if not torch.distributed.is_initialized():
-                init_process_group(backend="nccl")
-                setup_distributed()
+                # Try multiple ports if the default one is in use
+                max_tries = 5
+                for _ in range(max_tries):
+                    try:
+                        port = find_free_port()
+                        os.environ["MASTER_PORT"] = str(port)
+                        init_process_group(backend="nccl")
+                        setup_distributed()
+                        break
+                    except Exception as e:
+                        if _ == max_tries - 1:
+                            raise RuntimeError(f"Failed to initialize distributed training after {max_tries} attempts") from e
+                        continue
         yield
     finally:
         if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
@@ -54,7 +75,10 @@ def main():
     logger.info("Starting training script...", extra={'keyword': 'start'})
     
     # Set multiprocessing start method first
-    mp.set_start_method('spawn', force=True)
+    try:
+        mp.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Already set
     
     # Set all required distributed training environment variables
     if "RANK" not in os.environ:
@@ -65,13 +89,11 @@ def main():
         os.environ["LOCAL_RANK"] = "0"
     if "MASTER_ADDR" not in os.environ:
         os.environ["MASTER_ADDR"] = "localhost"
-    if "MASTER_PORT" not in os.environ:
-        os.environ["MASTER_PORT"] = "29500"
+    # Note: MASTER_PORT will be set dynamically in setup_environment
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
         
-        # Modified setup_environment context
         with setup_environment():
             device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {device}", extra={'success': True})
