@@ -52,26 +52,6 @@ class DDPMTrainer:
         
         # Create a new dataloader with proper multiprocessing settings
         dataset = train_dataloader.dataset
-        
-        # Ensure dataset's cache manager is picklable
-        if hasattr(dataset, 'cache_manager'):
-            # Add pickling methods to CacheManager class if not already present
-            if not hasattr(dataset.cache_manager.__class__, '__getstate__'):
-                def __getstate__(self):
-                    state = self.__dict__.copy()
-                    # Don't pickle the lock
-                    if '_lock' in state:
-                        del state['_lock']
-                    return state
-                
-                def __setstate__(self, state):
-                    self.__dict__.update(state)
-                    # Recreate the lock in the new process
-                    self._lock = threading.Lock()
-                
-                dataset.cache_manager.__class__.__getstate__ = __getstate__
-                dataset.cache_manager.__class__.__setstate__ = __setstate__
-        
         self.train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=train_dataloader.batch_size,

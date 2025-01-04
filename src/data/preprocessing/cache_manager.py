@@ -45,6 +45,20 @@ class CacheManager:
         self.index_path = self.cache_dir / "cache_index.json"
         self.rebuild_cache_index()
 
+    def __getstate__(self):
+        """Customize pickling behavior."""
+        state = self.__dict__.copy()
+        # Don't pickle the lock
+        if '_lock' in state:
+            del state['_lock']
+        return state
+    
+    def __setstate__(self, state):
+        """Customize unpickling behavior."""
+        self.__dict__.update(state)
+        # Recreate the lock in the new process
+        self._lock = threading.Lock()
+
     def rebuild_cache_index(self) -> None:
         """Rebuild cache index from disk as source of truth."""
         new_index = {
