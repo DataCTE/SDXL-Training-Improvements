@@ -217,18 +217,25 @@ class CacheManager:
         
         try:
             # Load VAE latents with proper shapes
-            vae_data = torch.load(entry["vae_path"], map_location=self.device)
+            vae_path = self.vae_latents_dir / f"{cache_key}.pt"
+            vae_data = torch.load(vae_path, map_location=self.device)
             vae_latents = vae_data["vae_latents"]  # [C, H, W]
             time_ids = vae_data["time_ids"]        # [1, 6]
             
             # Load CLIP embeddings with correct dimensions
-            clip_data = torch.load(entry["clip_path"], map_location=self.device)
+            clip_path = self.clip_latents_dir / f"{cache_key}.pt"
+            clip_data = torch.load(clip_path, map_location=self.device)
             prompt_embeds = clip_data["prompt_embeds"]           # [77, 2048]
             pooled_prompt_embeds = clip_data["pooled_prompt_embeds"]  # [1, 1280]
             
-            # Load metadata
-            with open(entry["metadata_path"]) as f:
+            # Load metadata with tag information
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            with open(metadata_path) as f:
                 metadata = json.loads(f.read())
+            
+            # Add tag info from cache index if available
+            if "tag_info" in entry:
+                metadata["tag_info"] = entry["tag_info"]
             
             # Return format compatible with both trainers
             return {
@@ -243,7 +250,7 @@ class CacheManager:
                 "crop_coords": metadata.get("crop_coords", (0, 0)),
                 "target_size": metadata.get("target_size"),
                 
-                # Additional info
+                # Additional info including tags
                 "metadata": metadata,
                 "bucket_info": entry.get("bucket_info")
             }

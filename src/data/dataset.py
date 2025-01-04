@@ -102,6 +102,12 @@ class AspectBucketDataset(Dataset):
             if cached_data is None:
                 return None
             
+            # Get tag information if available
+            tag_info = cached_data["metadata"].get("tag_info", {
+                "total_weight": 1.0,
+                "tags": {}
+            })
+            
             # Format tensors for both DDPM and Flow Matching
             return {
                 # Core tensors with correct shapes
@@ -122,7 +128,9 @@ class AspectBucketDataset(Dataset):
                     "crop_coords": cached_data["crop_coords"],
                     "target_size": cached_data["target_size"],
                     "text": caption,
-                    "bucket_info": cached_data["bucket_info"]
+                    "bucket_info": cached_data["bucket_info"],
+                    "tag_info": tag_info,
+                    "image_path": image_path
                 }
             }
             
@@ -151,20 +159,18 @@ class AspectBucketDataset(Dataset):
                 "time_ids": torch.stack([b["time_ids"] for b in valid_batch]),
                 
                 # Collect metadata
-                "original_size": [b["metadata"]["original_size"] for b in valid_batch],
-                "crop_coords": [b["metadata"]["crop_coords"] for b in valid_batch],
-                "target_size": [b["metadata"]["target_size"] for b in valid_batch],
-                "text": [b["metadata"]["text"] for b in valid_batch],
-                "bucket_info": [b["metadata"]["bucket_info"] for b in valid_batch]
+                "metadata": [
+                    {
+                        "original_size": b["metadata"]["original_size"],
+                        "crop_coords": b["metadata"]["crop_coords"],
+                        "target_size": b["metadata"]["target_size"],
+                        "text": b["metadata"]["text"],
+                        "bucket_info": b["metadata"]["bucket_info"],
+                        "tag_info": b["metadata"].get("tag_info", {"total_weight": 1.0, "tags": {}})
+                    }
+                    for b in valid_batch
+                ]
             }
-            
-            # Add tag weights if available
-            if "tag_weight" in valid_batch[0]["metadata"]:
-                collated["tag_weights"] = torch.tensor(
-                    [b["metadata"]["tag_weight"] for b in valid_batch],
-                    dtype=torch.float32,
-                    device=self.device
-                )
             
             return collated
             
@@ -205,9 +211,17 @@ class AspectBucketDataset(Dataset):
             # Process images in parallel
             processed_images = []
             
-            for path in image_paths:
+            for path, caption in zip(image_paths, captions):
+                # Get tag weight details if available
+                tag_info = None
+                if self.tag_weighter:
+                    tag_info = self.tag_weighter.get_caption_weight_details(caption)
+                
                 processed = self._process_single_image(path)
                 if processed:
+                    # Add tag information to processed data
+                    if tag_info:
+                        processed["tag_info"] = tag_info
                     processed_images.append(processed)
             
             # Batch encode text for all valid images
@@ -222,7 +236,7 @@ class AspectBucketDataset(Dataset):
                     proportion_empty_prompts=0.0
                 )
             
-            # Save results with bucket information
+            # Save results with bucket and tag information
             results = []
             caption_idx = 0
             
@@ -235,11 +249,15 @@ class AspectBucketDataset(Dataset):
                         target_size=img_data["target_size"]
                     )
                     
-                    # Add caption to processed data
+                    # Add caption and tag info to processed data
                     result = {
                         **img_data,
                         "text": caption,
-                        "bucket_info": img_data["bucket_info"]  # Ensure bucket info is passed through
+                        "bucket_info": img_data["bucket_info"],
+                        "tag_info": img_data.get("tag_info", {
+                            "total_weight": 1.0,
+                            "tags": {}
+                        })
                     }
                     
                     # Save to cache if enabled
@@ -255,13 +273,14 @@ class AspectBucketDataset(Dataset):
                             "crop_coords": img_data["crop_coords"],
                             "target_size": img_data["target_size"],
                             "text": caption,
-                            "bucket_info": img_data["bucket_info"]  # Store complete bucket info
+                            "bucket_info": img_data["bucket_info"]
                         }
                         self.cache_manager.save_latents(
                             tensors=tensors,
                             path=path,
                             metadata=metadata,
-                            bucket_info=img_data["bucket_info"]
+                            bucket_info=img_data["bucket_info"],
+                            tag_info=img_data.get("tag_info")
                         )
                         caption_idx += 1
                     
@@ -316,6 +335,11 @@ class AspectBucketDataset(Dataset):
                             img = Image.open(path).convert('RGB')
                             bucket_info = compute_bucket_dims(img.size, self.buckets)
                             
+                            # Get tag weight details if available
+                            tag_info = None
+                            if self.tag_weighter:
+                                tag_info = self.tag_weighter.get_caption_weight_details(caption)
+                            
                             # Prepare image tensor
                             img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
                             
@@ -340,7 +364,7 @@ class AspectBucketDataset(Dataset):
                                 crop_coords=(0, 0)
                             )
                             
-                            # Save to cache with linked metadata
+                            # Save to cache with all metadata
                             self.cache_manager.save_latents(
                                 tensors={
                                     "vae_latents": vae_latents.squeeze(0),
@@ -355,9 +379,10 @@ class AspectBucketDataset(Dataset):
                                     "target_size": bucket_info.pixel_dims,
                                     "text": caption,
                                     "bucket_info": bucket_info.__dict__,
-                                    "image_path": str(path),  # Store original image path
-                                    "caption": caption  # Store associated caption
-                                }
+                                    "image_path": str(path)
+                                },
+                                bucket_info=bucket_info,
+                                tag_info=tag_info
                             )
                             
                             pbar.update(1)
