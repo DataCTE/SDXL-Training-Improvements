@@ -623,10 +623,11 @@ def create_dataset(
         tag_weighter = None
         if config.tag_weighting.enable_tag_weighting:
             logger.info("Initializing tag weighting system...")
-            tag_weighter = preprocess_dataset_tags(
+            # Use create_tag_weighter_with_index directly instead of preprocess_dataset_tags
+            image_captions = dict(zip(image_paths, captions))
+            tag_weighter = create_tag_weighter_with_index(
                 config=config,
-                image_paths=image_paths,
-                captions=captions
+                image_captions=image_captions
             )
         
         # Create dataset instance with tag weighter
@@ -635,7 +636,7 @@ def create_dataset(
             image_paths=image_paths,
             captions=captions,
             model=model,
-            tag_weighter=tag_weighter,  # Pass the initialized tag weighter
+            tag_weighter=tag_weighter,
             cache_manager=cache_manager
         )
         
