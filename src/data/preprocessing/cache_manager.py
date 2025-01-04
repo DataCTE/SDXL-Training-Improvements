@@ -37,18 +37,20 @@ class CacheManager:
         self.latents_dir = self.cache_dir / "latents"
         self.latents_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create VAE and CLIP subdirectories within latents
+        # Create all subdirectories within latents
         self.vae_latents_dir = self.latents_dir / "vae"
         self.clip_latents_dir = self.latents_dir / "clip"
         self.metadata_dir = self.latents_dir / "metadata"
         self.bucket_info_dir = self.latents_dir / "buckets"
+        self.tags_dir = self.latents_dir / "tags"
         
         # Create all required subdirectories
         for directory in [
             self.vae_latents_dir,
             self.clip_latents_dir,
             self.metadata_dir,
-            self.bucket_info_dir
+            self.bucket_info_dir,
+            self.tags_dir
         ]:
             directory.mkdir(parents=True, exist_ok=True)
         
@@ -139,7 +141,8 @@ class CacheManager:
         tensors: Dict[str, torch.Tensor],
         path: Union[str, Path],
         metadata: Dict[str, Any],
-        bucket_info: Optional[BucketInfo] = None
+        bucket_info: Optional[BucketInfo] = None,
+        tag_info: Optional[Dict[str, Any]] = None
     ) -> bool:
         """Save processed tensors with proper organization for training."""
         cache_key = self.get_cache_key(path)
@@ -159,7 +162,7 @@ class CacheManager:
                 "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
             }, clip_path)
             
-            # Save metadata in metadata subfolder
+            # Save metadata in metadata subfolder with tag information
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             full_metadata = {
                 "original_path": str(path),
@@ -168,12 +171,19 @@ class CacheManager:
                 "clip_latents_path": str(clip_path.relative_to(self.latents_dir)),
                 **metadata
             }
+
+            # Add tag information if available
+            if tag_info:
+                full_metadata["tag_info"] = {
+                    "total_weight": tag_info["total_weight"],
+                    "tag_categories": tag_info["tags"]
+                }
             
             self._atomic_json_save(metadata_path, full_metadata)
             
             # Update cache index with relative paths
             with self._lock:
-                self.cache_index["entries"][cache_key] = {
+                entry = {
                     "vae_path": str(vae_path.relative_to(self.latents_dir)),
                     "clip_path": str(clip_path.relative_to(self.latents_dir)),
                     "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
@@ -182,8 +192,15 @@ class CacheManager:
                 }
                 
                 if bucket_info:
-                    self.cache_index["entries"][cache_key]["bucket_info"] = bucket_info.__dict__
+                    entry["bucket_info"] = bucket_info.__dict__
                 
+                if tag_info:
+                    entry["tag_info"] = {
+                        "total_weight": tag_info["total_weight"],
+                        "categories": list(tag_info["tags"].keys())
+                    }
+                
+                self.cache_index["entries"][cache_key] = entry
                 self._save_index()
             
             return True
