@@ -145,9 +145,20 @@ class CacheManager:
         tag_info: Optional[Dict[str, Any]] = None
     ) -> bool:
         """Save processed tensors with proper organization for training."""
-        cache_key = self.get_cache_key(path)
-        
         try:
+            # Extract dimensions from time_ids
+            time_ids = tensors["time_ids"].cpu()
+            dims = {
+                "original_size": (int(time_ids[0, 0].item()), int(time_ids[0, 1].item())),
+                "crop_coords": (int(time_ids[0, 2].item()), int(time_ids[0, 3].item())),
+                "target_size": (int(time_ids[0, 4].item()), int(time_ids[0, 5].item()))
+            }
+            
+            # Update metadata with dimensions from time_ids
+            metadata.update(dims)
+            
+            cache_key = self.get_cache_key(path)
+            
             # Save VAE latents in vae subfolder
             vae_path = self.vae_latents_dir / f"{cache_key}.pt"
             torch.save({
@@ -192,7 +203,24 @@ class CacheManager:
                 }
                 
                 if bucket_info:
-                    entry["bucket_info"] = bucket_info.__dict__
+                    bucket_dict = {
+                        "dimensions": {
+                            "width": bucket_info.dimensions.width,
+                            "height": bucket_info.dimensions.height,
+                            "width_latent": bucket_info.dimensions.width_latent,
+                            "height_latent": bucket_info.dimensions.height_latent,
+                            "aspect_ratio": bucket_info.dimensions.aspect_ratio,
+                            "aspect_ratio_inverse": bucket_info.dimensions.aspect_ratio_inverse,
+                            "total_pixels": bucket_info.dimensions.total_pixels,
+                            "total_latents": bucket_info.dimensions.total_latents
+                        },
+                        "pixel_dims": bucket_info.pixel_dims,
+                        "latent_dims": bucket_info.latent_dims,
+                        "bucket_index": bucket_info.bucket_index,
+                        "size_class": bucket_info.size_class,
+                        "aspect_class": bucket_info.aspect_class
+                    }
+                    metadata["bucket_info"] = bucket_dict
                 
                 if tag_info:
                     entry["tag_info"] = {
@@ -210,47 +238,34 @@ class CacheManager:
             return False
 
     def load_tensors(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """Load cached tensors optimized for DDPM and Flow Matching training."""
+        """Load cached tensors optimized for training."""
         entry = self.cache_index["entries"].get(cache_key)
         if not entry or not self._validate_cache_entry(entry):
             return None
         
         try:
-            # Load VAE latents with proper shapes
+            # Load VAE latents and time_ids
             vae_path = self.vae_latents_dir / f"{cache_key}.pt"
             vae_data = torch.load(vae_path, map_location=self.device)
-            vae_latents = vae_data["vae_latents"]  # [C, H, W]
-            time_ids = vae_data["time_ids"]        # [1, 6]
             
-            # Load CLIP embeddings with correct dimensions
+            # Load CLIP embeddings
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
             clip_data = torch.load(clip_path, map_location=self.device)
-            prompt_embeds = clip_data["prompt_embeds"]           # [77, 2048]
-            pooled_prompt_embeds = clip_data["pooled_prompt_embeds"]  # [1, 1280]
             
-            # Load metadata with tag information
+            # Load metadata
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             with open(metadata_path) as f:
                 metadata = json.loads(f.read())
             
-            # Add tag info from cache index if available
+            # Add tag info if available
             if "tag_info" in entry:
                 metadata["tag_info"] = entry["tag_info"]
             
-            # Return format compatible with both trainers
             return {
-                # Core tensors
-                "vae_latents": vae_latents,
-                "prompt_embeds": prompt_embeds,
-                "pooled_prompt_embeds": pooled_prompt_embeds,
-                "time_ids": time_ids,
-                
-                # Size information for SDXL conditioning
-                "original_size": metadata.get("original_size"),
-                "crop_coords": metadata.get("crop_coords", (0, 0)),
-                "target_size": metadata.get("target_size"),
-                
-                # Additional info including tags
+                "vae_latents": vae_data["vae_latents"],
+                "time_ids": vae_data["time_ids"],  # Single source of truth for dimensions
+                "prompt_embeds": clip_data["prompt_embeds"],
+                "pooled_prompt_embeds": clip_data["pooled_prompt_embeds"],
                 "metadata": metadata,
                 "bucket_info": entry.get("bucket_info")
             }

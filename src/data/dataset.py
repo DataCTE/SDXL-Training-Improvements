@@ -108,29 +108,12 @@ class AspectBucketDataset(Dataset):
                 "tags": {}
             })
             
-            # Format tensors for both DDPM and Flow Matching
             return {
-                # Core tensors with correct shapes
-                "vae_latents": cached_data["vae_latents"],          # [C, H, W]
-                "prompt_embeds": cached_data["prompt_embeds"],      # [77, 2048]
-                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],  # [1, 1280]
-                "time_ids": self._compute_time_ids(
-                    original_size=cached_data["original_size"],
-                    target_size=cached_data["target_size"],
-                    crop_coords=cached_data["crop_coords"]
-                ),
-                
-                # Added conditioning kwargs needed by both trainers
-                "added_cond_kwargs": {
-                    "text_embeds": cached_data["pooled_prompt_embeds"],
-                    "time_ids": cached_data["time_ids"]
-                },
-                
-                # Metadata for conditioning and logging
+                "vae_latents": cached_data["vae_latents"],
+                "prompt_embeds": cached_data["prompt_embeds"],
+                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
+                "time_ids": cached_data["time_ids"],  # Contains all dimension info
                 "metadata": {
-                    "original_size": cached_data["original_size"],
-                    "crop_coords": cached_data["crop_coords"],
-                    "target_size": cached_data["target_size"],
                     "text": caption,
                     "bucket_info": cached_data["bucket_info"],
                     "tag_info": tag_info,
@@ -307,12 +290,22 @@ class AspectBucketDataset(Dataset):
     ) -> torch.Tensor:
         """Compute time embeddings for SDXL.
         Format: [orig_w, orig_h, crop_left, crop_top, target_w, target_h]
+        Contains all necessary dimensional information in a single tensor.
         """
         time_ids = torch.tensor([
             list(original_size) + list(crop_coords) + list(target_size)
         ])
         
         return time_ids.to(device=self.device, dtype=torch.float32)
+
+    def _extract_dims_from_time_ids(self, time_ids: torch.Tensor) -> Dict[str, Any]:
+        """Extract dimensional information from time_ids tensor."""
+        time_ids = time_ids.squeeze()  # Remove batch dimension if present
+        return {
+            "original_size": (int(time_ids[0].item()), int(time_ids[1].item())),
+            "crop_coords": (int(time_ids[2].item()), int(time_ids[3].item())),
+            "target_size": (int(time_ids[4].item()), int(time_ids[5].item()))
+        }
 
     def _precompute_latents(self) -> None:
         """Precompute and cache latents for both DDPM and Flow Matching."""
