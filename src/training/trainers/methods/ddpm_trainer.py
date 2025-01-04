@@ -356,9 +356,13 @@ class DDPMTrainer:
             else:
                 loss = F.mse_loss(model_pred, target)
 
-            # Handle tag weights if present
-            if "tag_weights" in batch:
-                tag_weights = batch["tag_weights"].to(self.device)
+            # Apply tag weights from metadata if present
+            if "tag_info" in batch["metadata"]:
+                tag_weights = torch.tensor(
+                    [m["tag_info"]["total_weight"] for m in batch["metadata"]], 
+                    device=self.device, 
+                    dtype=model_dtype
+                )
                 loss = loss * tag_weights.mean()
 
             # Ensure loss is finite and properly scaled
