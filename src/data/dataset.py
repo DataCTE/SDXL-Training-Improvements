@@ -102,27 +102,25 @@ class AspectBucketDataset(Dataset):
             if cached_data is None:
                 return None
             
-            # Get tag information if available
-            tag_info = cached_data["metadata"].get("tag_info", {
-                "total_weight": 1.0,
-                "tags": {}
-            })
-            
             return {
                 "vae_latents": cached_data["vae_latents"],
                 "prompt_embeds": cached_data["prompt_embeds"],
                 "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
-                "time_ids": cached_data["time_ids"],  # Contains all dimension info
+                "time_ids": cached_data["time_ids"],
                 "metadata": {
-                    "text": caption,
-                    "bucket_info": cached_data["bucket_info"],
-                    "tag_info": tag_info,
-                    "image_path": image_path
+                    "vae_latent_path": cached_data["metadata"]["vae_latent_path"],
+                    "clip_latent_path": cached_data["metadata"]["clip_latent_path"],
+                    "text": cached_data["metadata"]["text"],
+                    "bucket_info": cached_data["metadata"]["bucket_info"],
+                    "tag_info": cached_data["metadata"].get("tag_info", {
+                        "total_weight": 1.0,
+                        "tags": {}
+                    })
                 }
             }
-            
+
         except Exception as e:
-            logger.error(f"Error loading item {idx}: {e}")
+            logger.error(f"Failed to get item {idx}: {e}")
             return None
 
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Optional[Dict[str, torch.Tensor]]:
@@ -308,10 +306,9 @@ class AspectBucketDataset(Dataset):
         }
 
     def _precompute_latents(self) -> None:
-        """Precompute and cache latents for both DDPM and Flow Matching."""
+        """Precompute and cache latents for both trainers."""
         try:
             uncached_paths = self.cache_manager.get_uncached_paths(self.image_paths)
-            total_images = len(self.image_paths)
             
             if uncached_paths:
                 with torch.no_grad():
@@ -328,16 +325,12 @@ class AspectBucketDataset(Dataset):
                             if self.tag_weighter:
                                 tag_info = self.tag_weighter.get_caption_weight_details(caption)
                             
-                            # Prepare image tensor
+                            # Process image and text
                             img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
-                            
-                            # Encode image with VAE
                             vae_latents = self.vae.encode(
                                 img_tensor.unsqueeze(0).to(self.device, dtype=self.vae.dtype)
-                            ).latent_dist.sample()
-                            vae_latents = vae_latents * self.vae.config.scaling_factor
+                            ).latent_dist.sample() * self.vae.config.scaling_factor
                             
-                            # Encode text with CLIP
                             text_output = CLIPEncoder.encode_prompt(
                                 batch={"text": [caption]},
                                 text_encoders=self.text_encoders,
@@ -345,29 +338,22 @@ class AspectBucketDataset(Dataset):
                                 is_train=self.is_train
                             )
                             
-                            # Compute time embeddings
-                            time_ids = self._compute_time_ids(
-                                original_size=img.size,
-                                target_size=bucket_info.pixel_dims,
-                                crop_coords=(0, 0)
-                            )
-                            
-                            # Save to cache with all metadata
+                            # Save to cache with new metadata format
                             self.cache_manager.save_latents(
                                 tensors={
                                     "vae_latents": vae_latents.squeeze(0),
                                     "prompt_embeds": text_output["prompt_embeds"][0],
                                     "pooled_prompt_embeds": text_output["pooled_prompt_embeds"][0],
-                                    "time_ids": time_ids
+                                    "time_ids": self._compute_time_ids(
+                                        original_size=img.size,
+                                        target_size=bucket_info.pixel_dims,
+                                        crop_coords=(0, 0)
+                                    )
                                 },
                                 path=path,
                                 metadata={
-                                    "original_size": img.size,
-                                    "crop_coords": (0, 0),
-                                    "target_size": bucket_info.pixel_dims,
                                     "text": caption,
-                                    "bucket_info": bucket_info.__dict__,
-                                    "image_path": str(path)
+                                    "bucket_info": bucket_info.__dict__
                                 },
                                 bucket_info=bucket_info,
                                 tag_info=tag_info
@@ -378,18 +364,6 @@ class AspectBucketDataset(Dataset):
                         except Exception as e:
                             logger.error(f"Failed to process {path}: {e}")
                             continue
-                        
-                        # Clear CUDA cache periodically
-                        if torch.cuda.is_available() and (pbar.n % 100 == 0):
-                            torch.cuda.empty_cache()
-                
-                # Log final statistics
-                logger.info(
-                    f"\nPrecomputing complete:\n"
-                    f"- Total images: {total_images}\n"
-                    f"- Already cached: {total_images - len(uncached_paths)}\n"
-                    f"- Processed: {len(uncached_paths)}\n"
-                )
 
         except Exception as e:
             logger.error(f"Failed to precompute latents: {e}")
@@ -497,35 +471,20 @@ class AspectBucketDataset(Dataset):
         
         for idx, path in enumerate(self.image_paths):
             try:
-                # First try to get from cache
                 cache_key = self.cache_manager.get_cache_key(path)
                 entry = self.cache_manager.cache_index["entries"].get(cache_key)
                 
                 if entry and "bucket_info" in entry:
-                    # Use cached bucket info
-                    cached_info = entry["bucket_info"]
-                    bucket_indices[tuple(cached_info["pixel_dims"])].append(idx)
+                    bucket_info = entry["bucket_info"]
+                    bucket_indices[tuple(bucket_info["pixel_dims"])].append(idx)
                 else:
                     # Compute bucket for uncached image
                     with Image.open(path) as img:
                         bucket_info = compute_bucket_dims(img.size, self.buckets)
                         bucket_indices[bucket_info.pixel_dims].append(idx)
-                        
-                        # Update cache with new bucket info
-                        if entry:
-                            entry["bucket_info"] = {
-                                "dimensions": bucket_info.dimensions.__dict__,
-                                "pixel_dims": bucket_info.pixel_dims,
-                                "latent_dims": bucket_info.latent_dims,
-                                "bucket_index": bucket_info.bucket_index,
-                                "size_class": bucket_info.size_class,
-                                "aspect_class": bucket_info.aspect_class
-                            }
-                            self.cache_manager._save_index()
             
             except Exception as e:
                 logger.error(f"Error loading bucket info for {path}: {e}")
-                # Only use default bucket as last resort
                 bucket_indices[self.buckets[0].pixel_dims].append(idx)
         
         return dict(bucket_indices)

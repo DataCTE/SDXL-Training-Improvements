@@ -146,17 +146,6 @@ class CacheManager:
     ) -> bool:
         """Save processed tensors with proper organization for training."""
         try:
-            # Extract dimensions from time_ids
-            time_ids = tensors["time_ids"].cpu()
-            dims = {
-                "original_size": (int(time_ids[0, 0].item()), int(time_ids[0, 1].item())),
-                "crop_coords": (int(time_ids[0, 2].item()), int(time_ids[0, 3].item())),
-                "target_size": (int(time_ids[0, 4].item()), int(time_ids[0, 5].item()))
-            }
-            
-            # Update metadata with dimensions from time_ids
-            metadata.update(dims)
-            
             cache_key = self.get_cache_key(path)
             
             # Save VAE latents in vae subfolder
@@ -173,60 +162,30 @@ class CacheManager:
                 "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
             }, clip_path)
             
-            # Save metadata in metadata subfolder with tag information
+            # Save essential metadata about the latent pair
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             full_metadata = {
-                "original_path": str(path),
+                "vae_latent_path": str(vae_path),
+                "clip_latent_path": str(clip_path),
                 "created_at": time.time(),
-                "vae_latents_path": str(vae_path.relative_to(self.latents_dir)),
-                "clip_latents_path": str(clip_path.relative_to(self.latents_dir)),
-                **metadata
+                "text": metadata.get("text"),
+                "bucket_info": bucket_info.__dict__ if bucket_info else None,
+                "tag_info": tag_info
             }
-
-            # Add tag information if available
-            if tag_info:
-                full_metadata["tag_info"] = {
-                    "total_weight": tag_info["total_weight"],
-                    "tag_categories": tag_info["tags"]
-                }
             
             self._atomic_json_save(metadata_path, full_metadata)
             
-            # Update cache index with relative paths
+            # Update cache index with latent pair info
             with self._lock:
                 entry = {
-                    "vae_path": str(vae_path.relative_to(self.latents_dir)),
-                    "clip_path": str(clip_path.relative_to(self.latents_dir)),
+                    "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
+                    "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
                     "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
                     "created_at": time.time(),
-                    "is_valid": True
+                    "is_valid": True,
+                    "bucket_info": bucket_info.__dict__ if bucket_info else None,
+                    "tag_info": tag_info
                 }
-                
-                if bucket_info:
-                    bucket_dict = {
-                        "dimensions": {
-                            "width": bucket_info.dimensions.width,
-                            "height": bucket_info.dimensions.height,
-                            "width_latent": bucket_info.dimensions.width_latent,
-                            "height_latent": bucket_info.dimensions.height_latent,
-                            "aspect_ratio": bucket_info.dimensions.aspect_ratio,
-                            "aspect_ratio_inverse": bucket_info.dimensions.aspect_ratio_inverse,
-                            "total_pixels": bucket_info.dimensions.total_pixels,
-                            "total_latents": bucket_info.dimensions.total_latents
-                        },
-                        "pixel_dims": bucket_info.pixel_dims,
-                        "latent_dims": bucket_info.latent_dims,
-                        "bucket_index": bucket_info.bucket_index,
-                        "size_class": bucket_info.size_class,
-                        "aspect_class": bucket_info.aspect_class
-                    }
-                    metadata["bucket_info"] = bucket_dict
-                
-                if tag_info:
-                    entry["tag_info"] = {
-                        "total_weight": tag_info["total_weight"],
-                        "categories": list(tag_info["tags"].keys())
-                    }
                 
                 self.cache_index["entries"][cache_key] = entry
                 self._save_index()
@@ -399,19 +358,42 @@ class CacheManager:
             entry = self.cache_index["entries"].get(cache_key)
             
             if entry:
-                # Check all required files exist
-                if not (Path(entry["tensors_path"]).exists() and 
-                       Path(entry["metadata_path"]).exists()):
+                # Check all required files and paths exist
+                vae_path = self.vae_latents_dir / f"{cache_key}.pt"
+                clip_path = self.clip_latents_dir / f"{cache_key}.pt"
+                metadata_path = self.metadata_dir / f"{cache_key}.json"
+                
+                if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
                     needs_rebuild = True
                     break
+                
+                # Verify metadata structure
+                try:
+                    with open(metadata_path) as f:
+                        metadata = json.load(f)
+                        
+                    required_fields = {
+                        "vae_latent_path", "clip_latent_path", "text",
+                        "bucket_info", "created_at"
+                    }
                     
-                # Verify bucket info structure if present
-                if "bucket_info" in entry:
-                    required_fields = {"dimensions", "pixel_dims", "latent_dims", 
-                                     "bucket_index", "size_class", "aspect_class"}
-                    if not all(field in entry["bucket_info"] for field in required_fields):
+                    if not all(field in metadata for field in required_fields):
                         needs_rebuild = True
                         break
+                        
+                    # Verify bucket info structure if present
+                    if metadata["bucket_info"]:
+                        bucket_fields = {
+                            "dimensions", "pixel_dims", "latent_dims",
+                            "bucket_index", "size_class", "aspect_class"
+                        }
+                        if not all(field in metadata["bucket_info"] for field in bucket_fields):
+                            needs_rebuild = True
+                            break
+                            
+                except Exception:
+                    needs_rebuild = True
+                    break
         
         if needs_rebuild:
             logger.warning("Cache verification failed. Rebuilding cache index...")
