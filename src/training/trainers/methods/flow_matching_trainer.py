@@ -269,6 +269,7 @@ class FlowMatchingTrainer(SDXLTrainer):
 
     def _compute_loss_impl(
         self,
+        model: torch.nn.Module,
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
@@ -285,7 +286,7 @@ class FlowMatchingTrainer(SDXLTrainer):
             # Use VAE latents directly as target (x1)
             x1 = vae_latents
 
-            # Sample time steps
+            # Sample time steps from logit-normal distribution
             t = self.sample_logit_normal(
                 (x1.shape[0],),
                 x1.device,
@@ -293,15 +294,16 @@ class FlowMatchingTrainer(SDXLTrainer):
                 generator=generator
             )
 
-            # Generate random starting point with matching dtype
+            # Generate random starting point (x0) with matching dtype
             x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
 
-            # Get enhanced metadata from batch
-            original_sizes = batch["original_size"]      # List of (H,W) tuples
-            target_sizes = batch["target_size"]         # List of (H,W) tuples
-            crop_coords = batch["crop_top_lefts"]      # List of (x,y) tuples
+            # Get bucket info and metadata from batch
+            bucket_info = batch.get("bucket_info", [])
+            original_sizes = [info["dimensions"]["original_size"] for info in bucket_info] if bucket_info else batch["original_size"]
+            target_sizes = [info["dimensions"]["target_size"] for info in bucket_info] if bucket_info else batch["target_size"]
+            crop_coords = [info["dimensions"]["crop_coords"] for info in bucket_info] if bucket_info else batch["crop_top_lefts"]
 
-            # Prepare time embeddings with enhanced metadata
+            # Prepare time embeddings with bucket-aware metadata
             add_time_ids = torch.cat([
                 self.compute_time_ids(
                     original_size=orig_size,
@@ -321,17 +323,22 @@ class FlowMatchingTrainer(SDXLTrainer):
                 }
             }
 
+            # Compute optimal transport path and velocity field
+            xt = self.optimal_transport_path(x0, x1, t)
+            v = self.compute_velocity(model, xt, t, cond_emb)
+
             # Compute flow matching loss
-            loss = self.compute_flow_matching_loss(self.model.unet, x0, x1, t, cond_emb)
+            loss = self.compute_flow_matching_loss(model.unet, x0, x1, t, cond_emb)
             loss = loss.mean()
 
-            # Compute additional metrics
+            # Compute additional metrics for monitoring
             metrics = {
                 "loss": loss.detach().item(),
                 "x0_norm": x0.norm().item(),
                 "x1_norm": x1.norm().item(),
                 "time_mean": t.mean().item(),
-                "time_std": t.std().item()
+                "time_std": t.std().item(),
+                "velocity_norm": v.norm().item()
             }
 
             return {

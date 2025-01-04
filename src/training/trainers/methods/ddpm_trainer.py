@@ -299,10 +299,11 @@ class DDPMTrainer:
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             tag_weights = batch["tag_weights"].to(device=self.device, dtype=model_dtype)
             
-            # Get metadata from batch with enhanced bucket information
-            original_sizes = batch["original_size"]  # List of (H,W) tuples
-            target_sizes = batch["target_size"]      # List of (H,W) tuples
-            crop_coords = batch["crop_top_lefts"]    # List of (x,y) tuples
+            # Get metadata and bucket info from batch
+            bucket_info = batch.get("bucket_info", None)  # Get bucket info directly
+            original_sizes = [info["original_size"] for info in bucket_info] if bucket_info else batch["original_size"]
+            target_sizes = [info["target_size"] for info in bucket_info] if bucket_info else batch["target_size"]
+            crop_coords = [info["crop_coords"] for info in bucket_info] if bucket_info else batch["crop_top_lefts"]
             
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
