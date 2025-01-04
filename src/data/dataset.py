@@ -141,9 +141,13 @@ class AspectBucketDataset(Dataset):
             
             # Verify the latents match the bucket dimensions from cache
             latents = cached_data["vae_latents"]
-            cached_bucket = cache_entry["metadata"]["bucket_info"]
-            expected_shape = (4, cached_bucket.latent_dims[1], cached_bucket.latent_dims[0])  # VAE shape is (C, H, W)
-            
+            bucket_info = self.cache_manager.load_bucket_info(cache_key)
+            if not bucket_info:
+                logger.warning(f"Failed to load bucket info for {image_path}")
+                return None
+
+            expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])  # VAE shape is (C, H, W)
+
             if latents.shape != expected_shape:
                 logger.warning(
                     f"Latent shape mismatch for {image_path}: "
