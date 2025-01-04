@@ -163,7 +163,15 @@ class CacheManager:
                 "created_at": time.time(),
                 "text": metadata.get("text"),
                 "bucket_info": bucket_info.__dict__ if bucket_info else None,
-                "tag_info": tag_info
+                "tag_info": {
+                    "tags": tag_info["tags"] if tag_info else {
+                        "subject": [],
+                        "style": [],
+                        "quality": [],
+                        "technical": [],
+                        "meta": []
+                    }
+                }
             }
             
             self._atomic_json_save(metadata_path, full_metadata)
@@ -220,8 +228,13 @@ class CacheManager:
                     "text": metadata["text"],
                     "bucket_info": entry["bucket_info"],
                     "tag_info": entry.get("tag_info", {
-                        "total_weight": 1.0,
-                        "tags": {}
+                        "tags": {
+                            "subject": [],
+                            "style": [],
+                            "quality": [],
+                            "technical": [],
+                            "meta": []
+                        }
                     })
                 }
             }

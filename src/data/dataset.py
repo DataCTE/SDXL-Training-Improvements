@@ -196,17 +196,20 @@ class AspectBucketDataset(Dataset):
             # Process images in parallel
             processed_images = []
             
+            # Get tag weights if enabled
+            tag_infos = None
+            if self.tag_weighter:
+                tag_infos = [
+                    {"tags": self.tag_weighter._extract_tags(caption)}
+                    for caption in captions
+                ]
+            
             for path, caption in zip(image_paths, captions):
-                # Get tag weight details if available
-                tag_info = None
-                if self.tag_weighter:
-                    tag_info = self.tag_weighter.get_caption_weight_details(caption)
-                
                 processed = self._process_single_image(path)
                 if processed:
                     # Add tag information to processed data
-                    if tag_info:
-                        processed["tag_info"] = tag_info
+                    if tag_infos:
+                        processed["tag_info"] = tag_infos[len(processed_images)]
                     processed_images.append(processed)
             
             # Batch encode text for all valid images
@@ -239,10 +242,7 @@ class AspectBucketDataset(Dataset):
                         **img_data,
                         "text": caption,
                         "bucket_info": img_data["bucket_info"],
-                        "tag_info": img_data.get("tag_info", {
-                            "total_weight": 1.0,
-                            "tags": {}
-                        })
+                        "tag_info": img_data.get("tag_info", {"tags": {}})
                     }
                     
                     # Save to cache if enabled
@@ -254,11 +254,9 @@ class AspectBucketDataset(Dataset):
                             "time_ids": time_ids
                         }
                         metadata = {
-                            "original_size": img_data["original_size"],
-                            "crop_coords": img_data["crop_coords"],
-                            "target_size": img_data["target_size"],
                             "text": caption,
-                            "bucket_info": img_data["bucket_info"]
+                            "bucket_info": img_data["bucket_info"].__dict__,
+                            "tag_info": img_data.get("tag_info", {"tags": {}})
                         }
                         self.cache_manager.save_latents(
                             tensors=tensors,
@@ -323,7 +321,9 @@ class AspectBucketDataset(Dataset):
                             # Get tag weight details if available
                             tag_info = None
                             if self.tag_weighter:
-                                tag_info = self.tag_weighter.get_caption_weight_details(caption)
+                                tag_info = {
+                                    "tags": self.tag_weighter._extract_tags(caption)
+                                }
                             
                             # Process image and text
                             img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
