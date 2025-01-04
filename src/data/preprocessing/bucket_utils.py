@@ -12,14 +12,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-def generate_buckets(config: Config) -> List[Tuple[int, int]]:
-    """Generate bucket dimensions from config in pixel space."""
+def generate_buckets(config: Config) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """Generate bucket dimensions from config, returning both pixel and latent dimensions."""
     image_config = config.global_config.image
-    buckets = []  # Change from set to list to maintain order
+    buckets = []  # [(pixel_dims, latent_dims), ...]
     
-    # Work in pixel space first (no division by 8)
+    # Work in pixel space
     for dims in image_config.supported_dims:
-        w, h = dims[0], dims[1]  # Keep original dimensions
+        w, h = dims[0], dims[1]  # Pixel dimensions
         
         # Validate dimensions against min/max size and step
         if (w >= image_config.min_size[0] and h >= image_config.min_size[1] and
@@ -27,85 +27,86 @@ def generate_buckets(config: Config) -> List[Tuple[int, int]]:
             w % image_config.bucket_step == 0 and h % image_config.bucket_step == 0):
             
             if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
-                # Store in latent space (divide by 8 at final step)
+                # Store both pixel and latent dimensions
                 w_latent, h_latent = w // 8, h // 8
-                buckets.append((w_latent, h_latent))
-                # Also add the flipped dimension if valid and not already present
+                buckets.append(((w, h), (w_latent, h_latent)))
+                
+                # Also add the flipped dimension if valid
                 if h != w and validate_aspect_ratio(h, w, image_config.max_aspect_ratio):
-                    flipped = (h_latent, w_latent)
-                    if flipped not in buckets:  # Only add if not already present
+                    flipped = ((h, w), (h_latent, w_latent))
+                    if flipped not in buckets:
                         buckets.append(flipped)
     
-    # No sorting needed - maintain order from config
-    # buckets = sorted(buckets, key=lambda x: (x[0] * x[1], x[0]))  # Remove this line
-    
-    # Log the actual pixel dimensions for verification
+    # Log both pixel and latent dimensions
     if logger.isEnabledFor(logging.INFO):
-        logger.info("\nConfigured buckets (pixel space):")
-        for w, h in buckets:
-            logger.info(f"- {w*8}x{h*8} (latent: {w}x{h}, ratio {(w*8)/(h*8):.2f})")
+        logger.info("\nConfigured buckets:")
+        for pixel_dims, latent_dims in buckets:
+            w, h = pixel_dims
+            w_latent, h_latent = latent_dims
+            logger.info(
+                f"- {w}x{h} pixels (latent: {w_latent}x{h_latent}, "
+                f"ratio: {w/h:.2f})"
+            )
     
     return buckets
 
-def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int, int]], config: Optional[Config] = None) -> Tuple[int, int]:
-    """Find closest bucket for given dimensions with aspect ratio tolerance."""
-    # Work in pixel space
+def compute_bucket_dims(
+    original_size: Tuple[int, int], 
+    buckets: List[Tuple[Tuple[int, int], Tuple[int, int]]]
+) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    """Find closest bucket returning both pixel and latent dimensions."""
     w, h = original_size[0], original_size[1]
     
-    # IMPORTANT: The buckets are already in latent space (divided by 8)
-    # We need to multiply by 8 to compare in pixel space
-    pixel_buckets = [(b[0] * 8, b[1] * 8) for b in buckets]
-    
-    # Find closest bucket in pixel space
+    # Find closest bucket using pixel dimensions
     closest_bucket_idx = min(
-        range(len(pixel_buckets)),
+        range(len(buckets)),
         key=lambda i: (
-            abs(pixel_buckets[i][0] * pixel_buckets[i][1] - (w * h)) / (w * h) +
-            abs((pixel_buckets[i][0]/pixel_buckets[i][1]) - (w/h))
+            abs(buckets[i][0][0] * buckets[i][0][1] - (w * h)) / (w * h) +
+            abs((buckets[i][0][0]/buckets[i][0][1]) - (w/h))
         )
     )
     
-    # Return the latent dimensions (already divided by 8)
+    # Return both pixel and latent dimensions
     return buckets[closest_bucket_idx]
 
 def group_images_by_bucket(
     image_paths: List[str], 
     cache_manager: "CacheManager"
 ) -> Dict[Tuple[int, int], List[int]]:
-    """Group images by bucket dimensions using cache."""
+    """Group images by pixel dimensions using cache."""
     bucket_indices = defaultdict(list)
     config = cache_manager.config
     
-    # Generate buckets once and store them
+    # Generate buckets with both dimensions
     buckets = generate_buckets(config)
     
     if not buckets:
         raise ValueError("No valid buckets generated from config")
     
-    logger.setLevel(logging.WARNING)  # Temporarily disable INFO logging
+    logger.setLevel(logging.WARNING)
     
     for idx, path in enumerate(tqdm(image_paths, desc="Grouping images")):
         try:
-            # Check if already cached
+            # Check cache
             cache_key = cache_manager.get_cache_key(path)
             cached_entry = cache_manager.cache_index["entries"].get(cache_key)
             
-            if cached_entry and cached_entry.get("bucket_dims"):
-                # Use cached bucket dimensions
-                bucket = (cached_entry["bucket_dims"][0] // 8, cached_entry["bucket_dims"][1] // 8)
+            if cached_entry and "bucket_dims" in cached_entry:
+                # Use cached pixel dimensions
+                bucket = cached_entry["bucket_dims"]  # Already in pixel space
             else:
                 # Compute new bucket dimensions
                 img = Image.open(path)
-                bucket = compute_bucket_dims(img.size, buckets)
+                bucket, _ = compute_bucket_dims(img.size, buckets)  # Use pixel dims
             
             bucket_indices[bucket].append(idx)
             
         except Exception as e:
             logger.warning(f"Error processing {path}: {e}")
-            default_bucket = tuple(d // 8 for d in config.global_config.image.target_size)
+            default_bucket = tuple(config.global_config.image.target_size)
             bucket_indices[default_bucket].append(idx)
     
-    logger.setLevel(logging.INFO)  # Restore INFO logging
+    logger.setLevel(logging.INFO)
     return dict(bucket_indices)
 
 def log_bucket_statistics(bucket_indices: Dict[Tuple[int, int], List[int]], total_images: int):
