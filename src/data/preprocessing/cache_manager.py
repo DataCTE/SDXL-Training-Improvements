@@ -33,27 +33,27 @@ class CacheManager:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         
-        # Create separate directories for different types of latents
+        # Create proper subfolder structure
         self.latents_dir = self.cache_dir / "latents"
-        self.vae_latents_dir = self.cache_dir / "vae"
-        self.clip_latents_dir = self.cache_dir / "clip"
-        self.metadata_dir = self.cache_dir / "metadata"
-        self.bucket_info_dir = self.cache_dir / "buckets"
-        self.tag_dir = self.cache_dir / "tags"
+        self.latents_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create all required directories
+        # Create VAE and CLIP subdirectories within latents
+        self.vae_latents_dir = self.latents_dir / "vae"
+        self.clip_latents_dir = self.latents_dir / "clip"
+        self.metadata_dir = self.latents_dir / "metadata"
+        self.bucket_info_dir = self.latents_dir / "buckets"
+        
+        # Create all required subdirectories
         for directory in [
-            self.latents_dir,
             self.vae_latents_dir,
             self.clip_latents_dir,
             self.metadata_dir,
-            self.bucket_info_dir,
-            self.tag_dir
+            self.bucket_info_dir
         ]:
             directory.mkdir(parents=True, exist_ok=True)
         
         self._lock = threading.Lock()
-        self.index_path = self.cache_dir / "cache_index.json"
+        self.index_path = self.latents_dir / "cache_index.json"
         self.rebuild_cache_index()
 
     def __getstate__(self):
@@ -145,38 +145,38 @@ class CacheManager:
         cache_key = self.get_cache_key(path)
         
         try:
-            # Save VAE latents
+            # Save VAE latents in vae subfolder
             vae_path = self.vae_latents_dir / f"{cache_key}.pt"
             torch.save({
                 "vae_latents": tensors["vae_latents"].cpu(),
                 "time_ids": tensors["time_ids"].cpu()
             }, vae_path)
             
-            # Save CLIP latents
+            # Save CLIP latents in clip subfolder
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
             torch.save({
                 "prompt_embeds": tensors["prompt_embeds"].cpu(),
                 "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
             }, clip_path)
             
-            # Save metadata with paths to both latent files
+            # Save metadata in metadata subfolder
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
             full_metadata = {
                 "original_path": str(path),
                 "created_at": time.time(),
-                "vae_latents_path": str(vae_path),
-                "clip_latents_path": str(clip_path),
+                "vae_latents_path": str(vae_path.relative_to(self.latents_dir)),
+                "clip_latents_path": str(clip_path.relative_to(self.latents_dir)),
                 **metadata
             }
             
-            metadata_path = self.metadata_dir / f"{cache_key}.json"
             self._atomic_json_save(metadata_path, full_metadata)
             
-            # Update cache index
+            # Update cache index with relative paths
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
-                    "vae_path": str(vae_path),
-                    "clip_path": str(clip_path),
-                    "metadata_path": str(metadata_path),
+                    "vae_path": str(vae_path.relative_to(self.latents_dir)),
+                    "clip_path": str(clip_path.relative_to(self.latents_dir)),
+                    "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
                     "created_at": time.time(),
                     "is_valid": True
                 }
