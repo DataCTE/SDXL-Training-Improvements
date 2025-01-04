@@ -1,6 +1,15 @@
 """Main orchestration script for SDXL fine-tuning """
 import os
 
+def get_unique_port():
+    """Get a unique port in a range unlikely to be used by other programs."""
+    # Use range 50000-55000 which is typically unused
+    base_port = 50000
+    port_range = 5000
+    # Use RANK to offset port and avoid conflicts between different runs
+    rank_offset = int(os.environ.get("RANK", "0")) * 10
+    return base_port + rank_offset
+
 # Set environment variables before any other imports
 def setup_training_env():
     """Setup training environment variables."""
@@ -9,7 +18,7 @@ def setup_training_env():
     os.environ.setdefault("WORLD_SIZE", "1")
     os.environ.setdefault("LOCAL_RANK", "0")
     os.environ.setdefault("MASTER_ADDR", "localhost")
-    os.environ.setdefault("MASTER_PORT", "29500")
+    os.environ.setdefault("MASTER_PORT", str(get_unique_port()))
     
     # Disable accelerate's automatic initialization
     os.environ["ACCELERATE_DISABLE_RICH"] = "1"
