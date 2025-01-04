@@ -9,6 +9,7 @@ import time
 import json
 from pathlib import Path
 import multiprocessing
+import threading
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
@@ -30,13 +31,13 @@ class DDPMTrainer:
         device: torch.device,
         wandb_logger=None,
         config: Optional[Config] = None,
-        parent_trainer=None,  # Add parent trainer reference
+        parent_trainer=None,
         **kwargs
     ):
         # Store parent trainer reference
         self.parent_trainer = parent_trainer
         
-        # Direct initialization instead of using super()
+        # Direct initialization
         self.model = model
         self.optimizer = optimizer
         self.device = device
@@ -51,6 +52,26 @@ class DDPMTrainer:
         
         # Create a new dataloader with proper multiprocessing settings
         dataset = train_dataloader.dataset
+        
+        # Ensure dataset's cache manager is picklable
+        if hasattr(dataset, 'cache_manager'):
+            # Add pickling methods to CacheManager class if not already present
+            if not hasattr(dataset.cache_manager.__class__, '__getstate__'):
+                def __getstate__(self):
+                    state = self.__dict__.copy()
+                    # Don't pickle the lock
+                    if '_lock' in state:
+                        del state['_lock']
+                    return state
+                
+                def __setstate__(self, state):
+                    self.__dict__.update(state)
+                    # Recreate the lock in the new process
+                    self._lock = threading.Lock()
+                
+                dataset.cache_manager.__class__.__getstate__ = __getstate__
+                dataset.cache_manager.__class__.__setstate__ = __setstate__
+        
         self.train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=train_dataloader.batch_size,
@@ -59,11 +80,11 @@ class DDPMTrainer:
             pin_memory=True,
             drop_last=True,
             collate_fn=dataset.collate_fn if hasattr(dataset, 'collate_fn') else None,
-            persistent_workers=True,  # Keep workers alive between iterations
-            multiprocessing_context='spawn'  # Explicitly use spawn context
+            persistent_workers=True,
+            multiprocessing_context='spawn'
         )
         
-        # Add after DataLoader creation
+        # Log CUDA worker info
         if torch.cuda.is_available() and config.training.num_workers > 0:
             logger.info(
                 "Using spawn method for DataLoader workers with CUDA. "
