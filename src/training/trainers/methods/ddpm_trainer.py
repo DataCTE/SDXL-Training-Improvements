@@ -8,6 +8,7 @@ from collections import defaultdict
 import time
 import json
 from pathlib import Path
+import multiprocessing
 
 from src.core.logging import get_logger
 from src.models import StableDiffusionXL
@@ -42,6 +43,12 @@ class DDPMTrainer:
         self.wandb_logger = wandb_logger
         self.config = config
         
+        # Set multiprocessing start method to 'spawn'
+        try:
+            multiprocessing.set_start_method('spawn', force=True)
+        except RuntimeError:
+            pass  # Method already set
+        
         # Create a new dataloader with proper multiprocessing settings
         dataset = train_dataloader.dataset
         self.train_dataloader = torch.utils.data.DataLoader(
@@ -52,8 +59,16 @@ class DDPMTrainer:
             pin_memory=True,
             drop_last=True,
             collate_fn=dataset.collate_fn if hasattr(dataset, 'collate_fn') else None,
-            multiprocessing_context='fork'  # Use fork context for better compatibility
+            persistent_workers=True,  # Keep workers alive between iterations
+            multiprocessing_context='spawn'  # Explicitly use spawn context
         )
+        
+        # Add after DataLoader creation
+        if torch.cuda.is_available() and config.training.num_workers > 0:
+            logger.info(
+                "Using spawn method for DataLoader workers with CUDA. "
+                "This may have a small startup overhead but is required for stability."
+            )
         
         # Remove tag weight caching since weights now come from dataset
         self.default_weight = config.tag_weighting.default_weight
