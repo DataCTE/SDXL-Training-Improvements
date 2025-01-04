@@ -275,51 +275,45 @@ class FlowMatchingTrainer(SDXLTrainer):
     ) -> Dict[str, Tensor]:
         """Compute Flow Matching loss with enhanced bucket metadata."""
         try:
+            # Validate batch contents
+            required_keys = {
+                "vae_latents", "prompt_embeds", "pooled_prompt_embeds", 
+                "time_ids", "metadata"
+            }
+            if not all(k in batch for k in required_keys):
+                missing = required_keys - set(batch.keys())
+                raise ValueError(f"Batch missing required keys: {missing}")
+
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
 
-            # Get batch data and ensure consistent dtype
+            # Extract and validate tensors
             vae_latents = batch["vae_latents"].to(self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(self.device, dtype=model_dtype)
+            time_ids = batch["time_ids"].to(self.device, dtype=model_dtype)
+            batch_size = vae_latents.shape[0]
 
-            # Use VAE latents directly as target (x1)
+            # Use VAE latents as target (x1)
             x1 = vae_latents
 
             # Sample time steps from logit-normal distribution
             t = self.sample_logit_normal(
-                (x1.shape[0],),
-                x1.device,
-                x1.dtype,
+                (batch_size,),
+                self.device,
+                model_dtype,
                 generator=generator
             )
 
-            # Generate random starting point (x0) with matching dtype
+            # Generate random starting point (x0)
             x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
-
-            # Get bucket info and metadata from batch
-            bucket_info = batch.get("bucket_info", [])
-            original_sizes = [info["dimensions"]["original_size"] for info in bucket_info] if bucket_info else batch["original_size"]
-            target_sizes = [info["dimensions"]["target_size"] for info in bucket_info] if bucket_info else batch["target_size"]
-            crop_coords = [info["dimensions"]["crop_coords"] for info in bucket_info] if bucket_info else batch["crop_top_lefts"]
-
-            # Prepare time embeddings with bucket-aware metadata
-            add_time_ids = torch.cat([
-                self.compute_time_ids(
-                    original_size=orig_size,
-                    crops_coords_top_left=crop_coord,
-                    target_size=target_size,
-                    device=self.device,
-                    dtype=model_dtype
-                ) for orig_size, crop_coord, target_size in zip(original_sizes, crop_coords, target_sizes)
-            ])
 
             # Prepare conditioning embeddings
             cond_emb = {
                 "prompt_embeds": prompt_embeds,
                 "added_cond_kwargs": {
                     "text_embeds": pooled_prompt_embeds,
-                    "time_ids": add_time_ids
+                    "time_ids": time_ids
                 }
             }
 
@@ -331,6 +325,18 @@ class FlowMatchingTrainer(SDXLTrainer):
             loss = self.compute_flow_matching_loss(model.unet, x0, x1, t, cond_emb)
             loss = loss.mean()
 
+            # Apply tag weights if present
+            if "tag_weights" in batch:
+                tag_weights = batch["tag_weights"].to(self.device, dtype=model_dtype)
+                loss = loss * tag_weights.mean()
+
+            # Ensure loss is finite and properly scaled
+            if not torch.isfinite(loss):
+                logger.warning("Invalid loss detected - using fallback value")
+                loss = torch.tensor(1000.0, device=self.device, dtype=model_dtype)
+            else:
+                loss = torch.clamp(loss, max=1000.0)
+
             # Compute additional metrics for monitoring
             metrics = {
                 "loss": loss.detach().item(),
@@ -338,7 +344,9 @@ class FlowMatchingTrainer(SDXLTrainer):
                 "x1_norm": x1.norm().item(),
                 "time_mean": t.mean().item(),
                 "time_std": t.std().item(),
-                "velocity_norm": v.norm().item()
+                "velocity_norm": v.norm().item(),
+                "batch_size": batch_size,
+                "lr": self.optimizer.param_groups[0]["lr"]
             }
 
             return {
