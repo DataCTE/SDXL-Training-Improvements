@@ -1,6 +1,6 @@
 """DDPM trainer implementation with memory optimizations."""
 import torch
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import torch.nn.functional as F
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
@@ -17,6 +17,7 @@ from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.core.distributed import is_main_process
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
+from src.training.schedulers.noise_scheduler import configure_noise_scheduler
 
 logger = get_logger(__name__)
 
@@ -111,7 +112,8 @@ class DDPMTrainer:
         if self.mixed_precision != "no":
             self.scaler = GradScaler()
         
-        self.noise_scheduler = model.noise_scheduler
+        # Initialize noise scheduler
+        self.noise_scheduler = configure_noise_scheduler(config, device)
         
         # Handle optimizer-specific dtype conversions
         if config.optimizer.optimizer_type == "adamw_bf16":
@@ -288,15 +290,16 @@ class DDPMTrainer:
             raise
 
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-        """Execute single training step with memory optimizations."""
+        """Training step with ZTSNR and v-prediction support."""
         try:
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
-            # Move batch data to device and dtype
+            # Move batch data to device and dtype - now using cached time_ids
             vae_latents = batch["vae_latents"].to(device=self.device, dtype=model_dtype)
             prompt_embeds = batch["prompt_embeds"].to(device=self.device, dtype=model_dtype)
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
+            time_ids = batch["time_ids"].to(device=self.device, dtype=model_dtype)  # Use cached time_ids
             
             # Get bucket info from batch
             bucket_info = batch.get("bucket_info", [])
@@ -308,35 +311,29 @@ class DDPMTrainer:
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
                 # Prepare time embeddings using bucket metadata
                 batch_size = vae_latents.shape[0]
-                add_time_ids = torch.cat([
-                    self.compute_time_ids(
-                        original_size=orig_size,
-                        crops_coords_top_left=crop_coord,
-                        target_size=target_size,
-                        device=self.device,
-                        dtype=model_dtype
-                    ) for orig_size, crop_coord, target_size in zip(original_sizes, crop_coords, target_sizes)
-                ])
+                add_time_ids = self.compute_time_ids(
+                    original_sizes=original_sizes,
+                    crop_coords=crop_coords,
+                    target_sizes=target_sizes,
+                    device=self.device,
+                    dtype=model_dtype
+                )
 
-                # Sample noise with ZTSNR-compatible scaling
+                # Generate noise
                 noise = torch.randn_like(vae_latents)
-                if self.config.model.use_ztsnr:
-                    noise = torch.clamp(noise * self.config.model.sigma_max, -20000.0, 20000.0)
+                
+                # Sample timesteps using noise scheduler
+                timesteps = self.noise_scheduler.sample_timesteps(batch_size)
 
-                # Sample timesteps with proper scaling for ZTSNR
-                timesteps = self.noise_scheduler.sample_timesteps(batch_size, device=self.device)
-
-                # Add noise to latents with ZTSNR scaling
+                # Add noise to latents using scheduler
                 noisy_latents = self.noise_scheduler.add_noise(vae_latents, noise, timesteps)
-                if self.config.model.use_ztsnr:
-                    noisy_latents = torch.clamp(noisy_latents, -20000.0, 20000.0)
 
                 # Get model prediction
                 model_pred = self.model.unet(
                     noisy_latents,
                     timesteps,
                     prompt_embeds,
-                    added_cond_kwargs={"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+                    added_cond_kwargs={"text_embeds": pooled_prompt_embeds, "time_ids": time_ids}  # Use cached time_ids
                 ).sample
 
                 # Calculate target based on prediction type
@@ -384,36 +381,4 @@ class DDPMTrainer:
             logger.error(f"DDPM training step failed: {str(e)}", exc_info=True)
             raise
 
-    def compute_time_ids(self, original_size, crops_coords_top_left, target_size, device=None, dtype=None):
-        """Compute time embeddings for SDXL.
-        
-        Args:
-            original_size (tuple): Original image size (height, width)
-            crops_coords_top_left (tuple): Crop coordinates (top, left)
-            target_size (tuple): Target image size (height, width)
-            device (torch.device, optional): Device to place tensor on
-            dtype (torch.dtype, optional): Dtype for the tensor
-        
-        Returns:
-            torch.Tensor: Time embeddings tensor of shape [1, 6]
-        """
-        # Ensure inputs are proper tuples
-        if not isinstance(original_size, (tuple, list)):
-            original_size = (original_size, original_size)
-        if not isinstance(crops_coords_top_left, (tuple, list)):
-            crops_coords_top_left = (crops_coords_top_left, crops_coords_top_left)
-        if not isinstance(target_size, (tuple, list)):
-            target_size = (target_size, target_size)
-        
-        # Combine all values into a single list
-        time_ids = [
-            original_size[0],    # Original height
-            original_size[1],    # Original width
-            crops_coords_top_left[0],  # Crop top
-            crops_coords_top_left[1],  # Crop left
-            target_size[0],     # Target height
-            target_size[1],     # Target width
-        ]
-        
-        # Create tensor with proper device and dtype
-        return torch.tensor([time_ids], device=device, dtype=dtype)
+    
