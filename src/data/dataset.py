@@ -24,7 +24,7 @@ from src.data.preprocessing import (
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
 from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, group_images_by_bucket, log_bucket_statistics
-from src.data.preprocessing.bucket_types import BucketInfo
+from src.data.preprocessing.bucket_types import BucketInfo, BucketDimensions
 
 logger = get_logger(__name__)
 
@@ -569,12 +569,24 @@ class AspectBucketDataset(Dataset):
                 entry = self.cache_manager.cache_index["entries"].get(cache_key)
                 
                 if entry and "metadata" in entry and "bucket_info" in entry["metadata"]:
-                    # Use cached bucket info
-                    bucket_info = entry["metadata"]["bucket_info"]
+                    # Reconstruct BucketInfo from cached data
+                    cached_info = entry["metadata"]["bucket_info"]
+                    dimensions = BucketDimensions.from_pixels(
+                        cached_info["dimensions"]["width"],
+                        cached_info["dimensions"]["height"]
+                    )
+                    bucket_info = BucketInfo(
+                        dimensions=dimensions,
+                        pixel_dims=tuple(cached_info["pixel_dims"]),
+                        latent_dims=tuple(cached_info["latent_dims"]),
+                        bucket_index=cached_info["bucket_index"],
+                        size_class=cached_info["size_class"],
+                        aspect_class=cached_info["aspect_class"]
+                    )
                     bucket_indices[bucket_info.pixel_dims].append(idx)
                 else:
                     # Use default bucket
-                    default_bucket = self.buckets[0]  # First bucket as default
+                    default_bucket = self.buckets[0]
                     bucket_indices[default_bucket.pixel_dims].append(idx)
                     logger.warning(f"Using default bucket for {path}")
             
