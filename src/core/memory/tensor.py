@@ -4,12 +4,17 @@ from collections.abc import Callable
 from contextlib import nullcontext, contextmanager
 from typing import Union, List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
-import packaging
 import torch
+
+# Global PyTorch performance settings
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('medium')
 
 # Initialize device without accelerate
 default_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch_version = packaging.version.parse(torch.__version__)
+torch_version = torch.__version__
 
 @dataclass
 class TensorStats:
@@ -23,7 +28,6 @@ class TensorStats:
 
 # Global statistics tracker
 tensor_stats = TensorStats()
-
 class TensorError(Exception):
     """Base exception for tensor operations."""
     def __init__(self, message: str, context: dict = None):
@@ -361,3 +365,4 @@ def reset_tensor_stats() -> None:
     """Reset tensor operation statistics."""
     global tensor_stats
     tensor_stats = TensorStats()
+

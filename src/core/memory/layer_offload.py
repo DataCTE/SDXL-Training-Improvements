@@ -4,12 +4,6 @@ import torch.nn as nn
 from typing import Dict, Optional
 from dataclasses import dataclass
 
-# Force maximal speed
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision('medium')
-
 from .tensor import (
     tensors_to_device_,
     torch_sync,
