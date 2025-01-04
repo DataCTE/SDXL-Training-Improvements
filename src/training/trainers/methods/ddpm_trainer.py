@@ -17,7 +17,7 @@ from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.core.distributed import is_main_process
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
-from src.training.schedulers.noise_scheduler import configure_noise_scheduler
+from src.training.schedulers.novelai_v3 import configure_noise_scheduler
 
 logger = get_logger(__name__)
 

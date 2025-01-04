@@ -1,5 +1,5 @@
 """Noise scheduler configuration and utilities."""
-from .noise_scheduler import (
+from .novelai_v3 import (
     configure_noise_scheduler,
     get_karras_sigmas,
     get_sigmas,

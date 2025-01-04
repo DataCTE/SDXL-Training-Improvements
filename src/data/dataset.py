@@ -579,30 +579,35 @@ class AspectBucketDataset(Dataset):
         
         for idx, path in enumerate(self.image_paths):
             try:
+                # First try to get from cache
                 cache_key = self.cache_manager.get_cache_key(path)
                 entry = self.cache_manager.cache_index["entries"].get(cache_key)
                 
-                if entry and "bucket_info" in entry:  # Now checking top-level bucket_info
-                    # Reconstruct BucketInfo from cached data
+                if entry and "bucket_info" in entry:
+                    # Use cached bucket info
                     cached_info = entry["bucket_info"]
-                    dimensions = BucketDimensions(**cached_info["dimensions"])
-                    bucket_info = BucketInfo(
-                        dimensions=dimensions,
-                        pixel_dims=tuple(cached_info["pixel_dims"]),
-                        latent_dims=tuple(cached_info["latent_dims"]),
-                        bucket_index=cached_info["bucket_index"],
-                        size_class=cached_info["size_class"],
-                        aspect_class=cached_info["aspect_class"]
-                    )
-                    bucket_indices[bucket_info.pixel_dims].append(idx)
+                    bucket_indices[tuple(cached_info["pixel_dims"])].append(idx)
                 else:
-                    # Use default bucket
-                    default_bucket = self.buckets[0]
-                    bucket_indices[default_bucket.pixel_dims].append(idx)
-                    logger.warning(f"Using default bucket for {path}")
+                    # Compute bucket for uncached image
+                    with Image.open(path) as img:
+                        bucket_info = compute_bucket_dims(img.size, self.buckets)
+                        bucket_indices[bucket_info.pixel_dims].append(idx)
+                        
+                        # Update cache with new bucket info
+                        if entry:
+                            entry["bucket_info"] = {
+                                "dimensions": bucket_info.dimensions.__dict__,
+                                "pixel_dims": bucket_info.pixel_dims,
+                                "latent_dims": bucket_info.latent_dims,
+                                "bucket_index": bucket_info.bucket_index,
+                                "size_class": bucket_info.size_class,
+                                "aspect_class": bucket_info.aspect_class
+                            }
+                            self.cache_manager._save_index()
             
             except Exception as e:
                 logger.error(f"Error loading bucket info for {path}: {e}")
+                # Only use default bucket as last resort
                 bucket_indices[self.buckets[0].pixel_dims].append(idx)
         
         return dict(bucket_indices)
