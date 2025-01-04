@@ -196,24 +196,21 @@ class CacheManager:
             return None
         
         try:
-            # Load VAE latents with size info
+            # Load VAE latents with proper shapes
             vae_data = torch.load(entry["vae_path"], map_location=self.device)
-            vae_latents = vae_data["vae_latents"]
-            time_ids = vae_data["time_ids"]
-            original_size = vae_data["original_size"]
-            crop_coords = vae_data["crop_coords"]
-            target_size = vae_data["target_size"]
+            vae_latents = vae_data["vae_latents"]  # [C, H, W]
+            time_ids = vae_data["time_ids"]        # [1, 6]
             
-            # Load CLIP embeddings
+            # Load CLIP embeddings with correct dimensions
             clip_data = torch.load(entry["clip_path"], map_location=self.device)
-            prompt_embeds = clip_data["prompt_embeds"]
-            pooled_prompt_embeds = clip_data["pooled_prompt_embeds"]
+            prompt_embeds = clip_data["prompt_embeds"]           # [77, 2048]
+            pooled_prompt_embeds = clip_data["pooled_prompt_embeds"]  # [1, 1280]
             
-            # Load metadata for bucket info
+            # Load metadata
             with open(entry["metadata_path"]) as f:
                 metadata = json.loads(f.read())
             
-            # Return format compatible with both DDPM and Flow Matching
+            # Return format compatible with both trainers
             return {
                 # Core tensors
                 "vae_latents": vae_latents,
@@ -221,14 +218,14 @@ class CacheManager:
                 "pooled_prompt_embeds": pooled_prompt_embeds,
                 "time_ids": time_ids,
                 
-                # Size information
-                "original_size": original_size,
-                "crop_coords": crop_coords,
-                "target_size": target_size,
+                # Size information for SDXL conditioning
+                "original_size": metadata.get("original_size"),
+                "crop_coords": metadata.get("crop_coords", (0, 0)),
+                "target_size": metadata.get("target_size"),
                 
                 # Additional info
                 "metadata": metadata,
-                "bucket_info": entry.get("bucket_info", None)
+                "bucket_info": entry.get("bucket_info")
             }
             
         except Exception as e:

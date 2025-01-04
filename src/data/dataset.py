@@ -102,35 +102,28 @@ class AspectBucketDataset(Dataset):
             if cached_data is None:
                 return None
             
-            # Extract tensors and metadata
-            vae_latents = cached_data["vae_latents"]
-            prompt_embeds = cached_data["prompt_embeds"]
-            pooled_prompt_embeds = cached_data["pooled_prompt_embeds"]
-            time_ids = cached_data["time_ids"]
-            
-            # Prepare metadata
-            metadata = {
-                "original_size": cached_data["original_size"],
-                "crop_coords": cached_data["crop_coords"],
-                "target_size": cached_data["target_size"],
-                "text": caption,
-                "bucket_info": cached_data["bucket_info"]
-            }
-            
-            # Add tag weight if enabled
-            if self.tag_weighter is not None:
-                metadata["tag_weight"] = self.tag_weighter.get_weight(image_path)
-            
-            # Return format compatible with both DDPM and Flow Matching
+            # Format tensors for both DDPM and Flow Matching
             return {
-                # Core tensors needed by both trainers
-                "vae_latents": vae_latents,          # Shape: [C, H, W]
-                "prompt_embeds": prompt_embeds,      # Shape: [77, 2048]
-                "pooled_prompt_embeds": pooled_prompt_embeds,  # Shape: [1, 1280]
-                "time_ids": time_ids,                # Shape: [1, 6]
+                # Core tensors with correct shapes
+                "vae_latents": cached_data["vae_latents"],          # [C, H, W]
+                "prompt_embeds": cached_data["prompt_embeds"],      # [77, 2048]
+                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],  # [1, 1280]
+                "time_ids": cached_data["time_ids"],                # [1, 6]
                 
-                # Metadata needed for conditioning
-                "metadata": metadata
+                # Added conditioning kwargs needed by both trainers
+                "added_cond_kwargs": {
+                    "text_embeds": cached_data["pooled_prompt_embeds"],
+                    "time_ids": cached_data["time_ids"]
+                },
+                
+                # Metadata for conditioning and logging
+                "metadata": {
+                    "original_size": cached_data["original_size"],
+                    "crop_coords": cached_data["crop_coords"],
+                    "target_size": cached_data["target_size"],
+                    "text": caption,
+                    "bucket_info": cached_data["bucket_info"]
+                }
             }
             
         except Exception as e:
