@@ -114,7 +114,11 @@ class AspectBucketDataset(Dataset):
                 "vae_latents": cached_data["vae_latents"],          # [C, H, W]
                 "prompt_embeds": cached_data["prompt_embeds"],      # [77, 2048]
                 "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],  # [1, 1280]
-                "time_ids": cached_data["time_ids"],                # [1, 6]
+                "time_ids": self._compute_time_ids(
+                    original_size=cached_data["original_size"],
+                    target_size=cached_data["target_size"],
+                    crop_coords=cached_data["crop_coords"]
+                ),
                 
                 # Added conditioning kwargs needed by both trainers
                 "added_cond_kwargs": {
@@ -245,8 +249,8 @@ class AspectBucketDataset(Dataset):
                     # Compute time ids
                     time_ids = self._compute_time_ids(
                         original_size=img_data["original_size"],
-                        crops_coords_top_left=img_data["crop_coords"],
-                        target_size=img_data["target_size"]
+                        target_size=img_data["target_size"],
+                        crop_coords=img_data["crop_coords"]
                     )
                     
                     # Add caption and tag info to processed data
@@ -298,12 +302,14 @@ class AspectBucketDataset(Dataset):
     def _compute_time_ids(
         self,
         original_size: Tuple[int, int],
-        target_size: Tuple[int, int]
+        target_size: Tuple[int, int],
+        crop_coords: Tuple[int, int] = (0, 0)
     ) -> torch.Tensor:
-        """Compute time embeddings for SDXL."""
-        # Compute time ids following SDXL format
+        """Compute time embeddings for SDXL.
+        Format: [orig_w, orig_h, crop_left, crop_top, target_w, target_h]
+        """
         time_ids = torch.tensor([
-            list(original_size) + list(target_size) + [0, 0],  # Add crop coords as 0,0
+            list(original_size) + list(crop_coords) + list(target_size)
         ])
         
         return time_ids.to(device=self.device, dtype=torch.float32)
@@ -461,7 +467,8 @@ class AspectBucketDataset(Dataset):
                 "vae_latents": vae_latents.squeeze(0),
                 "time_ids": self._compute_time_ids(
                     original_size=original_size,
-                    target_size=bucket_info.pixel_dims
+                    target_size=bucket_info.pixel_dims,
+                    crop_coords=(0, 0)
                 ),
                 "original_size": original_size,
                 "crop_coords": (0, 0),
