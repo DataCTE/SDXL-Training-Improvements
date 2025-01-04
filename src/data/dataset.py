@@ -474,7 +474,7 @@ class AspectBucketDataset(Dataset):
                 cache_key = self.cache_manager.get_cache_key(path)
                 entry = self.cache_manager.cache_index["entries"].get(cache_key)
                 
-                if entry and "bucket_info" in entry:
+                if entry and entry.get("bucket_info"):
                     bucket_info = entry["bucket_info"]
                     bucket_indices[tuple(bucket_info["pixel_dims"])].append(idx)
                 else:
@@ -485,6 +485,7 @@ class AspectBucketDataset(Dataset):
             
             except Exception as e:
                 logger.error(f"Error loading bucket info for {path}: {e}")
+                # Default to first bucket on error
                 bucket_indices[self.buckets[0].pixel_dims].append(idx)
         
         return dict(bucket_indices)

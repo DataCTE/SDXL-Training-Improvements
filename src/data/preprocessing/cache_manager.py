@@ -82,47 +82,40 @@ class CacheManager:
             "stats": {"total_entries": 0, "latents_size": 0}
         }
         
-        # Scan both legacy and new latents directories
-        latents_paths = list(self.latents_dir.glob("*.pt"))  # Legacy files
-        latents_paths.extend(self.vae_latents_dir.glob("*.pt"))  # New VAE files
-        
-        for latents_path in latents_paths:
-            # Handle both legacy and new paths
-            if latents_path.parent == self.latents_dir:
-                # Legacy path handling
-                metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
-            else:
-                # New path handling
-                metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
-                clip_path = self.clip_latents_dir / f"{latents_path.stem}.pt"
-                
-                if not (latents_path.exists() and metadata_path.exists() and clip_path.exists()):
-                    continue
+        # Scan VAE latents directory for primary files
+        for vae_path in self.vae_latents_dir.glob("*.pt"):
+            cache_key = vae_path.stem
+            clip_path = self.clip_latents_dir / f"{cache_key}.pt"
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            
+            # Only process if we have all required files
+            if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
+                continue
             
             try:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                 
-                cache_key = self.get_cache_key(metadata["original_path"])
                 entry = {
-                    "vae_path": str(latents_path),
-                    "clip_path": str(clip_path) if "clip_path" in locals() else None,
-                    "metadata_path": str(metadata_path),
+                    "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
+                    "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
+                    "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
                     "created_at": metadata.get("created_at", time.time()),
-                    "is_valid": True
+                    "is_valid": True,
+                    "bucket_info": metadata.get("bucket_info"),
+                    "tag_info": metadata.get("tag_info")
                 }
                 
-                # Preserve bucket info if it exists in metadata
-                if "bucket_info" in metadata:
-                    entry["bucket_info"] = metadata["bucket_info"]
-                
                 new_index["entries"][cache_key] = entry
+                new_index["stats"]["total_entries"] += 1
                 
             except Exception as e:
-                logger.warning(f"Failed to process cache file {latents_path}: {e}")
+                logger.warning(f"Failed to process cache files for {cache_key}: {e}")
         
-        self.cache_index = new_index
-        self._save_index()
+        # Update cache index
+        with self._lock:
+            self.cache_index = new_index
+            self._save_index()
 
     def get_uncached_paths(self, image_paths: List[str]) -> List[str]:
         """Get list of paths that need processing."""
@@ -235,12 +228,19 @@ class CacheManager:
 
     def _validate_cache_entry(self, entry: Dict[str, Any]) -> bool:
         """Validate cache entry files exist and are valid."""
-        return (
-            Path(entry["vae_path"]).exists() and
-            Path(entry["clip_path"]).exists() and
-            Path(entry["metadata_path"]).exists() and
-            entry.get("is_valid", False)
-        )
+        try:
+            vae_path = self.latents_dir / entry["vae_latent_path"]
+            clip_path = self.latents_dir / entry["clip_latent_path"]
+            metadata_path = self.latents_dir / entry["metadata_path"]
+            
+            return (
+                vae_path.exists() and
+                clip_path.exists() and
+                metadata_path.exists() and
+                entry.get("is_valid", False)
+            )
+        except Exception:
+            return False
 
     def _save_index(self) -> None:
         """Save cache index to disk atomically."""
@@ -404,37 +404,32 @@ class CacheManager:
     def load_bucket_info(self, cache_key: str) -> Optional["BucketInfo"]:
         """Load cached bucket information."""
         entry = self.cache_index["entries"].get(cache_key)
-        if not entry or not entry.get("bucket_info_path"):
+        if not entry or not entry.get("bucket_info"):
             return None
             
         try:
-            bucket_info_path = Path(entry["bucket_info_path"])
-            if not bucket_info_path.exists():
-                return None
-                
-            with open(bucket_info_path, 'r') as f:
-                bucket_data = json.load(f)
+            bucket_info = entry["bucket_info"]
             
-            # Reconstruct BucketDimensions
+            # Reconstruct BucketDimensions from stored info
             dimensions = BucketDimensions(
-                width=bucket_data["dimensions"]["width"],
-                height=bucket_data["dimensions"]["height"],
-                width_latent=bucket_data["dimensions"]["width_latent"],
-                height_latent=bucket_data["dimensions"]["height_latent"],
-                aspect_ratio=bucket_data["dimensions"]["aspect_ratio"],
-                aspect_ratio_inverse=bucket_data["dimensions"]["aspect_ratio_inverse"],
-                total_pixels=bucket_data["dimensions"]["total_pixels"],
-                total_latents=bucket_data["dimensions"]["total_latents"]
+                width=bucket_info["dimensions"]["width"],
+                height=bucket_info["dimensions"]["height"],
+                width_latent=bucket_info["dimensions"]["width_latent"],
+                height_latent=bucket_info["dimensions"]["height_latent"],
+                aspect_ratio=bucket_info["dimensions"]["aspect_ratio"],
+                aspect_ratio_inverse=bucket_info["dimensions"]["aspect_ratio_inverse"],
+                total_pixels=bucket_info["dimensions"]["total_pixels"],
+                total_latents=bucket_info["dimensions"]["total_latents"]
             )
             
             # Reconstruct BucketInfo
             return BucketInfo(
                 dimensions=dimensions,
-                pixel_dims=tuple(bucket_data["pixel_dims"]),
-                latent_dims=tuple(bucket_data["latent_dims"]),
-                bucket_index=bucket_data["bucket_index"],
-                size_class=bucket_data["size_class"],
-                aspect_class=bucket_data["aspect_class"]
+                pixel_dims=tuple(bucket_info["pixel_dims"]),
+                latent_dims=tuple(bucket_info["latent_dims"]),
+                bucket_index=bucket_info["bucket_index"],
+                size_class=bucket_info["size_class"],
+                aspect_class=bucket_info["aspect_class"]
             )
             
         except Exception as e:
