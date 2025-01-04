@@ -534,30 +534,23 @@ class AspectBucketDataset(Dataset):
         batch: Dict[str, List[str]],
         proportion_empty_prompts: float = 0.0
     ) -> Dict[str, torch.Tensor]:
-        """Encode prompts using CLIP encoders directly."""
+        """Encode text prompts with bucket-aware processing."""
         try:
+            # Use CLIPEncoder's encode_prompt method
             encoded_output = CLIPEncoder.encode_prompt(
                 batch=batch,
                 text_encoders=self.text_encoders,
                 tokenizers=self.tokenizers,
                 proportion_empty_prompts=proportion_empty_prompts,
-                is_train=self.is_train
+                is_train=self.is_train,
+                device=self.device
             )
             
-            return {
-                "prompt_embeds": encoded_output["prompt_embeds"],
-                "pooled_prompt_embeds": encoded_output["pooled_prompt_embeds"],
-                "metadata": {
-                    "num_prompts": len(batch[next(iter(batch))]),
-                    "device": str(self.device),
-                    "dtype": str(encoded_output["prompt_embeds"].dtype),
-                    "timestamp": time.time()
-                }
-            }
+            return encoded_output
+            
         except Exception as e:
-            logger.error("Failed to encode prompts", 
-                        extra={'error': str(e), 'batch_size': len(batch[next(iter(batch))])})
-            raise
+            logger.error(f"Failed to encode prompts: {e}")
+            return None
 
     def get_aspect_buckets(self) -> List[BucketInfo]:
         """Return cached buckets."""
