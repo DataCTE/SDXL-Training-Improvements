@@ -83,13 +83,19 @@ class CacheManager:
                     metadata = json.load(f)
                 
                 cache_key = self.get_cache_key(metadata["original_path"])
-                new_index["entries"][cache_key] = {
+                entry = {
                     "tensors_path": str(latents_path),
                     "metadata_path": str(metadata_path),
                     "created_at": metadata.get("created_at", time.time()),
-                    "bucket_dims": metadata.get("bucket_dims"),
                     "is_valid": True
                 }
+                
+                # Preserve bucket info if it exists in metadata
+                if "bucket_info" in metadata:
+                    entry["bucket_info"] = metadata["bucket_info"]
+                
+                new_index["entries"][cache_key] = entry
+                
             except Exception as e:
                 logger.warning(f"Failed to process cache file {latents_path}: {e}")
         
@@ -113,46 +119,25 @@ class CacheManager:
         tensors: Dict[str, torch.Tensor],
         path: Union[str, Path],
         metadata: Dict[str, Any],
-        bucket_info: Optional["BucketInfo"] = None  # Updated to use BucketInfo
+        bucket_info: Optional[BucketInfo] = None
     ) -> bool:
         """Save processed tensors with comprehensive bucket information."""
         cache_key = self.get_cache_key(path)
         tensors_path = self.latents_dir / f"{cache_key}.pt"
         metadata_path = self.metadata_dir / f"{cache_key}.json"
-        bucket_info_path = self.bucket_info_dir / f"{cache_key}.json"
         
         try:
             # Save tensors
             torch.save({k: v.cpu() for k, v in tensors.items()}, tensors_path)
             
-            # Save bucket information if provided
-            if bucket_info:
-                bucket_data = {
-                    "dimensions": {
-                        "width": bucket_info.dimensions.width,
-                        "height": bucket_info.dimensions.height,
-                        "width_latent": bucket_info.dimensions.width_latent,
-                        "height_latent": bucket_info.dimensions.height_latent,
-                        "aspect_ratio": bucket_info.dimensions.aspect_ratio,
-                        "aspect_ratio_inverse": bucket_info.dimensions.aspect_ratio_inverse,
-                        "total_pixels": bucket_info.dimensions.total_pixels,
-                        "total_latents": bucket_info.dimensions.total_latents
-                    },
-                    "pixel_dims": bucket_info.pixel_dims,
-                    "latent_dims": bucket_info.latent_dims,
-                    "bucket_index": bucket_info.bucket_index,
-                    "size_class": bucket_info.size_class,
-                    "aspect_class": bucket_info.aspect_class
-                }
-                self._atomic_json_save(bucket_info_path, bucket_data)
-            
-            # Save metadata with bucket reference
+            # Prepare metadata with bucket info
             full_metadata = {
                 "original_path": str(path),
                 "created_at": time.time(),
-                "bucket_info_path": str(bucket_info_path) if bucket_info else None,
                 **metadata
             }
+            
+            # Save metadata
             self._atomic_json_save(metadata_path, full_metadata)
             
             # Update index with comprehensive information
@@ -160,11 +145,21 @@ class CacheManager:
                 self.cache_index["entries"][cache_key] = {
                     "tensors_path": str(tensors_path),
                     "metadata_path": str(metadata_path),
-                    "bucket_info_path": str(bucket_info_path) if bucket_info else None,
                     "created_at": time.time(),
-                    "is_valid": True,
-                    "bucket_dims": bucket_info.pixel_dims if bucket_info else None
+                    "is_valid": True
                 }
+                
+                # Add bucket info if provided
+                if bucket_info:
+                    self.cache_index["entries"][cache_key]["bucket_info"] = {
+                        "dimensions": bucket_info.dimensions.__dict__,
+                        "pixel_dims": bucket_info.pixel_dims,
+                        "latent_dims": bucket_info.latent_dims,
+                        "bucket_index": bucket_info.bucket_index,
+                        "size_class": bucket_info.size_class,
+                        "aspect_class": bucket_info.aspect_class
+                    }
+                
                 self._save_index()
             
             return True
@@ -174,17 +169,23 @@ class CacheManager:
             return False
 
     def load_tensors(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """Load cached tensors and metadata."""
+        """Load cached tensors and metadata with bucket information."""
         entry = self.cache_index["entries"].get(cache_key)
         if not entry or not self._validate_cache_entry(entry):
             return None
             
         try:
-            # Load and create copies of tensors and metadata
+            # Load tensors and metadata
             tensors = {k: v.clone() for k, v in torch.load(entry["tensors_path"], map_location=self.device).items()}
             with open(entry["metadata_path"]) as f:
-                metadata = json.loads(f.read())  # Creates a new dict
+                metadata = json.loads(f.read())
+            
+            # Add bucket info if available
+            if "bucket_info" in entry:
+                metadata["bucket_info"] = entry["bucket_info"]
+            
             return {"metadata": metadata, **tensors}
+            
         except Exception as e:
             logger.error(f"Failed to load cache entry: {e}")
             return None
@@ -304,59 +305,34 @@ class CacheManager:
             raise e
 
     def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
-        """Verify cache integrity and rebuild if needed."""
+        """Verify cache integrity and rebuild if necessary."""
         logger.info("Verifying cache integrity...")
+        needs_rebuild = False
         
-        # Create image-caption mapping
-        image_captions = dict(zip(image_paths, captions))
-        
-        # Check uncached images
-        uncached = self.get_uncached_paths(image_paths)
-        missing_count = len(uncached)
-        
-        if missing_count > 0:
-            logger.warning(
-                f"Found {missing_count} uncached images "
-                f"({missing_count/len(image_paths)*100:.1f}% of dataset)"
-            )
-        
-        # Verify existing cache entries
-        invalid_entries = []
-        for path in image_paths:
+        for path in tqdm(image_paths, desc="Verifying cache entries"):
             cache_key = self.get_cache_key(path)
             entry = self.cache_index["entries"].get(cache_key)
             
-            if entry and not self._validate_cache_entry(entry):
-                invalid_entries.append(path)
-            
-            # Update caption in metadata if needed
-            if entry and entry.get("metadata_path"):
-                try:
-                    with open(entry["metadata_path"], 'r') as f:
-                        metadata = json.load(f)
-                    metadata["caption"] = image_captions[path]
-                    with open(entry["metadata_path"], 'w') as f:
-                        json.dump(metadata, f)
-                except Exception as e:
-                    logger.warning(f"Failed to update caption for {path}: {e}")
+            if entry:
+                # Check all required files exist
+                if not (Path(entry["tensors_path"]).exists() and 
+                       Path(entry["metadata_path"]).exists()):
+                    needs_rebuild = True
+                    break
+                    
+                # Verify bucket info structure if present
+                if "bucket_info" in entry:
+                    required_fields = {"dimensions", "pixel_dims", "latent_dims", 
+                                     "bucket_index", "size_class", "aspect_class"}
+                    if not all(field in entry["bucket_info"] for field in required_fields):
+                        needs_rebuild = True
+                        break
         
-        if invalid_entries:
-            logger.warning(f"Found {len(invalid_entries)} invalid cache entries")
-        
-        # Update cache index
-        if uncached or invalid_entries:
-            logger.info("Rebuilding cache index...")
+        if needs_rebuild:
+            logger.warning("Cache verification failed. Rebuilding cache index...")
             self.rebuild_cache_index()
-        
-        # Update statistics
-        self.cache_index["stats"]["total_entries"] = len(self.cache_index["entries"])
-        self.cache_index["last_updated"] = time.time()
-        self._save_index()
-        
-        logger.info(
-            f"Cache verification complete. "
-            f"Valid entries: {len(self.cache_index['entries'])}"
-        )
+        else:
+            logger.info("Cache verification completed successfully")
 
     def load_bucket_info(self, cache_key: str) -> Optional["BucketInfo"]:
         """Load cached bucket information."""

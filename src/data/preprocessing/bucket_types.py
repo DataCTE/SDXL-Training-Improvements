@@ -56,6 +56,21 @@ class BucketInfo:
     size_class: str               # Size classification
     aspect_class: str            # Aspect ratio classification
     
+    @property
+    def total_pixels(self) -> int:
+        """Get total pixel count."""
+        return self.dimensions.total_pixels
+        
+    @property
+    def total_latents(self) -> int:
+        """Get total latent count."""
+        return self.dimensions.total_latents
+        
+    @property
+    def aspect_ratio(self) -> float:
+        """Get aspect ratio."""
+        return self.dimensions.aspect_ratio
+    
     @classmethod
     def from_dims(cls, width: int, height: int, bucket_index: int) -> 'BucketInfo':
         """Create BucketInfo with full validation."""

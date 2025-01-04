@@ -579,13 +579,10 @@ class AspectBucketDataset(Dataset):
                 cache_key = self.cache_manager.get_cache_key(path)
                 entry = self.cache_manager.cache_index["entries"].get(cache_key)
                 
-                if entry and "metadata" in entry and "bucket_info" in entry["metadata"]:
+                if entry and "bucket_info" in entry:  # Changed from metadata check
                     # Reconstruct BucketInfo from cached data
-                    cached_info = entry["metadata"]["bucket_info"]
-                    dimensions = BucketDimensions.from_pixels(
-                        cached_info["dimensions"]["width"],
-                        cached_info["dimensions"]["height"]
-                    )
+                    cached_info = entry["bucket_info"]
+                    dimensions = BucketDimensions(**cached_info["dimensions"])  # Use dict unpacking
                     bucket_info = BucketInfo(
                         dimensions=dimensions,
                         pixel_dims=tuple(cached_info["pixel_dims"]),

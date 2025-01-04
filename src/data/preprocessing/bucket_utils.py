@@ -110,7 +110,7 @@ def group_images_by_bucket(
             if cached_entry and "bucket_info" in cached_entry:
                 # Use cached bucket information
                 bucket_info = cached_entry["bucket_info"]
-                bucket_indices[bucket_info["pixel_dims"]].append(idx)
+                bucket_indices[tuple(bucket_info["pixel_dims"])].append(idx)
             else:
                 # Process new image
                 img = Image.open(path)
@@ -122,12 +122,12 @@ def group_images_by_bucket(
                 # Update cache with full bucket information
                 if cached_entry:
                     cached_entry["bucket_info"] = {
+                        "dimensions": bucket_info.dimensions.__dict__,  # Store all dimension attributes
                         "pixel_dims": bucket_info.pixel_dims,
                         "latent_dims": bucket_info.latent_dims,
-                        "aspect_ratio": bucket_info.aspect_ratio,
-                        "total_pixels": bucket_info.total_pixels,
-                        "total_latents": bucket_info.total_latents,
-                        "bucket_index": bucket_info.bucket_index
+                        "bucket_index": bucket_info.bucket_index,
+                        "size_class": bucket_info.size_class,
+                        "aspect_class": bucket_info.aspect_class
                     }
                     cache_manager._save_index()
             
