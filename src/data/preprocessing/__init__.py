@@ -2,6 +2,7 @@
 from .cache_manager import CacheManager
 from .tag_weighter import TagWeighter, create_tag_weighter, create_tag_weighter_with_index, preprocess_dataset_tags
 from .bucket_utils import generate_buckets, compute_bucket_dims
+from .bucket_types import BucketInfo, BucketDimensions
 from .exceptions import (
     PreprocessingError,
     DataLoadError,
@@ -20,6 +21,8 @@ __all__ = [
     "TagWeighter",
     "generate_buckets",
     "compute_bucket_dims",
+    "BucketInfo",
+    "BucketDimensions",
     "preprocess_dataset_tags",
     "create_tag_weighter",
     "create_tag_weighter_with_index",
