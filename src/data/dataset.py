@@ -539,15 +539,21 @@ class AspectBucketDataset(Dataset):
     ) -> Dict[str, torch.Tensor]:
         """Encode text prompts with bucket-aware processing."""
         try:
-            # Use CLIPEncoder's encode_prompt method
+            # Use CLIPEncoder's encode_prompt method without device parameter
             encoded_output = CLIPEncoder.encode_prompt(
                 batch=batch,
                 text_encoders=self.text_encoders,
                 tokenizers=self.tokenizers,
                 proportion_empty_prompts=proportion_empty_prompts,
-                is_train=self.is_train,
-                device=self.device
+                is_train=self.is_train
             )
+            
+            # Move tensors to device after encoding
+            if encoded_output is not None:
+                encoded_output = {
+                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                    for k, v in encoded_output.items()
+                }
             
             return encoded_output
             
