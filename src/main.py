@@ -1,14 +1,16 @@
 """Main orchestration script for SDXL fine-tuning """
 import os
+import random
 
 def get_unique_port():
     """Get a unique port in a range unlikely to be used by other programs."""
     # Use range 50000-55000 which is typically unused
     base_port = 50000
     port_range = 5000
-    # Use RANK to offset port and avoid conflicts between different runs
+    # Use RANK and random offset to avoid conflicts
     rank_offset = int(os.environ.get("RANK", "0")) * 10
-    return base_port + rank_offset
+    random_offset = random.randint(0, port_range)
+    return base_port + rank_offset + random_offset
 
 # Set environment variables before any other imports
 def setup_training_env():
@@ -42,7 +44,6 @@ import torch
 from torch.distributed import init_process_group
 from torch.utils.data import DataLoader
 import socket
-import random
 
 # Core imports
 from src.core.logging import setup_logging, get_logger, WandbLogger
