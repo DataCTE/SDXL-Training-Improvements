@@ -34,6 +34,7 @@ class CacheManager:
         self.config = config
         
         # Create separate directories for different types of latents
+        self.latents_dir = self.cache_dir / "latents"
         self.vae_latents_dir = self.cache_dir / "vae"
         self.clip_latents_dir = self.cache_dir / "clip"
         self.metadata_dir = self.cache_dir / "metadata"
@@ -41,8 +42,14 @@ class CacheManager:
         self.tag_dir = self.cache_dir / "tags"
         
         # Create all required directories
-        for directory in [self.vae_latents_dir, self.clip_latents_dir, 
-                         self.metadata_dir, self.bucket_info_dir, self.tag_dir]:
+        for directory in [
+            self.latents_dir,
+            self.vae_latents_dir,
+            self.clip_latents_dir,
+            self.metadata_dir,
+            self.bucket_info_dir,
+            self.tag_dir
+        ]:
             directory.mkdir(parents=True, exist_ok=True)
         
         self._lock = threading.Lock()
@@ -73,20 +80,31 @@ class CacheManager:
             "stats": {"total_entries": 0, "latents_size": 0}
         }
         
-        # Scan latents directory
-        for latents_path in self.latents_dir.glob("*.pt"):
-            metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
-            
-            if not (latents_path.exists() and metadata_path.exists()):
-                continue
+        # Scan both legacy and new latents directories
+        latents_paths = list(self.latents_dir.glob("*.pt"))  # Legacy files
+        latents_paths.extend(self.vae_latents_dir.glob("*.pt"))  # New VAE files
+        
+        for latents_path in latents_paths:
+            # Handle both legacy and new paths
+            if latents_path.parent == self.latents_dir:
+                # Legacy path handling
+                metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
+            else:
+                # New path handling
+                metadata_path = self.metadata_dir / f"{latents_path.stem}.json"
+                clip_path = self.clip_latents_dir / f"{latents_path.stem}.pt"
                 
+                if not (latents_path.exists() and metadata_path.exists() and clip_path.exists()):
+                    continue
+            
             try:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                 
                 cache_key = self.get_cache_key(metadata["original_path"])
                 entry = {
-                    "tensors_path": str(latents_path),
+                    "vae_path": str(latents_path),
+                    "clip_path": str(clip_path) if "clip_path" in locals() else None,
                     "metadata_path": str(metadata_path),
                     "created_at": metadata.get("created_at", time.time()),
                     "is_valid": True
@@ -127,41 +145,33 @@ class CacheManager:
         cache_key = self.get_cache_key(path)
         
         try:
-            # Separate VAE and CLIP latents
-            vae_tensors = {
-                "vae_latents": tensors["vae_latents"].cpu(),  # [C, H, W]
-                "time_ids": tensors["time_ids"].cpu(),        # [1, 6]
-                "original_size": metadata.get("original_size"),
-                "crop_coords": metadata.get("crop_coords", (0, 0)),
-                "target_size": metadata.get("target_size")
-            }
-            
-            clip_tensors = {
-                "prompt_embeds": tensors["prompt_embeds"].cpu(),           # [77, 2048]
-                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()  # [1, 1280]
-            }
-            
             # Save VAE latents
             vae_path = self.vae_latents_dir / f"{cache_key}.pt"
-            torch.save(vae_tensors, vae_path)
+            torch.save({
+                "vae_latents": tensors["vae_latents"].cpu(),
+                "time_ids": tensors["time_ids"].cpu()
+            }, vae_path)
             
             # Save CLIP latents
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
-            torch.save(clip_tensors, clip_path)
+            torch.save({
+                "prompt_embeds": tensors["prompt_embeds"].cpu(),
+                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
+            }, clip_path)
             
-            # Save metadata with paths and associations
+            # Save metadata with paths to both latent files
             full_metadata = {
                 "original_path": str(path),
                 "created_at": time.time(),
-                "vae_path": str(vae_path),
-                "clip_path": str(clip_path),
+                "vae_latents_path": str(vae_path),
+                "clip_latents_path": str(clip_path),
                 **metadata
             }
             
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             self._atomic_json_save(metadata_path, full_metadata)
             
-            # Update cache index with bucket info
+            # Update cache index
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
                     "vae_path": str(vae_path),
@@ -172,14 +182,7 @@ class CacheManager:
                 }
                 
                 if bucket_info:
-                    self.cache_index["entries"][cache_key]["bucket_info"] = {
-                        "dimensions": bucket_info.dimensions.__dict__,
-                        "pixel_dims": bucket_info.pixel_dims,
-                        "latent_dims": bucket_info.latent_dims,
-                        "bucket_index": bucket_info.bucket_index,
-                        "size_class": bucket_info.size_class,
-                        "aspect_class": bucket_info.aspect_class
-                    }
+                    self.cache_index["entries"][cache_key]["bucket_info"] = bucket_info.__dict__
                 
                 self._save_index()
             

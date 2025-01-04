@@ -340,7 +340,7 @@ class AspectBucketDataset(Dataset):
                                 crop_coords=(0, 0)
                             )
                             
-                            # Save to cache
+                            # Save to cache with linked metadata
                             self.cache_manager.save_latents(
                                 tensors={
                                     "vae_latents": vae_latents.squeeze(0),
@@ -354,7 +354,9 @@ class AspectBucketDataset(Dataset):
                                     "crop_coords": (0, 0),
                                     "target_size": bucket_info.pixel_dims,
                                     "text": caption,
-                                    "bucket_info": bucket_info.__dict__
+                                    "bucket_info": bucket_info.__dict__,
+                                    "image_path": str(path),  # Store original image path
+                                    "caption": caption  # Store associated caption
                                 }
                             )
                             
