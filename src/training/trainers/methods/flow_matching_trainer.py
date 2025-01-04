@@ -272,7 +272,7 @@ class FlowMatchingTrainer(SDXLTrainer):
         batch: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
-        """Compute Flow Matching loss with new data format."""
+        """Compute Flow Matching loss with enhanced bucket metadata."""
         try:
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
@@ -296,20 +296,20 @@ class FlowMatchingTrainer(SDXLTrainer):
             # Generate random starting point with matching dtype
             x0 = torch.randn_like(x1, device=self.device, dtype=model_dtype)
 
-            # Get metadata from batch and ensure proper types
-            original_sizes = batch["original_size"]  # List of (H,W) tuples
-            target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
-            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * x1.shape[0])
+            # Get enhanced metadata from batch
+            original_sizes = batch["original_size"]      # List of (H,W) tuples
+            target_sizes = batch["target_size"]         # List of (H,W) tuples
+            crop_coords = batch["crop_top_lefts"]      # List of (x,y) tuples
 
-            # Prepare time embeddings for SDXL
+            # Prepare time embeddings with enhanced metadata
             add_time_ids = torch.cat([
                 self.compute_time_ids(
-                    original_size=original_size,
+                    original_size=orig_size,
                     crops_coords_top_left=crop_coord,
                     target_size=target_size,
                     device=self.device,
                     dtype=model_dtype
-                ) for original_size, crop_coord in zip(original_sizes, crop_coords)
+                ) for orig_size, crop_coord, target_size in zip(original_sizes, crop_coords, target_sizes)
             ])
 
             # Prepare conditioning embeddings

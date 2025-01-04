@@ -290,8 +290,6 @@ class DDPMTrainer:
     def training_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Execute single training step with memory optimizations."""
         try:
-           
-            
             # Get model dtype from parameters
             model_dtype = next(self.model.parameters()).dtype
             
@@ -301,10 +299,10 @@ class DDPMTrainer:
             pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(device=self.device, dtype=model_dtype)
             tag_weights = batch["tag_weights"].to(device=self.device, dtype=model_dtype)
             
-            # Get metadata from batch
-            original_sizes = batch["original_size"]
-            target_size = batch["target_size"][0] if isinstance(batch["target_size"], list) else batch["target_size"]
-            crop_coords = batch.get("crop_top_lefts", [(0, 0)] * vae_latents.shape[0])
+            # Get metadata from batch with enhanced bucket information
+            original_sizes = batch["original_size"]  # List of (H,W) tuples
+            target_sizes = batch["target_size"]      # List of (H,W) tuples
+            crop_coords = batch["crop_top_lefts"]    # List of (x,y) tuples
             
             # Use context manager for mixed precision
             with autocast(device_type='cuda', enabled=self.mixed_precision != "no"):
@@ -317,7 +315,7 @@ class DDPMTrainer:
                         target_size=target_size,
                         device=self.device,
                         dtype=model_dtype
-                    ) for orig_size, crop_coord in zip(original_sizes, crop_coords)
+                    ) for orig_size, crop_coord, target_size in zip(original_sizes, crop_coords, target_sizes)
                 ])
                 add_time_ids = add_time_ids.to(device=self.device)
 
