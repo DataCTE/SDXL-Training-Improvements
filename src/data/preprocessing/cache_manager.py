@@ -202,11 +202,11 @@ class CacheManager:
                 "images": index_data["images"]
             }
             
-            # Save statistics
+            # Save statistics to cache/tags/statistics.json
             stats_path = self.get_tag_statistics_path()
             self._atomic_json_save(stats_path, statistics_data)
             
-            # Save image tags
+            # Save image tags to cache/tags/image_tags.json
             tags_path = self.get_image_tags_path()
             self._atomic_json_save(tags_path, image_tags_data)
             

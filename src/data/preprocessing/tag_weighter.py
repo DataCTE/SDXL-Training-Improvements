@@ -262,7 +262,7 @@ class TagWeighter:
             return
         
         index_data = self._prepare_index_data(image_tags)
-        self.config.cache_manager.save_tag_index(index_data, output_path)
+        self.config.cache_manager.save_tag_index(index_data)
 
     def _prepare_index_data(self, image_tags: Dict[str, Dict[str, any]]) -> Dict[str, Any]:
         """Prepare index data structure without file operations."""
@@ -368,26 +368,21 @@ def create_tag_weighter(
     return weighter
 
 def create_tag_weighter_with_index(
-    config: "Config",  # type: ignore
-    image_captions: Dict[str, str],
-    index_output_path: Optional[Path] = None
+    config: "Config",
+    image_captions: Dict[str, str]
 ) -> TagWeighter:
     """Create and initialize tag weighter with index."""
-    # Create tag weighter
     weighter = TagWeighter(config)
     
-    # Process all captions
     logger.info("Processing captions and updating tag statistics...")
     weighter.update_statistics(list(image_captions.values()))
     
-    # Process detailed tag information
     logger.info("Creating detailed tag index...")
     image_tags = weighter.process_dataset_tags(image_captions)
     
-    # Save to index if path provided
-    if index_output_path is not None:
-        logger.info(f"Saving tag index to {index_output_path}")
-        weighter.save_to_index(index_output_path, image_tags)
+    # Save to cache manager's tag directory
+    logger.info("Saving tag index to cache")
+    weighter.save_to_index(None, image_tags)
     
     return weighter
 
@@ -416,8 +411,7 @@ def preprocess_dataset_tags(
     logger.info("Processing tags and creating index...")
     weighter = create_tag_weighter_with_index(
         config=config,
-        image_captions=image_captions,
-        index_output_path=index_path
+        image_captions=image_captions
     )
     
     logger.info("Tag preprocessing complete")

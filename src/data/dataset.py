@@ -265,11 +265,9 @@ class AspectBucketDataset(Dataset):
         """Setup tag weighting if enabled."""
         if config.tag_weighting.enable_tag_weighting:
             image_captions = dict(zip(self.image_paths, self.captions))
-            index_path = Path(cache_dir) / "tag_weights_index.json"
             self.tag_weighter = create_tag_weighter_with_index(
                 config=config,
-                image_captions=image_captions,
-                index_output_path=index_path
+                image_captions=image_captions
             )
         else:
             self.tag_weighter = None
@@ -498,67 +496,36 @@ class AspectBucketDataset(Dataset):
     def _process_single_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
         """Process a single image with aspect ratio bucketing and VAE encoding."""
         try:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            # Load image
+            img_tensor, original_size = self.cache_manager.load_image_to_tensor(image_path, self.device)
             
-            # Check if image is already cached
-            cache_key = self.cache_manager.get_cache_key(image_path)
-            cached_data = self.cache_manager.load_tensors(cache_key)
+            # Get bucket dimensions (in latent space)
+            bucket_dims = compute_bucket_dims(original_size, self.buckets)
             
-            if cached_data is not None and "vae_latents" in cached_data:
-                # Use cached data if available
-                return {
-                    "vae_latents": cached_data["vae_latents"],
-                    "original_size": cached_data["metadata"]["original_size"],
-                    "target_size": cached_data["metadata"]["target_size"],
-                    "latent_size": cached_data["metadata"]["latent_size"],
-                    "path": str(image_path),
-                    "timestamp": time.time(),
-                    "crop_coords": cached_data["metadata"].get("crop_coords", (0, 0))
-                }
+            # Convert to pixel space for resizing
+            target_size = (bucket_dims[0] * 8, bucket_dims[1] * 8)
             
-            # If not cached, load and process the image
-            loaded = self.cache_manager.load_image_to_tensor(image_path, self.device)
-            if loaded is None:
-                return None
+            # Resize image
+            img_tensor = F.interpolate(
+                img_tensor.unsqueeze(0),
+                size=target_size,
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(0)
             
-            img_tensor, original_size = loaded
+            # VAE encode (will automatically reduce to latent dimensions)
+            with torch.no_grad():
+                vae_latents = self.model.vae.encode(
+                    img_tensor.unsqueeze(0)
+                ).latent_dist.sample()
+                vae_latents = vae_latents * self.model.vae.config.scaling_factor
             
-            # Process the image tensor
-            processed = self._process_image_tensor(
-                img_tensor=img_tensor,
-                original_size=original_size,
-                image_path=image_path
-            )
-            
-            if processed is None:
-                return None
-            
-            # Encode with VAE if model is available
-            if self.model and hasattr(self.model, 'vae'):
-                with torch.no_grad():
-                    pixel_values = processed["pixel_values"].unsqueeze(0)
-                    vae_latents = self.model.vae.encode(pixel_values).latent_dist.sample()
-                    vae_latents = vae_latents * self.model.vae.config.scaling_factor
-                processed["vae_latents"] = vae_latents.squeeze(0)
-            
-            # Cache the processed data
-            if "vae_latents" in processed:
-                self.cache_manager.save_latents(
-                    tensors={
-                        "vae_latents": processed["vae_latents"],
-                    },
-                    image_path=image_path,
-                    metadata={
-                        "original_size": processed["original_size"],
-                        "target_size": processed["target_size"],
-                        "latent_size": processed["latent_size"],
-                        "crop_coords": processed["crop_coords"],
-                        "timestamp": processed["timestamp"]
-                    }
-                )
-            
-            return processed
+            return {
+                "vae_latents": vae_latents.squeeze(0),
+                "original_size": original_size,
+                "target_size": target_size,
+                "bucket_dims": bucket_dims
+            }
             
         except Exception as e:
             logger.error(f"Failed to process image {image_path}: {e}")
@@ -652,19 +619,23 @@ def create_dataset(
         logger.info(f"Loading data from: {config.data.train_data_dir}")
         image_paths, captions = load_data_from_directory(config.data.train_data_dir)
         
-        # Validate data
-        if len(image_paths) != len(captions):
-            raise ValueError(
-                f"Mismatch between number of images ({len(image_paths)}) "
-                f"and captions ({len(captions)})"
+        # Initialize tag weighting if enabled
+        tag_weighter = None
+        if config.tag_weighting.enable_tag_weighting:
+            logger.info("Initializing tag weighting system...")
+            tag_weighter = preprocess_dataset_tags(
+                config=config,
+                image_paths=image_paths,
+                captions=captions
             )
         
-        # Create dataset instance first (needed for VAE encoding)
+        # Create dataset instance with tag weighter
         dataset = AspectBucketDataset(
             config=config,
             image_paths=image_paths,
             captions=captions,
             model=model,
+            tag_weighter=tag_weighter,  # Pass the initialized tag weighter
             cache_manager=cache_manager
         )
         

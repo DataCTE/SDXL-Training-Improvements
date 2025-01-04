@@ -51,29 +51,21 @@ def compute_bucket_dims(original_size: Tuple[int, int], buckets: List[Tuple[int,
     """Find closest bucket for given dimensions with aspect ratio tolerance."""
     # Work in pixel space
     w, h = original_size[0], original_size[1]
-    target_area = w * h
-    target_ratio = w / h
     
-    # Convert buckets to pixel space for comparison
+    # IMPORTANT: The buckets are already in latent space (divided by 8)
+    # We need to multiply by 8 to compare in pixel space
     pixel_buckets = [(b[0] * 8, b[1] * 8) for b in buckets]
-    
-    if not buckets:
-        if config is None:
-            raise ValueError("No buckets and no config provided")
-        logger.warning("No buckets configured, using default target size")
-        default_size = config.global_config.image.target_size
-        return (default_size[0] // 8, default_size[1] // 8)
     
     # Find closest bucket in pixel space
     closest_bucket_idx = min(
         range(len(pixel_buckets)),
         key=lambda i: (
-            abs(pixel_buckets[i][0] * pixel_buckets[i][1] - target_area) / target_area +
-            abs((pixel_buckets[i][0]/pixel_buckets[i][1]) - target_ratio)
+            abs(pixel_buckets[i][0] * pixel_buckets[i][1] - (w * h)) / (w * h) +
+            abs((pixel_buckets[i][0]/pixel_buckets[i][1]) - (w/h))
         )
     )
     
-    # Return the latent dimensions
+    # Return the latent dimensions (already divided by 8)
     return buckets[closest_bucket_idx]
 
 def group_images_by_bucket(
