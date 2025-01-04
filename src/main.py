@@ -1,63 +1,29 @@
-"""Main orchestration script for SDXL fine-tuning """
+"""Main orchestration script for SDXL fine-tuning."""
 import os
-import random
+from src.core.distributed import (
+    setup_training_env,
+    setup_environment,
+    convert_model_to_ddp,
+    is_main_process,
+    get_world_size
+)
 
-def get_unique_port():
-    """Get a unique port in a range unlikely to be used by other programs."""
-    # Use range 50000-55000 which is typically unused
-    base_port = 50000
-    port_range = 5000
-    # Use RANK and random offset to avoid conflicts
-    rank_offset = int(os.environ.get("RANK", "0")) * 10
-    random_offset = random.randint(0, port_range)
-    return base_port + rank_offset + random_offset
-
-# Set environment variables before any other imports
-def setup_training_env():
-    """Setup training environment variables."""
-    # Ensure these are set before ANY imports or initialization
-    os.environ.setdefault("RANK", "0")
-    os.environ.setdefault("WORLD_SIZE", "1")
-    os.environ.setdefault("LOCAL_RANK", "0")
-    os.environ.setdefault("MASTER_ADDR", "localhost")
-    os.environ.setdefault("MASTER_PORT", str(get_unique_port()))
-    
-    # Disable accelerate's automatic initialization
-    os.environ["ACCELERATE_DISABLE_RICH"] = "1"
-    os.environ["ACCELERATE_USE_RICH"] = "0"
-    
-    # Force PyTorch to use spawn method
-    import multiprocessing as mp
-    try:
-        mp.set_start_method('spawn', force=True)
-    except RuntimeError:
-        pass
-
-# Call setup before anything else
+# Must be called before ANY other imports
 setup_training_env()
 
-# Now import other modules
+# Now safe to import the rest
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 import torch
-from torch.distributed import init_process_group
 from torch.utils.data import DataLoader
-import socket
 
 # Core imports
 from src.core.logging import setup_logging, get_logger, WandbLogger
-from src.core.distributed import setup_distributed, cleanup_distributed, is_main_process
-from src.core.memory import torch_sync
-
-# Data and model imports
 from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.models import StableDiffusionXL
 from src.models.base import ModelType
 from src.training.trainers import BaseRouter
-
-# Import our custom optimizers
 from src.training.optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 
 logger, tensor_logger = setup_logging(
@@ -68,42 +34,6 @@ logger, tensor_logger = setup_logging(
 )
 
 CONFIG_PATH = Path("src/config.yaml")
-
-def find_free_port():
-    """Find a free port to use for distributed training."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
-
-@contextmanager
-def setup_environment():
-    """Setup distributed training environment."""
-    try:
-        if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
-            if not torch.distributed.is_initialized():
-                # Try multiple ports if the default one is in use
-                max_tries = 5
-                for _ in range(max_tries):
-                    try:
-                        port = find_free_port()
-                        os.environ["MASTER_PORT"] = str(port)
-                        init_process_group(backend="nccl")
-                        setup_distributed()
-                        logger.info("Successfully initialized distributed training")
-                        break
-                    except Exception as e:
-                        if _ == max_tries - 1:
-                            raise RuntimeError(f"Failed to initialize distributed training after {max_tries} attempts") from e
-                        logger.warning(f"Port {port} failed, trying another...")
-                        continue
-        yield
-    finally:
-        if torch.cuda.is_available() and int(os.environ.get("WORLD_SIZE", "1")) > 1:
-            if torch.distributed.is_initialized():
-                cleanup_distributed()
-        torch_sync()
 
 def main():
     """Main training entry point."""
@@ -116,14 +46,21 @@ def main():
             device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {device}", extra={'success': True})
             
-            # Initialize model and dataset in one step
+            # Initialize model
             model = StableDiffusionXL.from_pretrained(
                 config.model.pretrained_model_name,
                 device=device,
                 model_type=ModelType[config.model.model_type.upper()]
             )
             
-            # Use create_dataset function which handles both dataset creation and model initialization
+            # Convert to DDP if using distributed training
+            if get_world_size() > 1:
+                model = convert_model_to_ddp(
+                    model,
+                    device_ids=[device.index] if device.type == "cuda" else None
+                )
+            
+            # Create dataset and dataloader
             dataset = create_dataset(config=config, model=model)
             train_dataloader = DataLoader(
                 dataset, 
@@ -131,7 +68,7 @@ def main():
                 multiprocessing_context='spawn'  # Force spawn for all workers
             )
             
-            # Get optimizer class from our custom implementations
+            # Setup optimizer
             optimizer_map = {
                 "AdamWBF16": AdamWBF16,
                 "AdamWScheduleFreeKahan": AdamWScheduleFreeKahan,
@@ -147,8 +84,10 @@ def main():
                 **config.optimizer.kwargs
             )
             
-            # Initialize wandb logger
-            wandb_logger = WandbLogger(config) if config.global_config.logging.use_wandb else None
+            # Initialize wandb logger only on main process
+            wandb_logger = None
+            if is_main_process() and config.global_config.logging.use_wandb:
+                wandb_logger = WandbLogger(config)
             
             # Create trainer
             trainer = BaseRouter.create(
@@ -164,8 +103,8 @@ def main():
             logger.info("Starting training loop...")
             trainer.train(num_epochs=config.training.num_epochs)
             
-            # Save final model if configured
-            if config.training.save_final_model:
+            # Save final model if configured (only on main process)
+            if config.training.save_final_model and is_main_process():
                 save_path = Path("outputs/models/final_model")
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 trainer.save_checkpoint(save_path, is_final=True)

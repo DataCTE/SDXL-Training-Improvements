@@ -6,14 +6,9 @@ from typing import Union, List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 import packaging
 import torch
-import accelerate
-from src.core.logging import get_logger, LogConfig
 
-logger = get_logger(__name__)
-
-# Initialize accelerator and device
-accelerator = accelerate.Accelerator()
-default_device = accelerator.device
+# Initialize device without accelerate
+default_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch_version = packaging.version.parse(torch.__version__)
 
 @dataclass
