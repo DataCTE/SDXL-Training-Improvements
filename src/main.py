@@ -1,5 +1,24 @@
 """Main orchestration script for SDXL fine-tuning """
 import os
+
+# Set environment variables before any other imports
+def setup_training_env():
+    """Setup training environment variables."""
+    if "RANK" not in os.environ:
+        os.environ["RANK"] = "0"
+    if "WORLD_SIZE" not in os.environ:
+        os.environ["WORLD_SIZE"] = "1"
+    if "LOCAL_RANK" not in os.environ:
+        os.environ["LOCAL_RANK"] = "0"
+    if "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"] = "localhost"
+    if "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"] = "29500"  # Set default port
+
+# Set environment variables before any other imports
+setup_training_env()
+
+# Now import other modules
 import multiprocessing as mp
 import torch.cuda
 import sys
@@ -26,7 +45,6 @@ from src.training.trainers import BaseRouter
 # Import our custom optimizers
 from src.training.optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 
-# Setup enhanced logging first
 logger, tensor_logger = setup_logging(
     log_dir="outputs/logs",
     filename="training.log",
@@ -74,22 +92,11 @@ def main():
     """Main training entry point."""
     logger.info("Starting training script...", extra={'keyword': 'start'})
     
-    # Set multiprocessing start method first
+    # Set multiprocessing start method
     try:
         mp.set_start_method('spawn', force=True)
     except RuntimeError:
         pass  # Already set
-    
-    # Set all required distributed training environment variables
-    if "RANK" not in os.environ:
-        os.environ["RANK"] = "0"
-    if "WORLD_SIZE" not in os.environ:
-        os.environ["WORLD_SIZE"] = "1"
-    if "LOCAL_RANK" not in os.environ:
-        os.environ["LOCAL_RANK"] = "0"
-    if "MASTER_ADDR" not in os.environ:
-        os.environ["MASTER_ADDR"] = "localhost"
-    # Note: MASTER_PORT will be set dynamically in setup_environment
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
