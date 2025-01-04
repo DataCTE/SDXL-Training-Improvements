@@ -184,7 +184,7 @@ class AspectBucketDataset(Dataset):
                 )
                 return None
             
-            # Return properly formatted data with tag weight
+            # Return properly formatted data with tag weight and bucket info
             return {
                 "vae_latents": cached_data["vae_latents"],
                 "prompt_embeds": cached_data["prompt_embeds"],
@@ -195,7 +195,8 @@ class AspectBucketDataset(Dataset):
                     "crop_coords": cached_data["metadata"]["crop_coords"],
                     "target_size": cached_data["metadata"]["target_size"],
                     "text": caption,
-                    "tag_weight": tag_weight
+                    "tag_weight": tag_weight,
+                    "bucket_info": bucket_info  # Add bucket info to metadata
                 }
             }
         
@@ -229,7 +230,8 @@ class AspectBucketDataset(Dataset):
                         [example["metadata"]["tag_weight"] for example in valid_batch],
                         dtype=torch.float32,
                         device=self.device
-                    )
+                    ),
+                    "bucket_info": [example["metadata"]["bucket_info"] for example in valid_batch]
                 }
             
             return None
@@ -325,7 +327,8 @@ class AspectBucketDataset(Dataset):
                         self.cache_manager.save_latents(
                             tensors=tensors,
                             path=path,
-                            metadata=metadata
+                            metadata=metadata,
+                            bucket_info=img_data["bucket_info"]
                         )
                         caption_idx += 1
                     
@@ -508,7 +511,8 @@ class AspectBucketDataset(Dataset):
                 "vae_latents": vae_latents.squeeze(0),
                 "original_size": original_size,
                 "target_size": bucket_info.pixel_dims,
-                "bucket_info": bucket_info  # Store complete BucketInfo object
+                "crop_coords": (0, 0),
+                "bucket_info": bucket_info
             }
             
         except Exception as e:
