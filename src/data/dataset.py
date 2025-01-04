@@ -556,12 +556,28 @@ def create_dataset(
         tag_weighter = None
         if config.tag_weighting.enable_tag_weighting:
             logger.info("Initializing tag weighting system...")
-            # Use create_tag_weighter_with_index directly instead of preprocess_dataset_tags
             image_captions = dict(zip(image_paths, captions))
-            tag_weighter = create_tag_weighter_with_index(
-                config=config,
-                image_captions=image_captions
-            )
+            
+            # Check for existing tag cache
+            tag_cache_path = cache_manager.tags_dir / "tag_index.json"
+            if tag_cache_path.exists() and config.tag_weighting.use_cache:
+                logger.info("Loading tag weights from cache...")
+                tag_weighter = TagWeighter(config)
+                tag_weighter._load_cache()
+            else:
+                logger.info("Computing tag weights and creating index...")
+                tag_weighter = create_tag_weighter_with_index(
+                    config=config,
+                    image_captions=image_captions
+                )
+                
+                # Save tag statistics and metadata
+                logger.info("Saving tag statistics...")
+                tag_metadata = tag_weighter.get_tag_metadata()
+                cache_manager.save_tag_index({
+                    "metadata": tag_metadata,
+                    "image_tags": tag_weighter.process_dataset_tags(image_captions)
+                })
         
         # Create dataset instance with tag weighter
         dataset = AspectBucketDataset(
@@ -573,10 +589,22 @@ def create_dataset(
             cache_manager=cache_manager
         )
         
-        # Verify cache and get uncached paths
+        # Verify cache and rebuild if necessary
         if verify_cache:
             logger.info("Verifying cache...")
             cache_manager.verify_and_rebuild_cache(image_paths, captions)
+            
+            # Also verify tag cache if enabled
+            if tag_weighter and config.tag_weighting.use_cache:
+                logger.info("Verifying tag cache...")
+                tag_cache = cache_manager.load_tag_index()
+                if not tag_cache or "metadata" not in tag_cache:
+                    logger.warning("Tag cache invalid or missing. Recomputing...")
+                    tag_weighter = create_tag_weighter_with_index(
+                        config=config,
+                        image_captions=image_captions
+                    )
+                    dataset.tag_weighter = tag_weighter
         
         # Precompute latents for uncached images
         logger.info("Checking for uncached images...")
@@ -590,6 +618,14 @@ def create_dataset(
         # Rebuild buckets after precomputation
         dataset.bucket_indices = dataset._group_images_by_bucket()
         dataset._log_bucket_statistics()
+        
+        # Log tag statistics if available
+        if tag_weighter:
+            stats = tag_weighter.get_tag_metadata()
+            logger.info("\nTag Statistics:")
+            logger.info(f"Total samples: {stats['statistics']['total_samples']}")
+            for tag_type, count in stats['statistics']['tag_type_counts'].items():
+                logger.info(f"{tag_type}: {count} tags, {stats['statistics']['unique_tags'][tag_type]} unique")
         
         logger.info(
             f"Dataset created successfully with {len(dataset)} samples "
