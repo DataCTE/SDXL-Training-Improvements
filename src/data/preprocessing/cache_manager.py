@@ -209,17 +209,21 @@ class CacheManager:
             with open(metadata_path) as f:
                 metadata = json.loads(f.read())
             
-            # Add tag info if available
-            if "tag_info" in entry:
-                metadata["tag_info"] = entry["tag_info"]
-            
             return {
                 "vae_latents": vae_data["vae_latents"],
-                "time_ids": vae_data["time_ids"],  # Single source of truth for dimensions
                 "prompt_embeds": clip_data["prompt_embeds"],
                 "pooled_prompt_embeds": clip_data["pooled_prompt_embeds"],
-                "metadata": metadata,
-                "bucket_info": entry.get("bucket_info")
+                "time_ids": vae_data["time_ids"],
+                "metadata": {
+                    "vae_latent_path": entry["vae_latent_path"],
+                    "clip_latent_path": entry["clip_latent_path"],
+                    "text": metadata["text"],
+                    "bucket_info": entry["bucket_info"],
+                    "tag_info": entry.get("tag_info", {
+                        "total_weight": 1.0,
+                        "tags": {}
+                    })
+                }
             }
             
         except Exception as e:
