@@ -411,7 +411,7 @@ class AspectBucketDataset(Dataset):
                                 time_ids = self._compute_time_ids(
                                     original_size=img.size,
                                     crops_coords_top_left=(0, 0),
-                                    target_size=(bucket_info[0]*8, bucket_info[1]*8)
+                                    target_size=bucket_info.pixel_dims
                                 )
                                 
                                 # Save to cache
