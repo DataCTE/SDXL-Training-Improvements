@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, TYPE_CHECKING, Any
 import numpy as np
 import torch
+import time
 
 if TYPE_CHECKING:
     from src.data.config import Config
@@ -29,12 +30,12 @@ class TagWeighter:
         self.max_weight = config.tag_weighting.max_weight
         self.smoothing_factor = config.tag_weighting.smoothing_factor
         
-        # Initialize tag statistics
+        # Initialize tag statistics with proper defaults
         self.tag_counts = defaultdict(lambda: defaultdict(int))
         self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
         self.total_samples = 0
         
-        # Tag type categories  
+        # Enhanced tag type categories for better classification
         self.tag_types = {
             "subject": ["person", "character", "object", "animal", "vehicle", "location"],
             "style": ["art_style", "artist", "medium", "genre"],
@@ -160,34 +161,58 @@ class TagWeighter:
             
         return float(np.exp(np.mean(np.log(weights))))
 
-    def get_caption_weight_details(self, caption: str) -> Dict[str, any]:
-        """Get detailed weights for all tags in a caption."""
+    def get_caption_weight_details(self, caption: str) -> Dict[str, Any]:
+        """Get detailed weights for all tags in a caption with enhanced metadata.
+        
+        Args:
+            caption: Input caption to analyze
+            
+        Returns:
+            Dict containing:
+                - total_weight: float
+                - tags: Dict[str, List[Dict]] with categorized tag info
+                - metadata: Dict with additional tag statistics
+        """
         categorized_tags = self._extract_tags(caption)
         tag_details = {
             "total_weight": self.default_weight,
-            "tags": defaultdict(list)
+            "tags": defaultdict(list),
+            "metadata": {
+                "tag_counts": {},
+                "category_weights": {},
+                "timestamp": time.time()
+            }
         }
         
         weights = []
         
         # Process each tag category
         for tag_type, tags in categorized_tags.items():
-            tag_weights = []
+            category_weights = []
             for tag in tags:
                 weight = self.tag_weights[tag_type][tag]
-                tag_weights.append(weight)
+                frequency = self.tag_counts[tag_type][tag] / self.total_samples if self.total_samples > 0 else 0
+                
                 tag_details["tags"][tag_type].append({
                     "tag": tag,
-                    "weight": weight,
-                    "frequency": self.tag_counts[tag_type][tag] / self.total_samples if self.total_samples > 0 else 0
+                    "weight": float(weight),
+                    "frequency": float(frequency),
+                    "count": int(self.tag_counts[tag_type][tag])
                 })
+                category_weights.append(weight)
             
-            if tag_weights:
-                weights.append(np.mean(tag_weights))
+            if category_weights:
+                weights.append(np.mean(category_weights))
+                tag_details["metadata"]["category_weights"][tag_type] = float(np.mean(category_weights))
         
         # Calculate total caption weight using geometric mean
         if weights:
             tag_details["total_weight"] = float(np.exp(np.mean(np.log(weights))))
+        
+        # Add tag count statistics
+        tag_details["metadata"]["tag_counts"] = {
+            tag_type: len(tags) for tag_type, tags in categorized_tags.items()
+        }
         
         return dict(tag_details)
 
@@ -344,6 +369,35 @@ class TagWeighter:
             }
         
         return image_tags
+
+    def get_tag_metadata(self, cache_key: Optional[str] = None) -> Dict[str, Any]:
+        """Get metadata about tag weighting for caching purposes."""
+        metadata = {
+            "config": {
+                "default_weight": self.default_weight,
+                "min_weight": self.min_weight,
+                "max_weight": self.max_weight,
+                "smoothing_factor": self.smoothing_factor
+            },
+            "statistics": {
+                "total_samples": self.total_samples,
+                "tag_type_counts": {
+                    tag_type: sum(counts.values())
+                    for tag_type, counts in self.tag_counts.items()
+                },
+                "unique_tags": {
+                    tag_type: len(counts)
+                    for tag_type, counts in self.tag_counts.items()
+                }
+            },
+            "tag_types": self.tag_types,
+            "timestamp": time.time()
+        }
+        
+        if cache_key:
+            metadata["cache_key"] = cache_key
+            
+        return metadata
 
 def create_tag_weighter(
     config: "Config",  # type: ignore
