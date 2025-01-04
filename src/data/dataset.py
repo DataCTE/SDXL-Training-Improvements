@@ -23,7 +23,8 @@ from src.data.preprocessing import (
 )
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
-from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, validate_aspect_ratio, group_images_by_bucket, log_bucket_statistics
+from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, group_images_by_bucket, log_bucket_statistics
+from src.data.preprocessing.bucket_types import BucketInfo
 
 logger = get_logger(__name__)
 
@@ -40,8 +41,7 @@ class AspectBucketDataset(Dataset):
         is_train: bool = True,
         device: Optional[torch.device] = None,
         device_id: Optional[int] = None,
-        cache_manager: Optional["CacheManager"] = None,
-        transform: Optional[bool] = None
+        cache_manager: Optional["CacheManager"] = None
     ):
         """Initialize dataset with preprocessing capabilities."""
         super().__init__()
