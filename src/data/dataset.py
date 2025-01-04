@@ -141,8 +141,8 @@ class AspectBucketDataset(Dataset):
             
             # Verify the latents match the bucket dimensions from cache
             latents = cached_data["vae_latents"]
-            cached_bucket = tuple(cache_entry["bucket_dims"])
-            expected_shape = (4, cached_bucket[1]//8, cached_bucket[0]//8)  # VAE reduces spatial dims by 8
+            cached_bucket = cache_entry["metadata"]["bucket_info"]
+            expected_shape = (4, cached_bucket.latent_dims[1], cached_bucket.latent_dims[0])  # VAE shape is (C, H, W)
             
             if latents.shape != expected_shape:
                 logger.warning(
