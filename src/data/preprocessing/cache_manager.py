@@ -39,7 +39,8 @@ class CacheManager:
         self.bucket_info_dir = self.cache_dir / "buckets" 
         self.tag_dir = self.cache_dir / "tags"
         
-        for directory in [self.latents_dir, self.metadata_dir, self.bucket_info_dir]:
+        # Create all required directories
+        for directory in [self.latents_dir, self.metadata_dir, self.bucket_info_dir, self.tag_dir]:
             directory.mkdir(exist_ok=True)
         
         self._lock = threading.Lock()
