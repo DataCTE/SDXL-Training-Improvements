@@ -33,15 +33,17 @@ class CacheManager:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         
-        # Create subdirectories with bucket organization
-        self.latents_dir = self.cache_dir / "latents"
+        # Create separate directories for different types of latents
+        self.vae_latents_dir = self.cache_dir / "vae"
+        self.clip_latents_dir = self.cache_dir / "clip"
         self.metadata_dir = self.cache_dir / "metadata"
-        self.bucket_info_dir = self.cache_dir / "buckets" 
+        self.bucket_info_dir = self.cache_dir / "buckets"
         self.tag_dir = self.cache_dir / "tags"
         
         # Create all required directories
-        for directory in [self.latents_dir, self.metadata_dir, self.bucket_info_dir, self.tag_dir]:
-            directory.mkdir(exist_ok=True)
+        for directory in [self.vae_latents_dir, self.clip_latents_dir, 
+                         self.metadata_dir, self.bucket_info_dir, self.tag_dir]:
+            directory.mkdir(parents=True, exist_ok=True)
         
         self._lock = threading.Lock()
         self.index_path = self.cache_dir / "cache_index.json"
@@ -121,35 +123,54 @@ class CacheManager:
         metadata: Dict[str, Any],
         bucket_info: Optional[BucketInfo] = None
     ) -> bool:
-        """Save processed tensors with comprehensive bucket information."""
+        """Save processed tensors with proper organization for training."""
         cache_key = self.get_cache_key(path)
-        tensors_path = self.latents_dir / f"{cache_key}.pt"
-        metadata_path = self.metadata_dir / f"{cache_key}.json"
         
         try:
-            # Save tensors
-            torch.save({k: v.cpu() for k, v in tensors.items()}, tensors_path)
+            # Separate VAE and CLIP latents
+            vae_tensors = {
+                "vae_latents": tensors["vae_latents"].cpu(),  # [C, H, W]
+                "time_ids": tensors["time_ids"].cpu(),        # [1, 6]
+                "original_size": metadata.get("original_size"),
+                "crop_coords": metadata.get("crop_coords", (0, 0)),
+                "target_size": metadata.get("target_size")
+            }
             
-            # Prepare metadata with bucket info
+            clip_tensors = {
+                "prompt_embeds": tensors["prompt_embeds"].cpu(),           # [77, 2048]
+                "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()  # [1, 1280]
+            }
+            
+            # Save VAE latents
+            vae_path = self.vae_latents_dir / f"{cache_key}.pt"
+            torch.save(vae_tensors, vae_path)
+            
+            # Save CLIP latents
+            clip_path = self.clip_latents_dir / f"{cache_key}.pt"
+            torch.save(clip_tensors, clip_path)
+            
+            # Save metadata with paths and associations
             full_metadata = {
                 "original_path": str(path),
                 "created_at": time.time(),
+                "vae_path": str(vae_path),
+                "clip_path": str(clip_path),
                 **metadata
             }
             
-            # Save metadata
+            metadata_path = self.metadata_dir / f"{cache_key}.json"
             self._atomic_json_save(metadata_path, full_metadata)
             
-            # Update index with comprehensive information
+            # Update cache index with bucket info
             with self._lock:
                 self.cache_index["entries"][cache_key] = {
-                    "tensors_path": str(tensors_path),
+                    "vae_path": str(vae_path),
+                    "clip_path": str(clip_path),
                     "metadata_path": str(metadata_path),
                     "created_at": time.time(),
                     "is_valid": True
                 }
                 
-                # Add bucket info if provided
                 if bucket_info:
                     self.cache_index["entries"][cache_key]["bucket_info"] = {
                         "dimensions": bucket_info.dimensions.__dict__,
@@ -169,22 +190,46 @@ class CacheManager:
             return False
 
     def load_tensors(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """Load cached tensors and metadata with bucket information."""
+        """Load cached tensors optimized for DDPM and Flow Matching training."""
         entry = self.cache_index["entries"].get(cache_key)
         if not entry or not self._validate_cache_entry(entry):
             return None
-            
+        
         try:
-            # Load tensors and metadata
-            tensors = {k: v.clone() for k, v in torch.load(entry["tensors_path"], map_location=self.device).items()}
+            # Load VAE latents with size info
+            vae_data = torch.load(entry["vae_path"], map_location=self.device)
+            vae_latents = vae_data["vae_latents"]
+            time_ids = vae_data["time_ids"]
+            original_size = vae_data["original_size"]
+            crop_coords = vae_data["crop_coords"]
+            target_size = vae_data["target_size"]
+            
+            # Load CLIP embeddings
+            clip_data = torch.load(entry["clip_path"], map_location=self.device)
+            prompt_embeds = clip_data["prompt_embeds"]
+            pooled_prompt_embeds = clip_data["pooled_prompt_embeds"]
+            
+            # Load metadata for bucket info
             with open(entry["metadata_path"]) as f:
                 metadata = json.loads(f.read())
             
-            # Add bucket info if available
-            if "bucket_info" in entry:
-                metadata["bucket_info"] = entry["bucket_info"]
-            
-            return {"metadata": metadata, **tensors}
+            # Return format compatible with both DDPM and Flow Matching
+            return {
+                # Core tensors
+                "vae_latents": vae_latents,
+                "prompt_embeds": prompt_embeds,
+                "pooled_prompt_embeds": pooled_prompt_embeds,
+                "time_ids": time_ids,
+                
+                # Size information
+                "original_size": original_size,
+                "crop_coords": crop_coords,
+                "target_size": target_size,
+                
+                # Additional info
+                "metadata": metadata,
+                "bucket_info": entry.get("bucket_info", None)
+            }
             
         except Exception as e:
             logger.error(f"Failed to load cache entry: {e}")
@@ -193,7 +238,8 @@ class CacheManager:
     def _validate_cache_entry(self, entry: Dict[str, Any]) -> bool:
         """Validate cache entry files exist and are valid."""
         return (
-            Path(entry["tensors_path"]).exists() and
+            Path(entry["vae_path"]).exists() and
+            Path(entry["clip_path"]).exists() and
             Path(entry["metadata_path"]).exists() and
             entry.get("is_valid", False)
         )
