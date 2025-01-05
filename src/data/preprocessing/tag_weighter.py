@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from src.core.logging import get_logger, LogConfig
 from src.data.utils.paths import convert_windows_path
+from src.models.sdxl import StableDiffusionXL
 
 logger = get_logger(__name__)
 

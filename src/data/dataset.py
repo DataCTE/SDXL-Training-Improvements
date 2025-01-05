@@ -532,22 +532,40 @@ def create_dataset(
             tag_cache_path = cache_manager.tags_dir / "tag_index.json"
             if tag_cache_path.exists() and config.tag_weighting.use_cache:
                 logger.info("Loading tag weights from verified cache...")
-                tag_weighter = TagWeighter(config)
+                tag_weighter = TagWeighter(config, model)  # Pass model for CLIP
                 tag_weighter._load_cache()
             else:
                 logger.info("Computing tag weights and creating new index...")
                 tag_weighter = create_tag_weighter_with_index(
                     config=config,
-                    image_captions=image_captions
+                    image_captions=image_captions,
+                    model=model  # Pass model for CLIP
                 )
                 
                 # Save tag statistics and metadata
                 logger.info("Saving tag statistics...")
-                tag_metadata = tag_weighter.get_tag_metadata()
                 cache_manager.save_tag_index({
                     "version": "1.0",
                     "updated_at": time.time(),
-                    "metadata": tag_metadata,
+                    "metadata": {
+                        "config": {
+                            "default_weight": tag_weighter.default_weight,
+                            "min_weight": tag_weighter.min_weight,
+                            "max_weight": tag_weighter.max_weight,
+                            "smoothing_factor": tag_weighter.smoothing_factor
+                        },
+                        "statistics": {
+                            "total_samples": tag_weighter.total_samples,
+                            "tag_type_counts": {
+                                tag_type: sum(counts.values())
+                                for tag_type, counts in tag_weighter.tag_counts.items()
+                            },
+                            "unique_tags": {
+                                tag_type: len(counts)
+                                for tag_type, counts in tag_weighter.tag_counts.items()
+                            }
+                        }
+                    },
                     "statistics": tag_weighter.get_tag_statistics(),
                     "images": tag_weighter.process_dataset_tags(image_captions)
                 })
