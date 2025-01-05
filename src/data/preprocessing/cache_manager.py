@@ -155,6 +155,16 @@ class CacheManager:
                 "pooled_prompt_embeds": tensors["pooled_prompt_embeds"].cpu()
             }, clip_path)
             
+            # Convert BucketInfo to serializable dict
+            bucket_dict = None
+            if bucket_info:
+                bucket_dict = {
+                    "pixel_dims": list(bucket_info.pixel_dims),
+                    "latent_dims": list(bucket_info.latent_dims),
+                    "aspect_ratio": bucket_info.aspect_ratio,
+                    "bucket_class": bucket_info.bucket_class
+                }
+            
             # Save essential metadata about the latent pair
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             full_metadata = {
@@ -162,9 +172,9 @@ class CacheManager:
                 "clip_latent_path": str(clip_path),
                 "created_at": time.time(),
                 "text": metadata.get("text"),
-                "bucket_info": bucket_info.__dict__ if bucket_info else None,
-                "tag_info": {
-                    "tags": tag_info["tags"] if tag_info else {
+                "bucket_info": bucket_dict,
+                "tag_info": tag_info or {
+                    "tags": {
                         "subject": [],
                         "style": [],
                         "quality": [],
@@ -184,7 +194,7 @@ class CacheManager:
                     "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
                     "created_at": time.time(),
                     "is_valid": True,
-                    "bucket_info": bucket_info.__dict__ if bucket_info else None,
+                    "bucket_info": bucket_dict,
                     "tag_info": tag_info
                 }
                 

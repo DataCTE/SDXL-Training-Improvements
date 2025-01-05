@@ -321,8 +321,14 @@ class AspectBucketDataset(Dataset):
                             # Get tag weight details if available
                             tag_info = None
                             if self.tag_weighter:
+                                tags = self.tag_weighter._extract_tags(caption)
                                 tag_info = {
-                                    "tags": self.tag_weighter._extract_tags(caption)
+                                    "tags": {
+                                        tag_type: [
+                                            {"tag": tag, "weight": self.tag_weighter.tag_weights[tag_type][tag]}
+                                            for tag in tags[tag_type]
+                                        ] for tag_type in tags
+                                    }
                                 }
                             
                             # Process image and text
@@ -338,7 +344,7 @@ class AspectBucketDataset(Dataset):
                                 is_train=self.is_train
                             )
                             
-                            # Save to cache with new metadata format
+                            # Save to cache with serializable metadata
                             self.cache_manager.save_latents(
                                 tensors={
                                     "vae_latents": vae_latents.squeeze(0),
@@ -352,8 +358,7 @@ class AspectBucketDataset(Dataset):
                                 },
                                 path=path,
                                 metadata={
-                                    "text": caption,
-                                    "bucket_info": bucket_info.__dict__
+                                    "text": caption
                                 },
                                 bucket_info=bucket_info,
                                 tag_info=tag_info
