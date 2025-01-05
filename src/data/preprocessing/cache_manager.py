@@ -159,10 +159,21 @@ class CacheManager:
             bucket_dict = None
             if bucket_info:
                 bucket_dict = {
+                    "dimensions": {
+                        "width": bucket_info.dimensions.width,
+                        "height": bucket_info.dimensions.height,
+                        "width_latent": bucket_info.dimensions.width_latent,
+                        "height_latent": bucket_info.dimensions.height_latent,
+                        "aspect_ratio": bucket_info.dimensions.aspect_ratio,
+                        "aspect_ratio_inverse": bucket_info.dimensions.aspect_ratio_inverse,
+                        "total_pixels": bucket_info.dimensions.total_pixels,
+                        "total_latents": bucket_info.dimensions.total_latents
+                    },
                     "pixel_dims": list(bucket_info.pixel_dims),
                     "latent_dims": list(bucket_info.latent_dims),
-                    "aspect_ratio": bucket_info.aspect_ratio,
-                    "bucket_class": bucket_info.bucket_class
+                    "bucket_index": bucket_info.bucket_index,
+                    "size_class": bucket_info.size_class,
+                    "aspect_class": bucket_info.aspect_class
                 }
             
             # Save essential metadata about the latent pair
