@@ -19,8 +19,15 @@ logger = get_logger(__name__)
 def default_int():
     return 0
 
-def default_weight(self):
-    return self.default_weight
+class DefaultWeightDict:
+    def __init__(self, default_weight):
+        self.default_weight = default_weight
+        
+    def __call__(self):
+        return defaultdict(self.get_default_weight)
+        
+    def get_default_weight(self):
+        return self.default_weight
 
 class TagWeighter:
     def __init__(
@@ -38,9 +45,9 @@ class TagWeighter:
         
         # Initialize tag statistics with proper defaults using pickleable functions
         self.tag_counts = defaultdict(lambda: defaultdict(default_int))
-        # Create a bound method for default_weight
-        self.get_default_weight = lambda: self.default_weight
-        self.tag_weights = defaultdict(lambda: defaultdict(self.get_default_weight))
+        # Create a proper defaultdict factory class instead of lambda
+        weight_dict_factory = DefaultWeightDict(self.default_weight)
+        self.tag_weights = defaultdict(weight_dict_factory)
         self.total_samples = 0
         
         # Enhanced tag type categories for better classification
