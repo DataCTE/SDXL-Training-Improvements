@@ -30,92 +30,133 @@ class TagWeighter:
     def __init__(
         self,
         config: "Config",  # type: ignore
+        model: Optional["StableDiffusionXL"] = None  # Add model parameter
     ):
         """Initialize tag weighting system."""
         self.config = config
         
-        # Tag weighting settings
+        # Core settings
         self.default_weight = config.tag_weighting.default_weight
         self.min_weight = config.tag_weighting.min_weight
         self.max_weight = config.tag_weighting.max_weight
         self.smoothing_factor = config.tag_weighting.smoothing_factor
         
-        # Initialize with pickleable defaults
+        # Use SDXL's CLIP encoders
+        self.clip_encoder = model.clip_encoder_1 if model else None
+        self.tokenizer = model.tokenizer_1 if model else None
+        
+        # Category embeddings using CLIP
+        self.category_embeddings = self._initialize_category_embeddings([
+            ("subject", ["person", "object", "animal", "vehicle", "building", "landscape"]),
+            ("style", ["painting", "anime", "drawing", "photograph", "digital art", "sketch", "watercolor"]),
+            ("quality", ["high quality", "detailed", "sharp", "professional", "masterpiece"]),
+            ("technical", ["lighting", "composition", "focus", "exposure", "angle", "depth"])
+        ])
+        
+        # Initialize counters
         self.tag_counts = defaultdict(DefaultDict(default_int))
         self.tag_weights = defaultdict(DefaultDict(lambda: self.default_weight))
         self.total_samples = 0
         
         # Cache reference
         self.cache_manager = config.cache_manager if hasattr(config, 'cache_manager') else None
+
+    def _initialize_category_embeddings(self, categories):
+        """Initialize category embeddings using SDXL's CLIP."""
+        if not self.clip_encoder:
+            return None
         
-        # Enhanced tag type categories
-        self.tag_types = {
-            "subject": ["person", "character", "object", "animal", "vehicle", "location"],
-            "style": ["art_style", "artist", "medium", "genre"],
-            "quality": ["quality", "rating", "aesthetic"],
-            "technical": ["camera", "lighting", "composition", "color"],
-            "meta": ["source", "meta", "misc"]
-        }
+        embeddings = {}
+        with torch.no_grad():
+            for category, terms in categories:
+                # Use CLIP to get embeddings
+                text_embeddings = self.clip_encoder.encode_text(terms)
+                embeddings[category] = torch.mean(text_embeddings, dim=0)
         
-        # Load cached weights if available
-        if config.tag_weighting.use_cache and hasattr(config, 'cache_manager'):
-            self._load_cache()
+        return embeddings
+
+    def _get_semantic_category(self, phrase: str) -> str:
+        """Determine category using CLIP similarity."""
+        if not self.clip_encoder:
+            return "meta"
+        
+        with torch.no_grad():
+            # Get phrase embedding using CLIP
+            phrase_embedding = self.clip_encoder.encode_text([phrase])
+            
+            # Compare with category embeddings
+            similarities = {
+                category: torch.cosine_similarity(
+                    phrase_embedding, 
+                    cat_embedding.unsqueeze(0)
+                )
+                for category, cat_embedding in self.category_embeddings.items()
+            }
+            
+            return max(similarities.items(), key=lambda x: x[1])[0]
 
     def _extract_tags(self, caption: str) -> Dict[str, List[str]]:
         """Extract and categorize tags from caption."""
         try:
-            # More robust tag splitting
-            tags = [t.strip() for t in caption.split(',') if t.strip()]
+            categorized = {
+                "subject": [],
+                "style": [],
+                "quality": [],
+                "technical": [],
+                "meta": []
+            }
             
-            # Initialize categories
-            categorized = {category: [] for category in self.tag_types.keys()}
-            
-            for tag in tags:
-                # Skip empty or malformed tags
-                if not tag or len(tag) > 100:  # Sanity check for tag length
+            # Handle explicit category:tag format first
+            for tag in (t.strip() for t in caption.split(',') if t):
+                if len(tag) > 100:
                     continue
                     
-                # Default to 'meta' category if no match found
-                matched = False
-                for category, keywords in self.tag_types.items():
-                    if any(keyword in tag.lower() for keyword in keywords):
-                        categorized[category].append(tag)
-                        matched = True
-                        break
+                if ':' in tag:
+                    parts = tag.lower().split(':')
+                    category = parts[0]
+                    if category in categorized:
+                        original_tag = ':'.join(tag.split(':')[1:])
+                        categorized[category].append(original_tag)
+                        continue
                 
-                if not matched:
-                    categorized["meta"].append(tag)
+                # Semantic categorization for natural language
+                category = self._get_semantic_category(tag)
+                categorized[category].append(tag)
                     
             return categorized
             
         except Exception as e:
-            logger.warning(f"Failed to extract tags from caption: {caption[:50]}...")
-            return {category: [] for category in self.tag_types.keys()}
-
-    def _determine_tag_type(self, tag: str) -> str:
-        """Determine tag type based on keywords.
-        
-        Args:
-            tag: Input tag to categorize
-            
-        Returns:
-            Category name for the tag
-        """
-        tag = tag.lower()
-        for type_name, keywords in self.tag_types.items():
-            if any(keyword in tag for keyword in keywords):
-                return type_name
-        return "subject"
+            return {
+                "subject": [], "style": [], "quality": [], 
+                "technical": [], "meta": []
+            }
 
     def update_statistics(self, captions: List[str]) -> None:
         """Update tag statistics from captions."""
-        for caption in captions:
-            self.total_samples += 1
-            categorized_tags = self._extract_tags(caption)
+        # Pre-allocate counters
+        tag_counts = {
+            "subject": defaultdict(int),
+            "style": defaultdict(int),
+            "quality": defaultdict(int),
+            "technical": defaultdict(int),
+            "meta": defaultdict(int)
+        }
+        
+        # Process in larger batches
+        batch_size = 5000
+        for i in range(0, len(captions), batch_size):
+            batch = captions[i:i + batch_size]
+            self.total_samples += len(batch)
             
-            for tag_type, tags in categorized_tags.items():
-                for tag in tags:
-                    self.tag_counts[tag_type][tag] += 1
+            # Batch process tags
+            for caption in batch:
+                for tag_type, tags in self._extract_tags(caption).items():
+                    for tag in tags:
+                        tag_counts[tag_type][tag] += 1
+        
+        # Bulk update counts
+        for tag_type, counts in tag_counts.items():
+            self.tag_counts[tag_type].update(counts)
         
         self._compute_weights()
         
@@ -123,7 +164,7 @@ class TagWeighter:
             self._save_cache()
 
     def _compute_weights(self) -> None:
-        """Compute tag weights based on frequency with proper scaling."""
+        """Compute tag weights based on in-class frequency with proper scaling."""
         for tag_type in self.tag_counts:
             type_counts = self.tag_counts[tag_type]
             total_type_count = sum(type_counts.values())
@@ -132,28 +173,22 @@ class TagWeighter:
                 continue
                 
             for tag, count in type_counts.items():
-                # Calculate normalized frequency (0 to 1 range)
-                frequency = count / self.total_samples
+                # Calculate frequency within this tag type class
+                in_class_frequency = count / total_type_count  # Changed from total_samples
                 
-                # Apply inverse frequency with smoothing
-                raw_weight = 1.0 / (frequency + self.smoothing_factor)
+                # Apply inverse in-class frequency with smoothing
+                raw_weight = 1.0 / (in_class_frequency + self.smoothing_factor)
                 
-                # Scale the weight to our desired range
-                # First normalize to 0-1 range
-                max_possible_weight = 1.0 / self.smoothing_factor  # Theoretical maximum when frequency = 0
+                # Scale to desired range while preserving relative in-class weights
+                max_possible_weight = 1.0 / self.smoothing_factor
                 normalized_weight = (raw_weight - 1.0) / (max_possible_weight - 1.0)
-                
-                # Then scale to our desired range
                 scaled_weight = (
                     self.min_weight +
                     (normalized_weight * (self.max_weight - self.min_weight))
                 )
                 
-                # Final clamp to ensure bounds
-                weight = min(max(scaled_weight, self.min_weight), self.max_weight)
-                
                 # Save the computed weight for this tag
-                self.tag_weights[tag_type][tag] = float(weight)
+                self.tag_weights[tag_type][tag] = float(min(max(scaled_weight, self.min_weight), self.max_weight))
 
             # Save weights if caching is enabled
             if self.config.tag_weighting.use_cache:
@@ -496,9 +531,6 @@ def preprocess_dataset_tags(
         
     # Create and initialize tag weighter
     image_captions = dict(zip(image_paths, captions))
-    
-    # Use statistics path as the main index
-    index_path = config.cache_manager.get_tag_statistics_path()
     
     logger.info("Processing tags and creating index...")
     weighter = create_tag_weighter_with_index(
