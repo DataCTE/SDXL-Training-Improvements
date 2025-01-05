@@ -56,9 +56,9 @@ class CacheManager:
             directory.mkdir(parents=True, exist_ok=True)
         
         # Initialize cache index
-        self.cache_index_path = self.cache_dir / "cache_index.json"
+        self.index_path = self.cache_dir / "cache_index.json"
         self._lock = threading.Lock()
-        self.cache_index = self._load_or_create_index()
+        self.cache_index = self._load_index()
 
     def __getstate__(self):
         """Customize pickling behavior."""
