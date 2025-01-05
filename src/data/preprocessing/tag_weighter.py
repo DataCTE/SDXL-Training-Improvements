@@ -19,15 +19,12 @@ logger = get_logger(__name__)
 def default_int():
     return 0
 
-class DefaultWeightDict:
-    def __init__(self, default_weight):
-        self.default_weight = default_weight
+class DefaultDict:
+    def __init__(self, default_factory):
+        self.default_factory = default_factory
         
     def __call__(self):
-        return defaultdict(self.get_default_weight)
-        
-    def get_default_weight(self):
-        return self.default_weight
+        return defaultdict(self.default_factory)
 
 class TagWeighter:
     def __init__(
@@ -43,14 +40,15 @@ class TagWeighter:
         self.max_weight = config.tag_weighting.max_weight
         self.smoothing_factor = config.tag_weighting.smoothing_factor
         
-        # Initialize tag statistics with proper defaults using pickleable functions
-        self.tag_counts = defaultdict(lambda: defaultdict(default_int))
-        # Create a proper defaultdict factory class instead of lambda
-        weight_dict_factory = DefaultWeightDict(self.default_weight)
-        self.tag_weights = defaultdict(weight_dict_factory)
+        # Initialize with pickleable defaults
+        self.tag_counts = defaultdict(DefaultDict(default_int))
+        self.tag_weights = defaultdict(DefaultDict(lambda: self.default_weight))
         self.total_samples = 0
         
-        # Enhanced tag type categories for better classification
+        # Cache reference
+        self.cache_manager = config.cache_manager if hasattr(config, 'cache_manager') else None
+        
+        # Enhanced tag type categories
         self.tag_types = {
             "subject": ["person", "character", "object", "animal", "vehicle", "location"],
             "style": ["art_style", "artist", "medium", "genre"],
@@ -305,44 +303,39 @@ class TagWeighter:
         self.config.cache_manager.save_tag_index(index_data)
 
     def _prepare_index_data(self, image_tags: Dict[str, Dict[str, any]]) -> Dict[str, Any]:
-        """Prepare index data structure without file operations."""
-        index_data = {
+        """Prepare index data structure for global metadata and per-image tags."""
+        return {
+            "version": "1.0",
             "metadata": {
                 "total_samples": self.total_samples,
                 "default_weight": self.default_weight,
                 "min_weight": self.min_weight,
                 "max_weight": self.max_weight,
                 "smoothing_factor": self.smoothing_factor,
-                "tag_types": self.tag_types
-            },
-            "statistics": {
-                "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
-                "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
-                "type_statistics": self.get_tag_statistics()
+                "tag_types": self.tag_types,
+                "created_at": time.time(),
+                "statistics": {
+                    "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
+                    "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
+                    "type_statistics": self.get_tag_statistics()
+                }
             },
             "images": {
-                str(image_path): self._prepare_image_data(image_data)
-                for image_path, image_data in image_tags.items()
-            }
-        }
-        
-        return self._clean_numeric_values(index_data)
-
-    def _prepare_image_data(self, image_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare individual image data for index."""
-        return {
-            "caption": image_data["caption"],
-            "total_weight": image_data["weight_details"]["total_weight"],
-            "tags": {
-                tag_type: [
-                    {
-                        "tag": tag_info["tag"],
-                        "weight": float(tag_info["weight"]),
-                        "frequency": float(tag_info["frequency"])
+                str(image_path): {
+                    "caption": image_data["caption"],
+                    "tags": {
+                        category: [
+                            {
+                                "tag": tag_info["tag"],
+                                "weight": float(tag_info["weight"]),
+                                "frequency": float(self.tag_counts[category][tag_info["tag"]] / self.total_samples)
+                            }
+                            for tag_info in tags_list
+                        ]
+                        for category, tags_list in image_data["weight_details"]["tags"].items()
                     }
-                    for tag_info in tags_list
-                ]
-                for tag_type, tags_list in image_data["weight_details"]["tags"].items()
+                }
+                for image_path, image_data in image_tags.items()
             }
         }
 
@@ -356,33 +349,24 @@ class TagWeighter:
             return [self._clean_numeric_values(x) for x in obj]
         return obj
 
-    def process_dataset_tags(self, image_captions: Dict[str, str]) -> Dict[str, Dict[str, any]]:
-        """Process all image captions and return detailed tag information."""
+    def process_dataset_tags(self, image_captions: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+        """Process all dataset tags and return weighted tags per image."""
         image_tags = {}
         
         for image_path, caption in image_captions.items():
-            # Get detailed tag analysis
-            tag_details = self.get_caption_weight_details(caption)
+            categorized_tags = self._extract_tags(caption)
             
-            # Store comprehensive information
+            # Store tags with their individual weights
             image_tags[image_path] = {
-                "caption": caption,
-                "weight_details": {
-                    "total_weight": tag_details["total_weight"],
-                    "tags": {
-                        tag_type: [
-                            {
-                                "tag": tag_info["tag"],
-                                "weight": tag_info["weight"],
-                                "frequency": tag_info["frequency"]
-                            }
-                            for tag_info in tags_list
-                        ]
-                        for tag_type, tags_list in tag_details["tags"].items()
-                    }
+                "tags": {
+                    category: [
+                        {"tag": tag, "weight": self.tag_weights[category][tag]}
+                        for tag in tags
+                    ]
+                    for category, tags in categorized_tags.items()
                 }
             }
-        
+            
         return image_tags
 
     def get_tag_metadata(self, cache_key: Optional[str] = None) -> Dict[str, Any]:
@@ -422,6 +406,36 @@ class TagWeighter:
     def __setstate__(self, state):
         """Customize unpickling behavior."""
         self.__dict__.update(state)
+
+    def get_image_tag_weights(self, image_path: str) -> Dict[str, Any]:
+        """Load tag weights for an image from cache."""
+        if not self.cache_manager:
+            return {
+                "tags": {
+                    category: [] for category in self.tag_types.keys()
+                }
+            }
+            
+        # Load from cache
+        tag_index = self.cache_manager.load_tag_index()
+        if not tag_index or "images" not in tag_index:
+            return {
+                "tags": {
+                    category: [] for category in self.tag_types.keys()
+                }
+            }
+            
+        # Get image-specific tags with weights
+        image_tags = tag_index["images"].get(image_path, {})
+        return {
+            "tags": {
+                category: [
+                    {"tag": tag, "weight": self.tag_weights[category][tag]}
+                    for tag in tags
+                ]
+                for category, tags in image_tags.get("tags", {}).items()
+            }
+        }
 
 def create_tag_weighter(
     config: "Config",  # type: ignore

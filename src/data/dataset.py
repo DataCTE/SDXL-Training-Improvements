@@ -90,10 +90,9 @@ class AspectBucketDataset(Dataset):
         return sum(len(indices) for indices in self.bucket_indices.values())
 
     def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
-        """Get a single item with proper tensor formatting for both trainers."""
+        """Get a single item with proper tensor formatting."""
         try:
             image_path = self.image_paths[idx]
-            caption = self.captions[idx] if self.captions else None
             
             # Load cached tensors
             cache_key = self.cache_manager.get_cache_key(image_path)
@@ -102,25 +101,28 @@ class AspectBucketDataset(Dataset):
             if cached_data is None:
                 return None
             
-            return {
-                "vae_latents": cached_data["vae_latents"],
-                "prompt_embeds": cached_data["prompt_embeds"],
-                "pooled_prompt_embeds": cached_data["pooled_prompt_embeds"],
-                "time_ids": cached_data["time_ids"],
-                "metadata": {
-                    "vae_latent_path": cached_data["metadata"]["vae_latent_path"],
-                    "clip_latent_path": cached_data["metadata"]["clip_latent_path"],
-                    "text": cached_data["metadata"]["text"],
-                    "bucket_info": cached_data["metadata"]["bucket_info"],
-                    "tag_info": cached_data["metadata"].get("tag_info", {
-                        "total_weight": 1.0,
-                        "tags": {}
-                    })
-                }
+            # Load tag weights if enabled
+            tag_info = None
+            if self.tag_weighter and self.config.tag_weighting.enable_tag_weighting:
+                tag_index = self.cache_manager.load_tag_index()
+                if tag_index and "images" in tag_index:
+                    image_tags = tag_index["images"].get(str(image_path), {})
+                    if image_tags:
+                        tag_info = {
+                            "tags": image_tags["tags"],
+                            "metadata": tag_index["metadata"]
+                        }
+            
+            # Update metadata with tag info
+            cached_data["metadata"]["tag_info"] = tag_info or {
+                "tags": {category: [] for category in self.tag_weighter.tag_types.keys()},
+                "metadata": {}
             }
-
+            
+            return cached_data
+            
         except Exception as e:
-            logger.error(f"Failed to get item {idx}: {e}")
+            logger.error(f"Error loading item {idx}: {e}")
             return None
 
     def collate_fn(self, batch: List[Dict[str, Any]]) -> Optional[Dict[str, torch.Tensor]]:

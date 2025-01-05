@@ -34,6 +34,7 @@ class CacheManager:
         self.config = config
         
         # Create proper subfolder structure
+        self.tags_dir = self.cache_dir / "tags"
         self.latents_dir = self.cache_dir / "latents"
         self.latents_dir.mkdir(parents=True, exist_ok=True)
         
@@ -41,8 +42,7 @@ class CacheManager:
         self.vae_latents_dir = self.latents_dir / "vae"
         self.clip_latents_dir = self.latents_dir / "clip"
         self.metadata_dir = self.latents_dir / "metadata"
-        self.bucket_info_dir = self.latents_dir / "buckets"
-        self.tags_dir = self.latents_dir / "tags"
+       
         
         # Create all required subdirectories
         for directory in [
@@ -79,10 +79,45 @@ class CacheManager:
             "created_at": time.time(),
             "last_updated": time.time(),
             "entries": {},
-            "stats": {"total_entries": 0, "latents_size": 0}
+            "stats": {"total_entries": 0, "latents_size": 0},
+            "tag_metadata": {}
         }
         
-        # Scan VAE latents directory for primary files
+        # First, verify and load tag metadata
+        logger.info("Verifying tag metadata...")
+        tag_stats_path = self.get_tag_statistics_path()
+        tag_images_path = self.get_image_tags_path()
+        
+        tag_metadata_valid = False
+        if tag_stats_path.exists() and tag_images_path.exists():
+            try:
+                with open(tag_stats_path, 'r', encoding='utf-8') as f:
+                    stats_data = json.load(f)
+                with open(tag_images_path, 'r', encoding='utf-8') as f:
+                    images_data = json.load(f)
+                    
+                if (all(key in stats_data for key in ["metadata", "statistics"]) and
+                    "images" in images_data):
+                    new_index["tag_metadata"] = {
+                        "statistics": stats_data["statistics"],
+                        "metadata": stats_data["metadata"],
+                        "images": images_data["images"]
+                    }
+                    tag_metadata_valid = True
+                    logger.info("Tag metadata verified successfully")
+            except Exception as e:
+                logger.warning(f"Tag metadata verification failed: {e}")
+        
+        if not tag_metadata_valid:
+            logger.warning("Tag metadata invalid or missing, will need to be rebuilt")
+            new_index["tag_metadata"] = {
+                "statistics": {},
+                "metadata": {},
+                "images": {}
+            }
+        
+        # Now scan VAE latents directory for primary files
+        logger.info("Scanning latent cache...")
         for vae_path in self.vae_latents_dir.glob("*.pt"):
             cache_key = vae_path.stem
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
@@ -96,6 +131,16 @@ class CacheManager:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                 
+                # Verify metadata structure
+                required_fields = {
+                    "vae_latent_path", "clip_latent_path", "text",
+                    "bucket_info", "created_at", "tag_reference"
+                }
+                
+                if not all(field in metadata for field in required_fields):
+                    logger.warning(f"Incomplete metadata for {cache_key}, skipping")
+                    continue
+                
                 entry = {
                     "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
                     "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
@@ -103,7 +148,7 @@ class CacheManager:
                     "created_at": metadata.get("created_at", time.time()),
                     "is_valid": True,
                     "bucket_info": metadata.get("bucket_info"),
-                    "tag_info": metadata.get("tag_info")
+                    "tag_reference": metadata.get("tag_reference")
                 }
                 
                 new_index["entries"][cache_key] = entry
@@ -116,6 +161,8 @@ class CacheManager:
         with self._lock:
             self.cache_index = new_index
             self._save_index()
+        
+        logger.info(f"Cache index rebuilt with {new_index['stats']['total_entries']} entries")
 
     def get_uncached_paths(self, image_paths: List[str]) -> List[str]:
         """Get list of paths that need processing."""
@@ -176,7 +223,14 @@ class CacheManager:
                     "aspect_class": bucket_info.aspect_class
                 }
             
-            # Save essential metadata about the latent pair
+            # Load existing tag index or create new
+            tag_index = self.load_tag_index() or {
+                "version": "1.0",
+                "metadata": {},
+                "images": {}
+            }
+            
+            # Update metadata for this specific image
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             full_metadata = {
                 "vae_latent_path": str(vae_path),
@@ -184,17 +238,26 @@ class CacheManager:
                 "created_at": time.time(),
                 "text": metadata.get("text"),
                 "bucket_info": bucket_dict,
-                "tag_info": tag_info or {
-                    "tags": {
-                        "subject": [],
-                        "style": [],
-                        "quality": [],
-                        "technical": [],
-                        "meta": []
-                    }
+                "tag_reference": {
+                    "cache_key": cache_key,
+                    "has_tags": bool(tag_info)
                 }
             }
             
+            # Update tag index if we have tag information
+            if tag_info:
+                tag_index["images"][str(path)] = {
+                    "cache_key": cache_key,
+                    "tags": tag_info["tags"]
+                }
+                
+                # Save updated tag index
+                self._atomic_json_save(
+                    self.tags_dir / "tag_index.json",
+                    tag_index
+                )
+            
+            # Save metadata
             self._atomic_json_save(metadata_path, full_metadata)
             
             # Update cache index with latent pair info
@@ -391,45 +454,32 @@ class CacheManager:
         logger.info("Verifying cache integrity...")
         needs_rebuild = False
         
-        for path in tqdm(image_paths, desc="Verifying cache entries"):
-            cache_key = self.get_cache_key(path)
-            entry = self.cache_index["entries"].get(cache_key)
-            
-            if entry:
-                # Check all required files and paths exist
-                vae_path = self.vae_latents_dir / f"{cache_key}.pt"
-                clip_path = self.clip_latents_dir / f"{cache_key}.pt"
-                metadata_path = self.metadata_dir / f"{cache_key}.json"
+        # First verify tag metadata
+        tag_stats_path = self.get_tag_statistics_path()
+        tag_images_path = self.get_image_tags_path()
+        
+        if not (tag_stats_path.exists() and tag_images_path.exists()):
+            needs_rebuild = True
+        else:
+            try:
+                with open(tag_stats_path, 'r', encoding='utf-8') as f:
+                    stats_data = json.load(f)
+                with open(tag_images_path, 'r', encoding='utf-8') as f:
+                    images_data = json.load(f)
                 
-                if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
+                if not (all(key in stats_data for key in ["metadata", "statistics"]) and
+                       "images" in images_data):
                     needs_rebuild = True
-                    break
+            except Exception:
+                needs_rebuild = True
+        
+        # Then verify latent cache entries
+        if not needs_rebuild:
+            for path in tqdm(image_paths, desc="Verifying cache entries"):
+                cache_key = self.get_cache_key(path)
+                entry = self.cache_index["entries"].get(cache_key)
                 
-                # Verify metadata structure
-                try:
-                    with open(metadata_path) as f:
-                        metadata = json.load(f)
-                        
-                    required_fields = {
-                        "vae_latent_path", "clip_latent_path", "text",
-                        "bucket_info", "created_at"
-                    }
-                    
-                    if not all(field in metadata for field in required_fields):
-                        needs_rebuild = True
-                        break
-                        
-                    # Verify bucket info structure if present
-                    if metadata["bucket_info"]:
-                        bucket_fields = {
-                            "dimensions", "pixel_dims", "latent_dims",
-                            "bucket_index", "size_class", "aspect_class"
-                        }
-                        if not all(field in metadata["bucket_info"] for field in bucket_fields):
-                            needs_rebuild = True
-                            break
-                            
-                except Exception:
+                if not entry or not self._validate_cache_entry(entry):
                     needs_rebuild = True
                     break
         
