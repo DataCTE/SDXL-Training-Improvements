@@ -43,21 +43,22 @@ class CacheManager:
         self.vae_latents_dir = self.latents_dir / "vae"
         self.clip_latents_dir = self.latents_dir / "clip"
         self.metadata_dir = self.latents_dir / "metadata"
-       
+        self.bucket_info_dir = self.latents_dir / "buckets"
         
         # Create all required subdirectories
         for directory in [
             self.vae_latents_dir,
             self.clip_latents_dir,
             self.metadata_dir,
-            self.bucket_info_dir,
-            self.tags_dir
+            self.tags_dir,
+            self.bucket_info_dir
         ]:
             directory.mkdir(parents=True, exist_ok=True)
         
+        # Initialize cache index
+        self.cache_index_path = self.cache_dir / "cache_index.json"
         self._lock = threading.Lock()
-        self.index_path = self.latents_dir / "cache_index.json"
-        self.rebuild_cache_index()
+        self.cache_index = self._load_or_create_index()
 
     def __getstate__(self):
         """Customize pickling behavior."""
