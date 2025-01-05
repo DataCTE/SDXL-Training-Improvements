@@ -513,24 +513,29 @@ def create_dataset(
             max_cache_size=config.global_config.cache.max_cache_size
         )
         
-        # Load data paths from config (returns copies)
+        # Load data paths from config
         logger.info(f"Loading data from: {config.data.train_data_dir}")
         image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+        image_captions = dict(zip(image_paths, captions))
         
         # Initialize tag weighting if enabled
         tag_weighter = None
         if config.tag_weighting.enable_tag_weighting:
             logger.info("Initializing tag weighting system...")
-            image_captions = dict(zip(image_paths, captions))
             
-            # Check for existing tag cache
+            # First verify cache integrity if requested
+            if verify_cache:
+                logger.info("Verifying cache and tag metadata...")
+                cache_manager.verify_and_rebuild_cache(image_paths, captions)
+            
+            # Check for existing tag cache after verification
             tag_cache_path = cache_manager.tags_dir / "tag_index.json"
             if tag_cache_path.exists() and config.tag_weighting.use_cache:
-                logger.info("Loading tag weights from cache...")
+                logger.info("Loading tag weights from verified cache...")
                 tag_weighter = TagWeighter(config)
                 tag_weighter._load_cache()
             else:
-                logger.info("Computing tag weights and creating index...")
+                logger.info("Computing tag weights and creating new index...")
                 tag_weighter = create_tag_weighter_with_index(
                     config=config,
                     image_captions=image_captions
@@ -540,8 +545,11 @@ def create_dataset(
                 logger.info("Saving tag statistics...")
                 tag_metadata = tag_weighter.get_tag_metadata()
                 cache_manager.save_tag_index({
+                    "version": "1.0",
+                    "updated_at": time.time(),
                     "metadata": tag_metadata,
-                    "image_tags": tag_weighter.process_dataset_tags(image_captions)
+                    "statistics": tag_weighter.get_tag_statistics(),
+                    "images": tag_weighter.process_dataset_tags(image_captions)
                 })
         
         # Create dataset instance with tag weighter
@@ -554,33 +562,17 @@ def create_dataset(
             cache_manager=cache_manager
         )
         
-        # Verify cache and rebuild if necessary
+        # Verify latent cache if needed
         if verify_cache:
-            logger.info("Verifying cache...")
-            cache_manager.verify_and_rebuild_cache(image_paths, captions)
-            
-            # Also verify tag cache if enabled
-            if tag_weighter and config.tag_weighting.use_cache:
-                logger.info("Verifying tag cache...")
-                tag_cache = cache_manager.load_tag_index()
-                if not tag_cache or "metadata" not in tag_cache:
-                    logger.warning("Tag cache invalid or missing. Recomputing...")
-                    tag_weighter = create_tag_weighter_with_index(
-                        config=config,
-                        image_captions=image_captions
-                    )
-                    dataset.tag_weighter = tag_weighter
+            logger.info("Checking for uncached images...")
+            uncached_paths = cache_manager.get_uncached_paths(image_paths)
+            if uncached_paths:
+                logger.info(f"Found {len(uncached_paths)} uncached images. Starting precomputation...")
+                dataset._precompute_latents()
+            else:
+                logger.info("All images are cached")
         
-        # Precompute latents for uncached images
-        logger.info("Checking for uncached images...")
-        uncached_paths = cache_manager.get_uncached_paths(image_paths)
-        if uncached_paths:
-            logger.info(f"Found {len(uncached_paths)} uncached images. Starting precomputation...")
-            dataset._precompute_latents()  # This will handle the actual precomputation
-        else:
-            logger.info("All images are cached. Skipping precomputation.")
-        
-        # Rebuild buckets after precomputation
+        # Rebuild buckets after any cache updates
         dataset.bucket_indices = dataset._group_images_by_bucket()
         dataset._log_bucket_statistics()
         
@@ -591,6 +583,12 @@ def create_dataset(
             logger.info(f"Total samples: {stats['statistics']['total_samples']}")
             for tag_type, count in stats['statistics']['tag_type_counts'].items():
                 logger.info(f"{tag_type}: {count} tags, {stats['statistics']['unique_tags'][tag_type]} unique")
+            
+            # Verify tag coverage
+            total_images = len(image_paths)
+            tagged_images = len(tag_weighter.process_dataset_tags(image_captions))
+            coverage = (tagged_images / total_images) * 100
+            logger.info(f"\nTag Coverage: {coverage:.2f}% ({tagged_images}/{total_images} images)")
         
         logger.info(
             f"Dataset created successfully with {len(dataset)} samples "
