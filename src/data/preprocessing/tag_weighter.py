@@ -16,6 +16,12 @@ from src.data.utils.paths import convert_windows_path
 
 logger = get_logger(__name__)
 
+def default_int():
+    return 0
+
+def default_weight(self):
+    return self.default_weight
+
 class TagWeighter:
     def __init__(
         self,
@@ -30,9 +36,9 @@ class TagWeighter:
         self.max_weight = config.tag_weighting.max_weight
         self.smoothing_factor = config.tag_weighting.smoothing_factor
         
-        # Initialize tag statistics with proper defaults
-        self.tag_counts = defaultdict(lambda: defaultdict(int))
-        self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
+        # Initialize tag statistics with proper defaults using pickleable functions
+        self.tag_counts = defaultdict(lambda: defaultdict(default_int))
+        self.tag_weights = defaultdict(lambda: defaultdict(self.default_weight))
         self.total_samples = 0
         
         # Enhanced tag type categories for better classification
@@ -398,6 +404,15 @@ class TagWeighter:
             metadata["cache_key"] = cache_key
             
         return metadata
+    
+    def __getstate__(self):
+        """Customize pickling behavior."""
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        """Customize unpickling behavior."""
+        self.__dict__.update(state)
 
 def create_tag_weighter(
     config: "Config",  # type: ignore
