@@ -58,7 +58,7 @@ class CacheManager:
         # Initialize cache index
         self.index_path = self.cache_dir / "cache_index.json"
         self._lock = threading.Lock()
-        self.cache_index = self._load_index()
+        self.cache_index = self.load_cache_index()
 
     def __getstate__(self):
         """Customize pickling behavior."""
@@ -327,15 +327,15 @@ class CacheManager:
         
         try:
             # Load VAE latents and time_ids
-            vae_path = self.vae_latents_dir / f"{cache_key}.pt"
+            vae_path = self.latents_dir / entry["vae_latent_path"]
             vae_data = torch.load(vae_path, map_location=self.device)
             
             # Load CLIP embeddings
-            clip_path = self.clip_latents_dir / f"{cache_key}.pt"
+            clip_path = self.latents_dir / entry["clip_latent_path"]
             clip_data = torch.load(clip_path, map_location=self.device)
             
             # Load metadata
-            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            metadata_path = self.latents_dir / entry["metadata_path"]
             with open(metadata_path) as f:
                 metadata = json.loads(f.read())
             
@@ -640,3 +640,27 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to load bucket info: {e}")
             return None
+
+    def load_cache_index(self) -> Dict[str, Any]:
+        """Load main cache index from disk or create new if not exists."""
+        try:
+            if self.index_path.exists():
+                with open(self.index_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load cache index: {e}")
+        
+        # Return new cache index if loading fails or file doesn't exist
+        return {
+            "version": "1.0",
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "entries": {},
+            "stats": {
+                "total_entries": 0,
+                "total_size": 0,
+                "latents_size": 0,
+                "metadata_size": 0
+            },
+            "bucket_stats": defaultdict(int)
+        }
