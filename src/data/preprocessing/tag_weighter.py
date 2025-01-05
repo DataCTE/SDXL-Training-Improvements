@@ -38,7 +38,9 @@ class TagWeighter:
         
         # Initialize tag statistics with proper defaults using pickleable functions
         self.tag_counts = defaultdict(lambda: defaultdict(default_int))
-        self.tag_weights = defaultdict(lambda: defaultdict(self.default_weight))
+        # Create a bound method for default_weight
+        self.get_default_weight = lambda: self.default_weight
+        self.tag_weights = defaultdict(lambda: defaultdict(self.get_default_weight))
         self.total_samples = 0
         
         # Enhanced tag type categories for better classification
