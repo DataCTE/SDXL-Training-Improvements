@@ -14,6 +14,7 @@ from tqdm import tqdm
 from src.data.config import Config
 import hashlib
 from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
+from collections import defaultdict
 logger = get_logger(__name__)
 
 class CacheManager:
@@ -79,8 +80,14 @@ class CacheManager:
             "created_at": time.time(),
             "last_updated": time.time(),
             "entries": {},
-            "stats": {"total_entries": 0, "latents_size": 0},
-            "tag_metadata": {}
+            "stats": {
+                "total_entries": 0,
+                "total_size": 0,
+                "latents_size": 0,
+                "metadata_size": 0
+            },
+            "tag_metadata": {},
+            "bucket_stats": defaultdict(int)
         }
         
         # First, verify and load tag metadata
@@ -128,6 +135,11 @@ class CacheManager:
                 continue
             
             try:
+                # Get file sizes
+                vae_size = vae_path.stat().st_size
+                clip_size = clip_path.stat().st_size
+                metadata_size = metadata_path.stat().st_size
+                
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                 
@@ -141,18 +153,33 @@ class CacheManager:
                     logger.warning(f"Incomplete metadata for {cache_key}, skipping")
                     continue
                 
+                # Update bucket statistics
+                if metadata.get("bucket_info"):
+                    bucket_idx = metadata["bucket_info"].get("bucket_index")
+                    if bucket_idx is not None:
+                        new_index["bucket_stats"][bucket_idx] += 1
+                
                 entry = {
                     "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
                     "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
                     "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
                     "created_at": metadata.get("created_at", time.time()),
                     "is_valid": True,
+                    "file_sizes": {
+                        "vae": vae_size,
+                        "clip": clip_size,
+                        "metadata": metadata_size,
+                        "total": vae_size + clip_size + metadata_size
+                    },
                     "bucket_info": metadata.get("bucket_info"),
                     "tag_reference": metadata.get("tag_reference")
                 }
                 
                 new_index["entries"][cache_key] = entry
                 new_index["stats"]["total_entries"] += 1
+                new_index["stats"]["total_size"] += entry["file_sizes"]["total"]
+                new_index["stats"]["latents_size"] += vae_size + clip_size
+                new_index["stats"]["metadata_size"] += metadata_size
                 
             except Exception as e:
                 logger.warning(f"Failed to process cache files for {cache_key}: {e}")
@@ -162,7 +189,17 @@ class CacheManager:
             self.cache_index = new_index
             self._save_index()
         
+        # Log cache statistics
         logger.info(f"Cache index rebuilt with {new_index['stats']['total_entries']} entries")
+        logger.info(f"Total cache size: {new_index['stats']['total_size'] / (1024*1024):.2f} MB")
+        logger.info(f"Latents size: {new_index['stats']['latents_size'] / (1024*1024):.2f} MB")
+        logger.info(f"Metadata size: {new_index['stats']['metadata_size'] / (1024*1024):.2f} MB")
+        
+        # Log bucket distribution
+        if new_index["bucket_stats"]:
+            logger.info("\nBucket distribution:")
+            for bucket_idx, count in sorted(new_index["bucket_stats"].items()):
+                logger.info(f"Bucket {bucket_idx}: {count} images")
 
     def get_uncached_paths(self, image_paths: List[str]) -> List[str]:
         """Get list of paths that need processing."""
@@ -451,43 +488,122 @@ class CacheManager:
 
     def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
         """Verify cache integrity and rebuild if necessary."""
-        logger.info("Verifying cache integrity...")
+        logger.info("Starting comprehensive cache verification...")
         needs_rebuild = False
         
-        # First verify tag metadata
+        # Step 1: Verify tag metadata files and structure
+        logger.info("Verifying tag metadata...")
         tag_stats_path = self.get_tag_statistics_path()
         tag_images_path = self.get_image_tags_path()
         
         if not (tag_stats_path.exists() and tag_images_path.exists()):
+            logger.warning("Tag metadata files missing")
             needs_rebuild = True
         else:
             try:
+                # Load and verify tag statistics
                 with open(tag_stats_path, 'r', encoding='utf-8') as f:
                     stats_data = json.load(f)
                 with open(tag_images_path, 'r', encoding='utf-8') as f:
                     images_data = json.load(f)
                 
-                if not (all(key in stats_data for key in ["metadata", "statistics"]) and
-                       "images" in images_data):
+                # Verify required fields
+                required_stats_fields = ["metadata", "statistics", "version"]
+                required_images_fields = ["images", "version", "updated_at"]
+                
+                if not (all(field in stats_data for field in required_stats_fields) and
+                       all(field in images_data for field in required_images_fields)):
+                    logger.warning("Tag metadata files missing required fields")
                     needs_rebuild = True
-            except Exception:
+                
+                # Verify all images have tag entries
+                if not needs_rebuild:
+                    for path in image_paths:
+                        if str(path) not in images_data.get("images", {}):
+                            logger.warning(f"Missing tag data for: {path}")
+                            needs_rebuild = True
+                            break
+                            
+            except Exception as e:
+                logger.warning(f"Failed to verify tag metadata: {e}")
                 needs_rebuild = True
         
-        # Then verify latent cache entries
+        # Step 2: Verify latent cache entries and their integrity
         if not needs_rebuild:
+            logger.info("Verifying latent cache entries...")
             for path in tqdm(image_paths, desc="Verifying cache entries"):
                 cache_key = self.get_cache_key(path)
                 entry = self.cache_index["entries"].get(cache_key)
                 
-                if not entry or not self._validate_cache_entry(entry):
+                if not entry:
+                    logger.warning(f"Missing cache entry for: {path}")
+                    needs_rebuild = True
+                    break
+                    
+                # Verify entry structure and files
+                if not self._validate_cache_entry(entry):
+                    logger.warning(f"Invalid cache entry for: {path}")
+                    needs_rebuild = True
+                    break
+                    
+                # Verify tag references
+                if not entry.get("tag_reference"):
+                    logger.warning(f"Missing tag reference for: {path}")
                     needs_rebuild = True
                     break
         
+        # Step 3: Verify cache index statistics
+        if not needs_rebuild:
+            logger.info("Verifying cache index statistics...")
+            try:
+                actual_entries = len(self.cache_index["entries"])
+                reported_entries = self.cache_index["stats"]["total_entries"]
+                
+                if actual_entries != reported_entries:
+                    logger.warning("Cache index statistics mismatch")
+                    needs_rebuild = True
+                    
+            except Exception as e:
+                logger.warning(f"Failed to verify cache statistics: {e}")
+                needs_rebuild = True
+        
+        # Step 4: Rebuild if necessary
         if needs_rebuild:
-            logger.warning("Cache verification failed. Rebuilding cache index...")
+            logger.warning("Cache verification failed. Starting complete rebuild...")
             self.rebuild_cache_index()
+            
+            # Verify rebuild was successful
+            if not self._verify_rebuild_success():
+                logger.error("Cache rebuild failed. Manual intervention may be required.")
+            else:
+                logger.info("Cache rebuild completed successfully")
         else:
-            logger.info("Cache verification completed successfully")
+            logger.info("Cache verification completed successfully - all systems valid")
+        
+    def _verify_rebuild_success(self) -> bool:
+        """Verify that cache rebuild was successful."""
+        try:
+            # Check basic cache structure
+            if not (self.cache_index and 
+                    "entries" in self.cache_index and 
+                    "stats" in self.cache_index and
+                    "tag_metadata" in self.cache_index):
+                return False
+            
+            # Verify tag metadata files exist
+            if not (self.get_tag_statistics_path().exists() and 
+                    self.get_image_tags_path().exists()):
+                return False
+            
+            # Verify cache statistics make sense
+            if self.cache_index["stats"]["total_entries"] <= 0:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to verify rebuild success: {e}")
+            return False
 
     def load_bucket_info(self, cache_key: str) -> Optional["BucketInfo"]:
         """Load cached bucket information."""
