@@ -673,14 +673,15 @@ def create_tag_weighter(
 
 def create_tag_weighter_with_index(
     config: "Config",
-    image_captions: Dict[str, str],
+    image_paths: List[str],
+    captions: List[str],
     model: Optional["StableDiffusionXL"] = None  # Add model parameter
 ) -> TagWeighter:
     """Create and initialize tag weighter with index."""
     weighter = TagWeighter(config, model=model)  # Pass model to TagWeighter
     
     logger.info("Processing captions and updating tag statistics...")
-    weighter.update_statistics(list(image_captions.values()))
+    weighter.update_statistics(captions)
     
     logger.info("Creating detailed tag index...")
     image_tags = weighter.process_dataset_tags(image_captions)
@@ -708,12 +709,11 @@ def preprocess_dataset_tags(
         return None
         
     # Create and initialize tag weighter
-    image_captions = dict(zip(image_paths, captions))
-    
     logger.info("Processing tags and creating index...")
     weighter = create_tag_weighter_with_index(
         config=config,
-        image_captions=image_captions
+        image_paths=image_paths,
+        captions=captions
     )
     
     logger.info("Tag preprocessing complete")
