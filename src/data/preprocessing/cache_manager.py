@@ -711,39 +711,32 @@ class CacheManager:
                     'error': str(e)
                 })
 
-    def _verify_tag_metadata(self, stats_data: Dict[str, Any], images_data: Dict[str, Any]) -> bool:
-        """Verify tag metadata structure and content.
-        
-        Args:
-            stats_data: Tag statistics data
-            images_data: Image tags data
-            
-        Returns:
-            bool: True if metadata is valid
-        """
+    def _validate_tag_metadata(self, stats_data: Dict[str, Any], images_data: Dict[str, Any]) -> bool:
+        """Validate tag metadata structure and content."""
         try:
-            # Verify required fields
+            # Required fields for validation
             required_stats_fields = ["metadata", "statistics", "version"]
             required_images_fields = ["images", "version", "updated_at"]
+            required_stats = ["total_samples", "tag_type_counts", "unique_tags"]
             
+            # Validate basic structure
             if not (all(field in stats_data for field in required_stats_fields) and
                    all(field in images_data for field in required_images_fields)):
                 return False
-            
-            # Verify version compatibility
-            if (stats_data["version"] != "1.0" or 
-                images_data["version"] != "1.0"):
-                return False
-            
-            # Verify statistics structure
-            required_stats = ["total_samples", "tag_type_counts", "unique_tags"]
+                
+            # Validate statistics structure
             if not all(field in stats_data["statistics"] for field in required_stats):
                 return False
-            
+                
+            # Validate version compatibility
+            if (stats_data.get("version") != "1.0" or 
+                images_data.get("version") != "1.0"):
+                return False
+                
             return True
             
         except Exception as e:
-            logger.error(f"Failed to verify tag metadata: {e}")
+            logger.error(f"Tag metadata validation failed: {e}")
             return False
 
     def verify_tag_cache(self, image_paths: List[str], captions: List[str]) -> bool:
@@ -763,7 +756,7 @@ class CacheManager:
                     images_data = json.load(f)
                     
                 # Verify structure and version
-                if not self._verify_tag_metadata(stats_data, images_data):
+                if not self._validate_tag_metadata(stats_data, images_data):
                     return False
                     
                 # Check coverage
