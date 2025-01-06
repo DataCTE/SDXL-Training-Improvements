@@ -1,4 +1,4 @@
-"""Memory optimization utilities for training with extreme speedups."""
+"""Memory optimization utilities for training with extreme speedups and efficient memory management."""
 import torch
 from typing import Dict, Optional, TYPE_CHECKING
 from pathlib import Path
