@@ -128,11 +128,16 @@ class CacheManager:
         # Now scan VAE latents directory for primary files with progress tracking
         logger.info("Scanning latent cache...")
         vae_files = list(self.vae_latents_dir.glob("*.pt"))
+        
+        if not vae_files:
+            logger.info("No cached files found, initializing empty cache")
+            return new_index
+            
         predictor = ProgressPredictor()
         predictor.start(len(vae_files))
         
         processed = 0
-        update_interval = 20  # Update more frequently
+        update_interval = 20  # Fixed update interval for stability
         
         for i, vae_path in enumerate(vae_files):
             cache_key = vae_path.stem
@@ -145,8 +150,57 @@ class CacheManager:
                 eta_str = predictor.format_time(timing["eta_seconds"])
                 logger.info(f"Scanning cache: {i+1}/{len(vae_files)} files ({progress:.1f}%) (ETA: {eta_str})")
                 processed = 0  # Reset counter
+                
+                # Force Python to process any pending events
+                time.sleep(0.001)
+            
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
             metadata_path = self.metadata_dir / f"{cache_key}.json"
+            
+            # Only process if we have all required files
+            if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
+                continue
+                
+            try:
+                # Get file sizes
+                vae_size = vae_path.stat().st_size
+                clip_size = clip_path.stat().st_size
+                metadata_size = metadata_path.stat().st_size
+                
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+                
+                # Update bucket statistics
+                if metadata.get("bucket_info"):
+                    bucket_idx = metadata["bucket_info"].get("bucket_index")
+                    if bucket_idx is not None:
+                        new_index["bucket_stats"][bucket_idx] += 1
+                
+                entry = {
+                    "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
+                    "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
+                    "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
+                    "created_at": metadata.get("created_at", time.time()),
+                    "is_valid": True,
+                    "file_sizes": {
+                        "vae": vae_size,
+                        "clip": clip_size,
+                        "metadata": metadata_size,
+                        "total": vae_size + clip_size + metadata_size
+                    },
+                    "bucket_info": metadata.get("bucket_info"),
+                    "tag_reference": metadata.get("tag_reference")
+                }
+                
+                new_index["entries"][cache_key] = entry
+                new_index["stats"]["total_entries"] += 1
+                new_index["stats"]["total_size"] += entry["file_sizes"]["total"]
+                new_index["stats"]["latents_size"] += vae_size + clip_size
+                new_index["stats"]["metadata_size"] += metadata_size
+                
+            except Exception as e:
+                logger.warning(f"Failed to process cache files for {cache_key}: {e}")
+                continue
             
             # Only process if we have all required files
             if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
