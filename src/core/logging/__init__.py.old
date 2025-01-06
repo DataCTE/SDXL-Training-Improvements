@@ -16,7 +16,6 @@ __all__ = [
     'ProgressConfig', 
     'MetricsConfig',
     'UnifiedLogger',
-    'Logger',  # Backward compatibility
     'setup_logging',
     'cleanup_logging',
     'LogManager',
