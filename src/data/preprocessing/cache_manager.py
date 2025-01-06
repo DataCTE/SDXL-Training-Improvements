@@ -681,25 +681,42 @@ class CacheManager:
     def _verify_rebuild_success(self) -> bool:
         """Verify that cache rebuild was successful."""
         try:
-            # Check basic cache structure
-            if not (isinstance(self.cache_index, dict) and 
-                    "entries" in self.cache_index and 
-                    "stats" in self.cache_index):
+            # Verify basic cache structure
+            if not isinstance(self.cache_index, dict):
+                logger.error("Cache index is not a dictionary")
                 return False
+                
+            required_fields = ["entries", "stats", "tag_metadata"]
+            for field in required_fields:
+                if field not in self.cache_index:
+                    logger.error(f"Missing required field in cache index: {field}")
+                    return False
             
-            # Initialize tag_metadata if missing
-            if "tag_metadata" not in self.cache_index:
+            # Initialize empty structures if needed
+            if not self.cache_index["entries"]:
+                self.cache_index["entries"] = {}
+                
+            if not self.cache_index["stats"]:
+                self.cache_index["stats"] = {
+                    "total_entries": 0,
+                    "total_size": 0,
+                    "latents_size": 0,
+                    "metadata_size": 0
+                }
+                
+            if not self.cache_index["tag_metadata"]:
                 self.cache_index["tag_metadata"] = {
                     "statistics": {},
                     "metadata": {},
                     "last_updated": time.time()
                 }
             
-            # Verify or create tag metadata files
+            # Ensure tag metadata files exist
             tag_stats_path = self.get_tag_statistics_path()
             tag_images_path = self.get_image_tags_path()
             
             if not tag_stats_path.exists():
+                logger.info("Creating empty tag statistics file")
                 self._atomic_json_save(tag_stats_path, {
                     "version": "1.0",
                     "metadata": {},
@@ -707,11 +724,21 @@ class CacheManager:
                 })
                 
             if not tag_images_path.exists():
+                logger.info("Creating empty image tags file")
                 self._atomic_json_save(tag_images_path, {
                     "version": "1.0",
                     "updated_at": time.time(),
                     "images": {}
                 })
+            
+            # Save updated index
+            self._save_index()
+            
+            logger.info("Cache validation successful", extra={
+                'total_entries': self.cache_index["stats"]["total_entries"],
+                'has_tag_metadata': bool(self.cache_index["tag_metadata"]),
+                'tag_files_exist': tag_stats_path.exists() and tag_images_path.exists()
+            })
             
             return True
             
