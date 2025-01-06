@@ -4,16 +4,12 @@ import sys
 import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
-from datetime import datetime
 import torch
 import wandb
-from tqdm import tqdm
-import numpy as np
-from functools import wraps
-from collections import deque
-
-from .base import LogConfig
-from .logger import ColoredFormatter, ProgressTracker, MetricsTracker
+from .base import LogConfig, ProgressConfig, MetricsConfig, ConfigurationError
+from .formatters import ColoredFormatter
+from .progress import ProgressTracker
+from .metrics import MetricsTracker
 
 class UnifiedLogger:
     """Single entry point for all logging functionality."""
@@ -29,6 +25,7 @@ class UnifiedLogger:
         self.logger = logging.getLogger(self.config.name)
         self.logger.setLevel(logging.DEBUG)
         self.logger.handlers.clear()
+        self.logger.propagate = self.config.propagate
         
         # Console handler setup
         if self.config.enable_console:
@@ -66,19 +63,32 @@ class UnifiedLogger:
             except Exception as e:
                 self.logger.warning(f"Failed to initialize W&B: {e}")
                 
+        # Metrics tracking setup
+        if self.config.enable_metrics:
+            metrics_config = MetricsConfig(
+                window_size=self.config.metrics_window,
+                keep_history=self.config.metrics_history,
+                prefix=self.config.metrics_prefix
+            )
+            self._metrics = MetricsTracker(metrics_config)
+        else:
+            self._metrics = None
+            
         # Progress tracking setup
         self._progress = None
+        
+    def start_progress(self, total: int, desc: str = "") -> None:
+        """Start progress tracking."""
         if self.config.enable_progress:
-            self._progress = ProgressTracker(
-                window_size=self.config.progress_window,
-                smoothing=self.config.progress_smoothing
+            progress_config = ProgressConfig(
+                total=total,
+                desc=desc,
+                smoothing=self.config.progress_smoothing,
+                position=self.config.progress_position,
+                leave=self.config.progress_leave,
+                window_size=self.config.progress_window
             )
-            
-        # Metrics tracking setup
-        self._metrics = MetricsTracker(
-            window_size=self.config.metrics_window,
-            keep_history=self.config.metrics_history
-        )
+            self._progress = ProgressTracker(progress_config)
     
     def debug(self, msg: str, *args, **kwargs) -> None:
         """Log debug message."""
@@ -98,20 +108,33 @@ class UnifiedLogger:
         
     def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
         """Log multiple metrics with optional step."""
+        if not self.config.enable_metrics:
+            return
+            
         for name, value in metrics.items():
             self._metrics.update(name, value)
             
         if self._wandb_run is not None:
             self._wandb_run.log(metrics, step=step)
             
-    def update_progress(self, n: int = 1, **kwargs) -> Optional[float]:
-        """Update progress and return current rate if available."""
+    def update_progress(self, n: int = 1, batch_size: Optional[int] = None) -> Optional[Dict[str, float]]:
+        """Update progress and return metrics if available."""
         if self._progress is not None:
-            rate = self._progress.update(n)
-            if self.config.enable_metrics:
-                self._metrics.update("progress/steps_per_sec", rate)
-            return rate
+            metrics = self._progress.update(n, batch_size)
+            if self.config.enable_metrics and metrics:
+                self.log_metrics(metrics)
+            return metrics
         return None
+            
+    def log_memory(self) -> None:
+        """Log memory usage metrics."""
+        if not self.config.enable_memory or not torch.cuda.is_available():
+            return
+            
+        self.log_metrics({
+            "memory/gpu_allocated_gb": torch.cuda.memory_allocated() / 1e9,
+            "memory/gpu_reserved_gb": torch.cuda.memory_reserved() / 1e9
+        })
             
     def finish(self) -> None:
         """Cleanup and close all logging systems."""
