@@ -682,18 +682,37 @@ class CacheManager:
         """Verify that cache rebuild was successful."""
         try:
             # Check basic cache structure
-            if not (self.cache_index and 
+            if not (isinstance(self.cache_index, dict) and 
                     "entries" in self.cache_index and 
-                    "stats" in self.cache_index and
-                    "tag_metadata" in self.cache_index):
+                    "stats" in self.cache_index):
                 return False
             
-            # Verify tag metadata files exist
-            if not (self.get_tag_statistics_path().exists() and 
-                    self.get_image_tags_path().exists()):
-                return False
+            # Initialize tag_metadata if missing
+            if "tag_metadata" not in self.cache_index:
+                self.cache_index["tag_metadata"] = {
+                    "statistics": {},
+                    "metadata": {},
+                    "last_updated": time.time()
+                }
             
-            # An empty cache is valid for initial setup
+            # Verify or create tag metadata files
+            tag_stats_path = self.get_tag_statistics_path()
+            tag_images_path = self.get_image_tags_path()
+            
+            if not tag_stats_path.exists():
+                self._atomic_json_save(tag_stats_path, {
+                    "version": "1.0",
+                    "metadata": {},
+                    "statistics": {}
+                })
+                
+            if not tag_images_path.exists():
+                self._atomic_json_save(tag_images_path, {
+                    "version": "1.0",
+                    "updated_at": time.time(),
+                    "images": {}
+                })
+            
             return True
             
         except Exception as e:
