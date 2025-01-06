@@ -1,10 +1,10 @@
 """Logging configuration dataclass."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List
 from pathlib import Path
 
 @dataclass
-class LoggingConfig:
+class LogConfig:
     """Unified logging configuration."""
     # Basic logging
     console_level: str = "INFO"
@@ -35,3 +35,7 @@ class LoggingConfig:
     wandb_name: Optional[str] = None
     wandb_tags: Optional[List[str]] = None
     wandb_notes: Optional[str] = None
+    
+    # Additional settings
+    segment_names: List[str] = field(default_factory=lambda: ["main"])
+    max_history: int = 1000
