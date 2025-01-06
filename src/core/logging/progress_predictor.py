@@ -63,6 +63,9 @@ class ProgressPredictor:
         self._completed_items += items
         self._last_update = current_time
         
+        # Calculate progress percentage
+        progress = (self._completed_items / self._total_items) * 100 if self._total_items > 0 else 0
+        
         # Calculate predictions
         remaining_items = self._total_items - self._completed_items
         if remaining_items <= 0:
@@ -86,7 +89,10 @@ class ProgressPredictor:
         
         return {
             "current_time": time_per_item,
-            "eta_seconds": eta_seconds
+            "eta_seconds": eta_seconds,
+            "progress": progress,
+            "completed": self._completed_items,
+            "total": self._total_items
         }
         
     def get_progress(self) -> Dict[str, float]:
