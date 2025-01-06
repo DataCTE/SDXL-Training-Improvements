@@ -14,6 +14,8 @@ from functools import wraps
 
 from .config import LogConfig
 from .progress import ProgressTracker, ProgressConfig
+from .logging import TensorLogger
+from .wandb import WandbLogger
 
 # Add a simple reduce_dict implementation here to break the cycle
 def reduce_dict(input_dict: dict, average: bool = True) -> dict:
@@ -52,19 +54,42 @@ class LogManager:
     _instance = None
     _lock = threading.Lock()
     
-    def __new__(cls):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._initialize()
-            return cls._instance
-            
-    def _initialize(self):
+    def __init__(self):
         """Initialize the log manager."""
         self._loggers = {}
         self._metrics_buffer = {}
         self._registry_lock = threading.Lock()
-        self.config = None
+        self._config = None
+        self._wandb_logger = None
+        self._tensor_logger = None
+        
+    @classmethod
+    def configure(cls, config: LogConfig) -> None:
+        """Configure the logging system."""
+        instance = cls.get_instance()
+        with instance._lock:
+            instance._config = config
+            
+            # Set up base logging
+            if config.file_output:
+                Path(config.log_dir).mkdir(parents=True, exist_ok=True)
+                
+            # Initialize W&B if enabled
+            if config.use_wandb:
+                instance._wandb_logger = WandbLogger(config)
+                
+            # Initialize tensor logger
+            instance._tensor_logger = TensorLogger(
+                instance.get_logger("tensors"),
+                dump_on_error=True
+            )
+            
+    @property
+    def config(self) -> LogConfig:
+        """Get current configuration."""
+        if self._config is None:
+            self._config = LogConfig()
+        return self._config
     
     @classmethod
     def get_instance(cls) -> 'LogManager':

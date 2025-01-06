@@ -8,6 +8,12 @@ import torch
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
+from logging import Logger, getLogger
+from functools import wraps
+from concurrent.futures import ThreadPoolExecutor
+from .progress import ProgressTracker
+
+
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
@@ -319,7 +325,7 @@ def process_with_progress(
 ) -> List[Any]:
     """Process items in parallel with progress tracking."""
     if logger is None:
-        logger = get_logger(__name__)
+        logger = getLogger(__name__)
         
     with logger.create_progress_tracker(
         total=len(items),
@@ -330,7 +336,69 @@ def process_with_progress(
         return track_parallel_progress(
             func=func,
             items=items,
-            desc=desc,
             max_workers=max_workers,
             tracker=tracker
         )
+
+class LogContext:
+    """Context manager for scoped logging."""
+    
+    def __init__(self, logger: logging.Logger, context: Dict[str, Any]):
+        self.logger = logger
+        self.context = context
+        self.old_context = {}
+        
+    def __enter__(self):
+        """Store previous context and set new one."""
+        if hasattr(self.logger, "extra"):
+            self.old_context = self.logger.extra
+        self.logger.extra = self.context
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Restore previous context."""
+        if self.old_context:
+            self.logger.extra = self.old_context
+        else:
+            delattr(self.logger, "extra")
+
+def log_errors(logger: logging.Logger):
+    """Decorator to automatically log errors."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(
+                    f"Error in {func.__name__}",
+                    exc_info=True,
+                    extra={
+                        'args': args,
+                        'kwargs': kwargs,
+                        'error': str(e)
+                    }
+                )
+                raise
+        return wrapper
+    return decorator
+
+def track_parallel_progress(
+    func: Callable,
+    items: List[Any],
+    max_workers: Optional[int] = None,
+    tracker: Optional[ProgressTracker] = None
+) -> List[Any]:
+    """Process items in parallel with progress tracking."""
+    results = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        for item in items:
+            future = executor.submit(func, item)
+            future.add_done_callback(lambda _: tracker.update(1) if tracker else None)
+            futures.append(future)
+            
+        results = [f.result() for f in futures]
+        
+    return results
