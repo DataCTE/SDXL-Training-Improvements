@@ -596,7 +596,7 @@ def create_dataset(
             
         # Initialize tag weighting system
         tag_weighter = None
-        if config.tag_weighting.enabled:
+        if config.tag_weighting.enable_tag_weighting:
             try:
                 # Check for existing tag cache after verification
                 tag_stats_path = cache_manager.get_tag_statistics_path()
