@@ -626,6 +626,34 @@ class TagWeighter:
             }
         }
 
+    def initialize_tag_system(self) -> bool:
+        """Initialize tag system and verify cache if available."""
+        try:
+            if not self.cache_manager:
+                return False
+            
+            # Try loading from cache first
+            if self.config.tag_weighting.use_cache:
+                tag_data = self.cache_manager.load_tag_index()
+                if tag_data and self._load_cache():
+                    logger.info("Successfully loaded tag weights from cache")
+                    return True
+                
+            # Initialize fresh tag system
+            self.tag_counts = defaultdict(lambda: defaultdict(int))
+            self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
+            self.total_samples = 0
+            
+            # Initialize category embeddings if CLIP is available
+            if self.clip_encoder:
+                self.category_embeddings = self._initialize_category_embeddings()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize tag system: {e}")
+            return False
+
 def create_tag_weighter(
     config: "Config",  # type: ignore
     captions: List[str],
