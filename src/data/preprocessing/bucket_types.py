@@ -1,6 +1,6 @@
 """Shared type definitions for bucket handling."""
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any
 import numpy as np
 
 @dataclass
@@ -72,12 +72,64 @@ class BucketDimensions:
 @dataclass
 class BucketInfo:
     """Comprehensive bucket information with redundant storage."""
-    dimensions: BucketDimensions    # All dimension-related information
-    pixel_dims: Tuple[int, int]    # Redundant pixel dimensions (w, h)
-    latent_dims: Tuple[int, int]   # Redundant latent dimensions (w//8, h//8)
-    bucket_index: int              # Index in bucket list
-    size_class: str               # Size classification
-    aspect_class: str            # Aspect ratio classification
+    dimensions: BucketDimensions
+    pixel_dims: Tuple[int, int]
+    latent_dims: Tuple[int, int]
+    bucket_index: int
+    size_class: str
+    aspect_class: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert bucket info to serializable dictionary."""
+        return {
+            "dimensions": {
+                "width": self.dimensions.width,
+                "height": self.dimensions.height,
+                "width_latent": self.dimensions.width_latent,
+                "height_latent": self.dimensions.height_latent,
+                "aspect_ratio": self.dimensions.aspect_ratio,
+                "aspect_ratio_inverse": self.dimensions.aspect_ratio_inverse,
+                "total_pixels": self.dimensions.total_pixels,
+                "total_latents": self.dimensions.total_latents
+            },
+            "pixel_dims": list(self.pixel_dims),
+            "latent_dims": list(self.latent_dims),
+            "bucket_index": self.bucket_index,
+            "size_class": self.size_class,
+            "aspect_class": self.aspect_class
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'BucketInfo':
+        """Create BucketInfo from dictionary with validation."""
+        try:
+            dimensions = BucketDimensions(
+                width=data["dimensions"]["width"],
+                height=data["dimensions"]["height"],
+                width_latent=data["dimensions"]["width_latent"],
+                height_latent=data["dimensions"]["height_latent"],
+                aspect_ratio=data["dimensions"]["aspect_ratio"],
+                aspect_ratio_inverse=data["dimensions"]["aspect_ratio_inverse"],
+                total_pixels=data["dimensions"]["total_pixels"],
+                total_latents=data["dimensions"]["total_latents"]
+            )
+            
+            bucket = cls(
+                dimensions=dimensions,
+                pixel_dims=tuple(data["pixel_dims"]),
+                latent_dims=tuple(data["latent_dims"]),
+                bucket_index=data["bucket_index"],
+                size_class=data["size_class"],
+                aspect_class=data["aspect_class"]
+            )
+            
+            if not bucket.validate():
+                raise ValueError("Invalid bucket data")
+            
+            return bucket
+            
+        except Exception as e:
+            raise ValueError(f"Failed to create bucket from dict: {str(e)}")
     
     @property
     def total_pixels(self) -> int:
