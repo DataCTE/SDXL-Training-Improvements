@@ -445,15 +445,10 @@ class TagWeighter:
         """Process all dataset captions and return tag information."""
         processed_tags = {}
         
-        with ProgressTracker(
+        with logger.start_progress(
             total=len(captions),
-            config=ProgressConfig(
-                desc="Processing tags",
-                show_memory=True,
-                log_interval=1000
-            ),
-            context={"tag_types": list(self.tag_types.keys())}
-        ) as tracker:
+            desc="Processing tags"
+        ) as progress:
             for caption in captions:
                 tags = self._extract_tags(caption)
                 weighted_tags = {

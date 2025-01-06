@@ -127,7 +127,9 @@ def group_images_by_bucket(
         raise ValueError("No valid buckets generated from config")
     
     # Process images with detailed progress
-    for idx, path in enumerate(tqdm(image_paths, desc="Grouping images by bucket")):
+    with logger.start_progress(len(image_paths), desc="Grouping images by bucket") as progress:
+        for idx, path in enumerate(image_paths):
+            progress.update(1)
         try:
             # Check cache first
             cache_key = cache_manager.get_cache_key(path)
