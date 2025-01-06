@@ -12,58 +12,6 @@ from .formatters import ColoredFormatter
 from .progress import ProgressTracker
 from .metrics import MetricsTracker
 from .progress_predictor import ProgressPredictor
-from ..utils.paths import convert_windows_path
-
-class LogManager:
-    """Centralized logging manager."""
-    _instance = None
-    _loggers: Dict[str, 'UnifiedLogger'] = {}
-    _lock = threading.Lock()
-    _config = None
-    
-    def __init__(self):
-        """Initialize log manager."""
-        pass
-        
-    @classmethod
-    def get_instance(cls) -> 'LogManager':
-        """Get singleton instance."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
-    
-    def get_logger(self, name: str) -> 'UnifiedLogger':
-        """Get or create UnifiedLogger by name."""
-        with self._lock:
-            if name not in self._loggers:
-                config = self._config.copy() if self._config else LogConfig()
-                config.name = name
-                self._loggers[name] = UnifiedLogger(config)
-            return self._loggers[name]
-    
-    def configure_from_config(self, config: Union[LogConfig, Dict]) -> None:
-        """Configure logging from config object or dict."""
-        if isinstance(config, dict):
-            config = LogConfig(**config)
-            
-        self._config = config
-        
-        # Update existing loggers with new config
-        with self._lock:
-            for name, logger in self._loggers.items():
-                new_config = config.copy()
-                new_config.name = name
-                self._loggers[name] = UnifiedLogger(new_config)
-                
-    def cleanup(self) -> None:
-        """Cleanup all loggers."""
-        with self._lock:
-            for logger in self._loggers.values():
-                logger.finish()
-            self._loggers.clear()
-            self._config = None
 
 class UnifiedLogger:
     """Single entry point for all logging functionality."""
@@ -90,7 +38,7 @@ class UnifiedLogger:
             
         # File handler setup
         if self.config.enable_file:
-            log_dir = Path(convert_windows_path(str(self.config.log_dir), make_absolute=True))
+            log_dir = Path(self.config.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             file = logging.FileHandler(
                 log_dir / self.config.filename,
