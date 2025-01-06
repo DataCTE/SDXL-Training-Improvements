@@ -4,11 +4,9 @@ import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Tuple
 import threading
-import colorama
-from colorama import Fore, Style
 from datetime import datetime
+from .logger import ColoredFormatter
 from .base import LogConfig
-from .utils import ColoredFormatter, TensorLogger
 from src.data.utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
