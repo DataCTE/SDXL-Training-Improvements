@@ -127,14 +127,20 @@ class CacheManager:
         predictor = ProgressPredictor()
         predictor.start(len(vae_files))
         
+        processed = 0
+        update_interval = 20  # Update more frequently
+        
         for i, vae_path in enumerate(vae_files):
             cache_key = vae_path.stem
+            processed += 1
             
-            # Update progress every 100 files
-            if i % 100 == 0:
-                timing = predictor.update(100)
+            # Update progress more frequently with percentage
+            if processed >= update_interval:
+                timing = predictor.update(processed)
+                progress = (i + 1) / len(vae_files) * 100
                 eta_str = predictor.format_time(timing["eta_seconds"])
-                logger.info(f"Scanning cache: {i}/{len(vae_files)} files (ETA: {eta_str})")
+                logger.info(f"Scanning cache: {i+1}/{len(vae_files)} files ({progress:.1f}%) (ETA: {eta_str})")
+                processed = 0  # Reset counter
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             
