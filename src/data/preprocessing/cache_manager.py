@@ -488,7 +488,7 @@ class CacheManager:
                 temp_path.unlink()
             raise e
 
-    def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
+    def verify_and_rebuild_cache(self, image_paths: List[str]) -> None:
         """Verify cache integrity and rebuild if necessary."""
         logger.info("Starting comprehensive cache verification...")
         needs_rebuild = False
