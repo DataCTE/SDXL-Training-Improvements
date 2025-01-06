@@ -68,23 +68,32 @@ def generate_buckets(config: Config) -> List[BucketInfo]:
 
 def compute_bucket_dims(
     original_size: Tuple[int, int],
-    buckets: List[BucketInfo]
-) -> BucketInfo:
-    """Find closest bucket using comprehensive metrics."""
+    buckets: List[BucketInfo],
+    max_size_diff: float = 0.25  # Maximum allowed size difference
+) -> Optional[BucketInfo]:
+    """Find closest bucket with improved metrics and validation."""
     w, h = original_size
     original_ratio = w / h
     original_pixels = w * h
     
-    # Find closest bucket using multiple metrics
-    closest_bucket = min(
-        buckets,
-        key=lambda b: (
-            abs(b.total_pixels - original_pixels) / original_pixels * 0.5 +  # Area difference
-            abs(b.aspect_ratio - original_ratio) * 2.0                       # Aspect ratio difference
-        )
-    )
+    # Add size constraints
+    valid_buckets = [
+        b for b in buckets
+        if (abs(b.total_pixels - original_pixels) / original_pixels) <= max_size_diff
+    ]
     
-    return closest_bucket
+    if not valid_buckets:
+        return None
+        
+    # Enhanced metric calculation
+    def compute_bucket_score(bucket: BucketInfo) -> float:
+        size_diff = abs(bucket.total_pixels - original_pixels) / original_pixels
+        ratio_diff = abs(bucket.aspect_ratio - original_ratio)
+        
+        # Weighted scoring
+        return size_diff * 0.6 + ratio_diff * 0.4
+    
+    return min(valid_buckets, key=compute_bucket_score)
 
 def group_images_by_bucket(
     image_paths: List[str],

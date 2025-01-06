@@ -1,6 +1,6 @@
 """Shared type definitions for bucket handling."""
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy as np
 
 @dataclass
@@ -45,6 +45,23 @@ class BucketDimensions:
             self.total_latents == self.width_latent * self.height_latent
         ]
         return all(checks)
+    
+    def validate_with_details(self) -> Tuple[bool, Optional[str]]:
+        """Validate dimensions with detailed error reporting."""
+        checks = [
+            (self.width > 0, "Width must be positive"),
+            (self.height > 0, "Height must be positive"),
+            (self.width_latent == self.width // 8, "Invalid latent width"),
+            (self.height_latent == self.height // 8, "Invalid latent height"),
+            (np.isclose(self.aspect_ratio, self.width / self.height), "Invalid aspect ratio"),
+            (self.total_pixels == self.width * self.height, "Invalid pixel count"),
+            (self.total_latents == self.width_latent * self.height_latent, "Invalid latent count")
+        ]
+        
+        for check, message in checks:
+            if not check:
+                return False, message
+        return True, None
 
 @dataclass
 class BucketInfo:
