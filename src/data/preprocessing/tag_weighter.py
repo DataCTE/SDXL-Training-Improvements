@@ -497,10 +497,11 @@ def create_tag_weighter(
 
 def create_tag_weighter_with_index(
     config: "Config",
-    image_captions: Dict[str, str]
+    image_captions: Dict[str, str],
+    model: Optional["StableDiffusionXL"] = None  # Add model parameter
 ) -> TagWeighter:
     """Create and initialize tag weighter with index."""
-    weighter = TagWeighter(config)
+    weighter = TagWeighter(config, model=model)  # Pass model to TagWeighter
     
     logger.info("Processing captions and updating tag statistics...")
     weighter.update_statistics(list(image_captions.values()))
