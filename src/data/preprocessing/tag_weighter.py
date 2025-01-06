@@ -47,21 +47,48 @@ class TagWeighter:
         self.clip_encoder = model.clip_encoder_1 if model else None
         self.tokenizer = model.tokenizer_1 if model else None
         
-        # Category embeddings using CLIP
-        self.category_embeddings = self._initialize_category_embeddings([
-            ("subject", ["person", "object", "animal", "vehicle", "building", "landscape"]),
-            ("style", ["painting", "anime", "drawing", "photograph", "digital art", "sketch", "watercolor"]),
-            ("quality", ["high quality", "detailed", "sharp", "professional", "masterpiece"]),
-            ("technical", ["lighting", "composition", "focus", "exposure", "angle", "depth"])
-        ])
+        # Initialize tag types and embeddings
+        self.tag_types = {
+            "subject": ["person", "object", "animal", "vehicle", "building", "landscape"],
+            "style": ["painting", "anime", "drawing", "photograph", "digital art", "sketch", "watercolor"],
+            "quality": ["high quality", "detailed", "sharp", "professional", "masterpiece"],
+            "technical": ["lighting", "composition", "focus", "exposure", "angle", "depth"]
+        }
         
-        # Initialize counters
+        # Initialize counters with proper defaults
         self.tag_counts = defaultdict(DefaultDict(default_int))
         self.tag_weights = defaultdict(DefaultDict(lambda: self.default_weight))
         self.total_samples = 0
         
         # Cache reference
         self.cache_manager = config.cache_manager if hasattr(config, 'cache_manager') else None
+
+    def verify_cache_validity(self) -> bool:
+        """Verify that loaded cache data is valid and complete."""
+        try:
+            # Check basic structure
+            if not self.tag_counts or not self.tag_weights:
+                return False
+                
+            # Verify all tag types are present
+            for tag_type in self.tag_types:
+                if tag_type not in self.tag_counts or tag_type not in self.tag_weights:
+                    return False
+                    
+            # Verify weight ranges
+            for tag_type, weights in self.tag_weights.items():
+                if not weights:  # Skip empty categories
+                    continue
+                min_weight = min(weights.values())
+                max_weight = max(weights.values())
+                if not (self.min_weight <= min_weight <= max_weight <= self.max_weight):
+                    return False
+                    
+            return True
+            
+        except Exception as e:
+            logger.error(f"Cache validation failed: {e}")
+            return False
 
     def _initialize_category_embeddings(self, categories):
         """Initialize category embeddings using SDXL's CLIP."""
@@ -290,29 +317,37 @@ class TagWeighter:
         index_data = self._prepare_index_data({})  # Empty images dict for statistics only
         self.config.cache_manager.save_tag_index(index_data)
 
-    def _load_cache(self) -> None:
-        """Load tag statistics from cache."""
-        if not hasattr(self.config, 'cache_manager'):
-            return
-        
-        index_data = self.config.cache_manager.load_tag_index()
-        if not index_data:
-            return
-        
-        # Load statistics from index
-        if "statistics" in index_data:
-            stats = index_data["statistics"]
-            if "tag_counts" in stats:
-                for tag_type, counts in stats["tag_counts"].items():
-                    self.tag_counts[tag_type].update(counts)
+    def _load_cache(self) -> bool:
+        """Load tag statistics from cache with validation."""
+        try:
+            if not self.cache_manager:
+                return False
             
-            if "tag_weights" in stats:
-                for tag_type, weights in stats["tag_weights"].items():
-                    self.tag_weights[tag_type].update(weights)
-        
-        # Load metadata
-        if "metadata" in index_data:
-            self.total_samples = index_data["metadata"].get("total_samples", 0)
+            index_data = self.cache_manager.load_tag_index()
+            if not index_data:
+                return False
+            
+            # Load statistics from index
+            if "statistics" in index_data:
+                stats = index_data["statistics"]
+                if "tag_counts" in stats:
+                    for tag_type, counts in stats["tag_counts"].items():
+                        self.tag_counts[tag_type].update(counts)
+                
+                if "tag_weights" in stats:
+                    for tag_type, weights in stats["tag_weights"].items():
+                        self.tag_weights[tag_type].update(weights)
+            
+            # Load metadata
+            if "metadata" in index_data:
+                self.total_samples = index_data["metadata"].get("total_samples", 0)
+            
+            # Verify loaded data
+            return self.verify_cache_validity()
+            
+        except Exception as e:
+            logger.error(f"Failed to load tag cache: {e}")
+            return False
 
     def get_tag_statistics(self) -> Dict[str, Dict[str, Union[int, float]]]:
         """Get statistics about tags and weights."""
@@ -350,41 +385,41 @@ class TagWeighter:
         index_data = self._prepare_index_data(image_tags)
         self.config.cache_manager.save_tag_index(index_data)
 
-    def _prepare_index_data(self, image_tags: Dict[str, Dict[str, any]]) -> Dict[str, Any]:
-        """Prepare index data structure for global metadata and per-image tags."""
+    def _prepare_index_data(self, image_tags: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Prepare tag index data for saving."""
         return {
             "version": "1.0",
+            "updated_at": time.time(),
             "metadata": {
-                "total_samples": self.total_samples,
-                "default_weight": self.default_weight,
-                "min_weight": self.min_weight,
-                "max_weight": self.max_weight,
-                "smoothing_factor": self.smoothing_factor,
-                "tag_types": self.tag_types,
-                "created_at": time.time(),
+                "config": {
+                    "default_weight": self.default_weight,
+                    "min_weight": self.min_weight,
+                    "max_weight": self.max_weight,
+                    "smoothing_factor": self.smoothing_factor
+                },
                 "statistics": {
-                    "tag_counts": {k: dict(v) for k, v in self.tag_counts.items()},
-                    "tag_weights": {k: dict(v) for k, v in self.tag_weights.items()},
-                    "type_statistics": self.get_tag_statistics()
-                }
-            },
-            "images": {
-                str(image_path): {
-                    "caption": image_data["caption"],
-                    "tags": {
-                        category: [
-                            {
-                                "tag": tag_info["tag"],
-                                "weight": float(tag_info["weight"]),
-                                "frequency": float(self.tag_counts[category][tag_info["tag"]] / self.total_samples)
-                            }
-                            for tag_info in tags_list
-                        ]
-                        for category, tags_list in image_data["weight_details"]["tags"].items()
+                    "total_samples": self.total_samples,
+                    "tag_type_counts": {
+                        tag_type: sum(counts.values())
+                        for tag_type, counts in self.tag_counts.items()
+                    },
+                    "unique_tags": {
+                        tag_type: len(counts)
+                        for tag_type, counts in self.tag_counts.items()
                     }
                 }
-                for image_path, image_data in image_tags.items()
-            }
+            },
+            "statistics": {
+                "tag_counts": {
+                    tag_type: dict(counts)
+                    for tag_type, counts in self.tag_counts.items()
+                },
+                "tag_weights": {
+                    tag_type: dict(weights)
+                    for tag_type, weights in self.tag_weights.items()
+                }
+            },
+            "images": image_tags
         }
 
     def _clean_numeric_values(self, obj: Any) -> Any:
