@@ -6,6 +6,7 @@ from .logging import setup_logging, cleanup_logging, LogManager, get_logger
 from .formatters import ColoredFormatter
 from .progress import ProgressTracker
 from .metrics import MetricsTracker
+from .wandb import WandbLogger, WandbConfig
 
 # Type alias for backward compatibility
 Logger: TypeAlias = UnifiedLogger
@@ -22,5 +23,7 @@ __all__ = [
     'ColoredFormatter',
     'ProgressTracker',
     'MetricsTracker',
-    'get_logger'
+    'get_logger',
+    'WandbLogger',
+    'WandbConfig'
 ]
