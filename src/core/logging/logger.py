@@ -12,11 +12,10 @@ import numpy as np
 from tqdm import tqdm
 import torch
 import wandb
-from colorama import Fore, Style, init as colorama_init
+import colorama
+from colorama import Fore, Style
 
 # Initialize colorama
-colorama_init(autoreset=True)
-
 colorama.init(autoreset=True)
 
 @dataclass

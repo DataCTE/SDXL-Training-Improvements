@@ -5,12 +5,18 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Tuple
 import threading
 from datetime import datetime
-from .logger import ColoredFormatter
+import colorama
+from .logger import ColoredFormatter, UnifiedLogger
 from .base import LogConfig
 from src.data.utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
+
+class TensorLogger:
+    """Logger for tensor operations."""
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
 
 # Global action history dict
 _action_history: Dict[str, Any] = {}
@@ -21,7 +27,7 @@ class LogManager:
     """Centralized logging manager."""
     _instance = None
     _loggers: Dict[str, logging.Logger] = {}
-    _tensor_loggers: Dict[str, 'TensorLogger'] = {}
+    _tensor_loggers: Dict[str, TensorLogger] = {}
     _action_history: Dict[str, Any] = {}
     
     def __init__(self):
@@ -41,7 +47,7 @@ class LogManager:
                 self._loggers[name] = logging.getLogger(name)
             return self._loggers[name]
     
-    def get_tensor_logger(self, name: str) -> 'TensorLogger':
+    def get_tensor_logger(self, name: str) -> TensorLogger:
         """Get or create tensor logger by name."""
         with self._lock:
             if name not in self._tensor_loggers:
@@ -108,7 +114,7 @@ def setup_logging(
     capture_warnings: Optional[bool] = None,
     propagate: Optional[bool] = None,
     console_level: Optional[Union[int, str]] = None
-) -> Tuple[logging.Logger, TensorLogger]:
+) -> Tuple[logging.Logger, "TensorLogger"]:
     """Setup logging system with configuration."""
     # Use config values if provided, otherwise use fallback values
     if config:
