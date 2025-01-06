@@ -50,8 +50,6 @@ colorama.init(autoreset=True)
 class LogManager:
     """Centralized logging manager."""
     _instance = None
-    _loggers: Dict[str, 'Logger'] = {}
-    _metrics_buffer: Dict[str, List[float]] = {}
     _lock = threading.Lock()
     
     def __new__(cls):
@@ -66,6 +64,7 @@ class LogManager:
         self._loggers = {}
         self._metrics_buffer = {}
         self._registry_lock = threading.Lock()
+        self.config = None
     
     @classmethod
     def get_instance(cls) -> 'LogManager':

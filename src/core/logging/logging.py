@@ -1,10 +1,9 @@
 """Centralized logging configuration for SDXL training."""
 import logging
 import sys
-import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Tuple
-import torch
+import threading
 import colorama
 from colorama import Fore, Style
 from datetime import datetime
@@ -177,34 +176,29 @@ def setup_logging(
     propagate: Optional[bool] = None,
     console_level: Optional[Union[int, str]] = None
 ) -> Tuple[logging.Logger, TensorLogger]:
-    """Setup logging system with configuration.
-    
-    Args:
-        config: LogConfig object or dict containing logging configuration
-        log_dir: Directory for log files (fallback if not in config)
-        level: Logging level for file output (fallback if not in config)
-        filename: Optional log file name (fallback if not in config)
-        module_name: Optional module name for logger
-        capture_warnings: Whether to capture Python warnings (fallback if not in config)
-        propagate: Whether to propagate logs to parent loggers (fallback if not in config)
-        console_level: Logging level for console output (fallback if not in config)
+    """Setup logging system with configuration."""
+    # Use config values if provided, otherwise use fallback values
+    if config:
+        if isinstance(config, dict):
+            config = LogConfig(**config)
+        log_dir = config.log_dir
+        level = config.file_level
+        filename = config.filename
+        capture_warnings = config.capture_warnings
+        propagate = config.propagate
+        console_level = config.console_level
+
+    # Create log directory only for file logging
+    if filename:
+        log_path = Path(convert_windows_path(log_dir, make_absolute=True))
+        log_path.mkdir(parents=True, exist_ok=True)
         
-    Returns:
-        Tuple of (configured logger instance, tensor logger instance)
-    """
-    # Get root logger
+    # Configure root logger
     root_logger = logging.getLogger()
-    
-    # Important: Set propagate=False for root logger to prevent duplicates
-    root_logger.propagate = False
-    
-    # Set root logger to DEBUG to allow all messages through
-    root_logger.setLevel(logging.DEBUG)
-    
-    # Clear existing handlers
+    root_logger.setLevel(logging.DEBUG)  # Allow all messages through
     root_logger.handlers.clear()
     
-    # Add console handler
+    # Add console handler with specified level
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, (console_level or "INFO").upper()))
     console_handler.setFormatter(ColoredFormatter(
@@ -212,11 +206,11 @@ def setup_logging(
         datefmt='%Y-%m-%d %H:%M:%S'
     ))
     root_logger.addHandler(console_handler)
-    
+
     # Add file handler if filename provided
     if filename:
         file_handler = logging.FileHandler(
-            Path(log_dir) / filename,
+            log_path / filename,
             encoding='utf-8'
         )
         file_handler.setLevel(getattr(logging, (level or "DEBUG").upper()))
@@ -227,127 +221,17 @@ def setup_logging(
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         root_logger.addHandler(file_handler)
-        
-    # Configure warning capture
+
+    # Configure warning capture and propagation
     logging.captureWarnings(capture_warnings if capture_warnings is not None else True)
     
-    # Create logger with propagation explicitly set to False
+    # Create logger with propagation explicitly set
     logger = logging.getLogger(module_name or 'root')
     logger.propagate = False if propagate is None else propagate
     
-    # Create tensor logger with enhanced error reporting
-    tensor_logger = TensorLogger(logger, dump_on_error=True)
-    
-    return logger, tensor_logger
-    """Setup logging configuration with detailed action tracking and colored output.
-    
-    Args:
-        config: LogConfig object or dict containing logging configuration
-        log_dir: Directory for log files (fallback if not in config)
-        level: Logging level for file output (fallback if not in config)
-        filename: Optional log file name (fallback if not in config)
-        module_name: Optional module name for logger
-        capture_warnings: Whether to capture Python warnings (fallback if not in config)
-        propagate: Whether to propagate logs to parent loggers (fallback if not in config)
-        console_level: Logging level for console output (fallback if not in config)
-        
-    Returns:
-        Tuple of (configured logger instance, tensor logger instance)
-    """
-    # Use config values if provided, otherwise use fallback values
-    if config:
-        if isinstance(config, dict):
-            config = LogConfig(**config)
-        log_dir = config.log_dir
-        level = config.file_level
-        filename = config.filename
-        capture_warnings = config.capture_warnings
-        propagate = config.propagate
-        console_level = config.console_level  # Use console_level from config
-    
-    # If no console_level specified (either via config or parameter), default to "INFO"
-    if console_level is None:
-        console_level = "INFO"
-
-    # Create log directory only for file logging
-    if log_dir:
-        log_path = Path(convert_windows_path(log_dir, make_absolute=True))
-    else:
-        log_path = Path(convert_windows_path("outputs/logs", make_absolute=True))
-        
-    try:
-        if filename:
-            log_path.mkdir(parents=True, exist_ok=True)
-            logging.info(f"Created log directory: {log_path}")
-    except Exception as e:
-        print(f"{Fore.RED}Failed to create log directory: {str(e)}{Style.RESET_ALL}")
-        raise
-    
-    # Create and configure logger
-    logger_name = module_name or 'root'
-    logger = logging.getLogger(logger_name)
-    
-    # Important: Set the base logger level to the minimum of console and file levels
-    # This ensures lower level messages aren't filtered before reaching handlers
-    logger.setLevel(logging.DEBUG)  
-    
-    # Remove existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    try:
-        # Create console handler with specified level
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_formatter = ColoredFormatter(
-            '%(asctime)s | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        console_handler.setFormatter(console_formatter)
-        # Convert level string to logging constant
-        console_level = console_level.upper() if isinstance(console_level, str) else console_level
-        console_handler.setLevel(getattr(logging, console_level))  # Changed: directly use console_level
-        logger.addHandler(console_handler)
-        logger.debug(f"Console handler configured with level: {console_level}")  # Add debug message
-
-        # Enable warning capture and configure propagation
-        logging.captureWarnings(capture_warnings)
-        logger.propagate = propagate
-        
-        # Add detailed file handler if filename provided
-        if filename:
-            file_path = log_path / filename
-            file_handler = logging.FileHandler(file_path, mode='a', encoding='utf-8')
-            file_handler.setFormatter(logging.Formatter(
-                '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
-                '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
-                '%(funcName)s |\n%(message)s\n',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            ))
-            file_handler.setLevel(logging.DEBUG)  # Always capture full detail in file
-            logger.addHandler(file_handler)
-            logger.info(f"Logging to file: {file_path}", extra={
-                'file_path': str(file_path),
-                'log_level': logging.getLevelName(level)
-            })
-    except Exception as e:
-        print(f"{Fore.RED}Failed to setup logging handlers: {str(e)}{Style.RESET_ALL}")
-        raise
-    
-    # Suppress noisy loggers
-    for logger_name in ["PIL", "torch", "transformers"]:
-        logging.getLogger(logger_name).setLevel(logging.WARNING)
-    
-    # Log initialization only once
-    if not logger.handlers:
-        logger.info(f"Logging system initialized for {logger_name} at level {logging.getLevelName(level)}")
-    
     # Create tensor logger
     tensor_logger = TensorLogger(logger)
-        
-    # Enable warning capture and configure propagation
-    logging.captureWarnings(capture_warnings)
-    logger.propagate = propagate
-        
+    
     return logger, tensor_logger
     
 def cleanup_logging() -> Dict[str, Any]:
