@@ -851,13 +851,25 @@ class CacheManager:
                     
                 # Check coverage with detailed logging
                 image_tags = images_data.get("images", {})
-                missing_paths = [str(path) for path in image_paths 
-                               if str(path) not in image_tags]
+                missing_paths = []
+                missing_captions = []
                 
-                if missing_paths:
-                    logger.warning(f"Missing tags for {len(missing_paths)} images")
-                    if len(missing_paths) <= 5:  # Log first few missing paths
-                        logger.debug(f"Missing paths: {missing_paths}")
+                for path, caption in zip(image_paths, captions):
+                    path_str = str(path)
+                    if path_str not in image_tags:
+                        missing_paths.append(path_str)
+                    elif not caption:
+                        missing_captions.append(path_str)
+                
+                if missing_paths or missing_captions:
+                    if missing_paths:
+                        logger.warning(f"Missing tags for {len(missing_paths)} images")
+                        if len(missing_paths) <= 5:
+                            logger.debug(f"Missing paths: {missing_paths}")
+                    if missing_captions:
+                        logger.warning(f"Missing captions for {len(missing_captions)} images")
+                        if len(missing_captions) <= 5:
+                            logger.debug(f"Missing captions: {missing_captions}")
                     return False
                     
                 return True
