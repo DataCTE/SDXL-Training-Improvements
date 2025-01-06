@@ -6,7 +6,7 @@ import torch
 import threading
 from typing import Dict, Optional, Union, Any, List
 from src.core.logging import get_logger, ProgressPredictor
-from src.data.utils.paths import convert_windows_path
+from src.data.utils.paths import convert_windows_path, convert_path_to_pathlib, convert_paths
 from src.data.config import Config
 import hashlib
 from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
@@ -25,7 +25,7 @@ class CacheManager:
         device: Optional[torch.device] = None
     ):
         """Initialize cache manager with bucket support."""
-        self.cache_dir = Path(convert_windows_path(cache_dir))
+        self.cache_dir = convert_path_to_pathlib(cache_dir, make_absolute=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache_size = max_cache_size
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -154,8 +154,8 @@ class CacheManager:
                 # Force Python to process any pending events
                 time.sleep(0.001)
             
-            clip_path = self.clip_latents_dir / f"{cache_key}.pt"
-            metadata_path = self.metadata_dir / f"{cache_key}.json"
+            clip_path = convert_path_to_pathlib(self.clip_latents_dir / f"{cache_key}.pt")
+            metadata_path = convert_path_to_pathlib(self.metadata_dir / f"{cache_key}.json")
             
             # Only process if we have all required files
             if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
@@ -277,7 +277,8 @@ class CacheManager:
         """Get list of paths that need processing."""
         uncached = []
         for path in image_paths:
-            cache_key = self.get_cache_key(path)
+            path_str = str(convert_path_to_pathlib(path))
+            cache_key = self.get_cache_key(path_str)
             cache_entry = self.cache_index["entries"].get(cache_key)
             
             if not cache_entry or not self._validate_cache_entry(cache_entry):
@@ -303,7 +304,7 @@ class CacheManager:
             })
             
             # Save VAE latents
-            vae_path = self.vae_latents_dir / f"{cache_key}.pt"
+            vae_path = convert_path_to_pathlib(self.vae_latents_dir / f"{cache_key}.pt")
             torch.save({
                 "vae_latents": tensors["vae_latents"].cpu(),
                 "time_ids": tensors["time_ids"].cpu()
@@ -476,7 +477,7 @@ class CacheManager:
 
     def get_cache_key(self, path: Union[str, Path]) -> str:
         """Generate cache key from path."""
-        path_str = str(path)
+        path_str = str(convert_path_to_pathlib(path))
         return hashlib.md5(path_str.encode()).hexdigest()
 
     def save_tag_index(self, tag_data: Dict[str, Any]) -> None:
