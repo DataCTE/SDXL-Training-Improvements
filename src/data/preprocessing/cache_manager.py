@@ -399,7 +399,7 @@ class CacheManager:
         path_str = str(path)
         return hashlib.md5(path_str.encode()).hexdigest()
 
-    def save_tag_index(self, index_data: Dict[str, Any], index_path: Optional[Path] = None) -> bool:
+    def save_tag_index(self, index_data: Dict[str, Any]) -> bool:
         """Save tag index with split files for better performance."""
         try:
             # Split data into statistics and image tags
