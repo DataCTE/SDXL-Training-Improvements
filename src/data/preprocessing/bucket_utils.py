@@ -69,31 +69,44 @@ def generate_buckets(config: Config) -> List[BucketInfo]:
 def compute_bucket_dims(
     original_size: Tuple[int, int],
     buckets: List[BucketInfo],
-    max_size_diff: float = 0.25  # Maximum allowed size difference
+    max_size_diff: float = 0.25,
+    max_aspect_diff: float = 0.1
 ) -> Optional[BucketInfo]:
-    """Find closest bucket with improved metrics and validation."""
+    """Find closest bucket with improved metrics and validation.
+    
+    Args:
+        original_size: Original image dimensions (width, height)
+        buckets: List of available buckets
+        max_size_diff: Maximum allowed size difference ratio (default: 0.25)
+        max_aspect_diff: Maximum allowed aspect ratio difference (default: 0.1)
+        
+    Returns:
+        BucketInfo or None if no suitable bucket found
+    """
     w, h = original_size
     original_ratio = w / h
     original_pixels = w * h
     
-    # Add size constraints
-    valid_buckets = [
-        b for b in buckets
-        if (abs(b.total_pixels - original_pixels) / original_pixels) <= max_size_diff
-    ]
+    # Filter valid buckets based on constraints
+    valid_buckets = []
+    for bucket in buckets:
+        size_diff = abs(bucket.dimensions.total_pixels - original_pixels) / original_pixels
+        aspect_diff = abs(bucket.dimensions.aspect_ratio - original_ratio)
+        
+        if size_diff <= max_size_diff and aspect_diff <= max_aspect_diff:
+            valid_buckets.append((bucket, size_diff, aspect_diff))
     
     if not valid_buckets:
         return None
-        
-    # Enhanced metric calculation
-    def compute_bucket_score(bucket: BucketInfo) -> float:
-        size_diff = abs(bucket.total_pixels - original_pixels) / original_pixels
-        ratio_diff = abs(bucket.aspect_ratio - original_ratio)
-        
-        # Weighted scoring
-        return size_diff * 0.6 + ratio_diff * 0.4
     
-    return min(valid_buckets, key=compute_bucket_score)
+    # Score buckets using weighted metrics
+    def compute_score(size_diff: float, aspect_diff: float) -> float:
+        size_weight = 0.6
+        aspect_weight = 0.4
+        return size_diff * size_weight + aspect_diff * aspect_weight
+    
+    # Return bucket with lowest score
+    return min(valid_buckets, key=lambda x: compute_score(x[1], x[2]))[0]
 
 def group_images_by_bucket(
     image_paths: List[str],

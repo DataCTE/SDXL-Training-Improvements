@@ -6,31 +6,37 @@ import numpy as np
 @dataclass
 class BucketDimensions:
     """Explicit storage of all dimension-related information."""
-    width: int                       # Pixel width
-    height: int                      # Pixel height
-    width_latent: int               # Latent width (w//8)
-    height_latent: int              # Latent height (h//8)
-    aspect_ratio: float             # Width/height ratio
-    aspect_ratio_inverse: float     # Height/width ratio
-    total_pixels: int               # Total pixel count
-    total_latents: int              # Total latent count
+    width: int
+    height: int
+    width_latent: int
+    height_latent: int
+    aspect_ratio: float
+    aspect_ratio_inverse: float
+    total_pixels: int
+    total_latents: int
     
     @classmethod
     def from_pixels(cls, width: int, height: int) -> 'BucketDimensions':
         """Create dimensions from pixel values with validation."""
-        if width <= 0 or height <= 0:
-            raise ValueError(f"Invalid dimensions: {width}x{height}")
-        
-        return cls(
-            width=width,
-            height=height,
-            width_latent=width // 8,
-            height_latent=height // 8,
-            aspect_ratio=width / height,
-            aspect_ratio_inverse=height / width,
-            total_pixels=width * height,
-            total_latents=(width // 8) * (height // 8)
-        )
+        try:
+            if width <= 0 or height <= 0:
+                raise ValueError(f"Invalid dimensions: {width}x{height}")
+            
+            if width % 8 != 0 or height % 8 != 0:
+                raise ValueError(f"Dimensions must be divisible by 8: {width}x{height}")
+                
+            return cls(
+                width=width,
+                height=height,
+                width_latent=width // 8,
+                height_latent=height // 8,
+                aspect_ratio=width / height,
+                aspect_ratio_inverse=height / width,
+                total_pixels=width * height,
+                total_latents=(width // 8) * (height // 8)
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to create bucket dimensions: {str(e)}")
     
     def validate(self) -> bool:
         """Validate internal consistency of dimensions."""
