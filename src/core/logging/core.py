@@ -1,4 +1,4 @@
-"""Unified logging system with integrated features."""
+"""Core logging functionality with integrated features."""
 import logging
 import sys
 import threading
@@ -13,65 +13,72 @@ from functools import wraps
 from dataclasses import dataclass, field
 from collections import deque
 
-
+from .logger import ColoredFormatter, LogConfig, ProgressTracker, MetricsTracker
 
 class UnifiedLogger:
     """Single entry point for all logging functionality."""
     
-    def __init__(self, config: LogConfig):
-        self.config = config
-        self.logger = self._setup_logger()
-        self._setup_features()
+    def __init__(self, config: Optional[Union[LogConfig, Dict]] = None):
+        """Initialize unified logger with optional configuration."""
+        self.config = LogConfig(**config) if isinstance(config, dict) else config or LogConfig()
+        self._setup_base_logger()
+        self._setup_tracking_features()
         
-    def _setup_logger(self) -> logging.Logger:
-        """Initialize base logger with handlers."""
-        logger = logging.getLogger(self.config.name)
-        logger.handlers.clear()
-        logger.setLevel(logging.DEBUG)
+    def _setup_base_logger(self) -> None:
+        """Initialize base logger with configured handlers."""
+        self.logger = logging.getLogger(self.config.name)
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.handlers.clear()
         
+        # Console handler setup
         if self.config.enable_console:
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(ColoredFormatter())
-            console_handler.setLevel(getattr(logging, self.config.console_level.upper()))
-            logger.addHandler(console_handler)
+            console = logging.StreamHandler(sys.stdout)
+            console.setLevel(getattr(logging, self.config.console_level.upper()))
+            console.setFormatter(ColoredFormatter())
+            self.logger.addHandler(console)
             
+        # File handler setup
         if self.config.enable_file:
-            log_path = Path(self.config.log_dir)
-            log_path.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(
-                log_path / self.config.filename,
+            log_dir = Path(self.config.log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            file = logging.FileHandler(
+                log_dir / self.config.filename,
                 encoding='utf-8'
             )
-            file_handler.setLevel(getattr(logging, self.config.file_level.upper()))
-            file_handler.setFormatter(logging.Formatter(
+            file.setLevel(getattr(logging, self.config.file_level.upper()))
+            file.setFormatter(logging.Formatter(
                 '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
             ))
-            logger.addHandler(file_handler)
+            self.logger.addHandler(file)
             
-        return logger
-        
-    def _setup_features(self):
-        """Initialize optional features based on config."""
-        # Initialize W&B
-        self.wandb = None
+    def _setup_tracking_features(self) -> None:
+        """Initialize tracking features based on configuration."""
+        # W&B initialization
+        self._wandb_run = None
         if self.config.enable_wandb:
             try:
-                self.wandb = wandb.init(**self.config.wandb_config)
+                self._wandb_run = wandb.init(
+                    project=self.config.wandb_project,
+                    name=self.config.wandb_name,
+                    tags=self.config.wandb_tags,
+                    config=vars(self.config)
+                )
             except Exception as e:
-                self.logger.error(f"Failed to initialize W&B: {e}")
+                self.logger.warning(f"Failed to initialize W&B: {e}")
                 
-        # Initialize progress tracking
-        self.progress = None
+        # Progress tracking setup
+        self._progress = None
         if self.config.enable_progress:
-            self.progress = ProgressTracker(self.config.progress_config)
-            
-        # Initialize metrics tracking
-        self.metrics = None
-        if self.config.enable_metrics:
-            self.metrics = MetricsTracker(
-                self.config.metrics_config,
-                self.wandb if self.config.enable_wandb else None
+            self._progress = ProgressTracker(
+                window_size=self.config.progress_window,
+                smoothing=self.config.progress_smoothing
             )
+            
+        # Metrics tracking setup
+        self._metrics = MetricsTracker(
+            window_size=self.config.metrics_window,
+            keep_history=self.config.metrics_history
+        )
     
     # Core logging methods
     def debug(self, msg: str, *args, **kwargs): self.logger.debug(msg, *args, **kwargs)
