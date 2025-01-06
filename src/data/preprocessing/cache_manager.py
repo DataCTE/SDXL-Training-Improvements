@@ -661,9 +661,16 @@ class CacheManager:
                     if not self._verify_rebuild_success():
                         raise CacheError("Cache rebuild failed", context={
                             'cache_dir': str(self.cache_dir),
-                            'total_entries': len(self.cache_index.get("entries", {}))
+                            'total_entries': len(self.cache_index.get("entries", {})),
+                            'tag_stats_exists': self.get_tag_statistics_path().exists(),
+                            'tag_images_exists': self.get_image_tags_path().exists(),
+                            'cache_structure': {
+                                'has_entries': "entries" in self.cache_index,
+                                'has_stats': "stats" in self.cache_index,
+                                'has_tag_metadata': "tag_metadata" in self.cache_index
+                            }
                         })
-                    logger.info("Cache rebuild completed successfully")
+                    logger.info("Cache rebuild completed successfully - ready for preprocessing")
                     
             except Exception as e:
                 raise CacheError("Failed to rebuild cache", context={
@@ -686,10 +693,7 @@ class CacheManager:
                     self.get_image_tags_path().exists()):
                 return False
             
-            # Verify cache statistics make sense
-            if self.cache_index["stats"]["total_entries"] <= 0:
-                return False
-            
+            # An empty cache is valid for initial setup
             return True
             
         except Exception as e:
