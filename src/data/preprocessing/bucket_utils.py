@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 def generate_buckets(config: Config) -> List[BucketInfo]:
-    """Generate comprehensive bucket information with validation."""
+    """Generate comprehensive bucket information with enhanced validation."""
     image_config = config.global_config.image
     buckets = []
     
@@ -23,46 +23,39 @@ def generate_buckets(config: Config) -> List[BucketInfo]:
         try:
             w, h = dims[0], dims[1]
             
-            # Basic dimension validation
-            if not (w >= image_config.min_size[0] and h >= image_config.min_size[1] and
-                   w <= image_config.max_size[0] and h <= image_config.max_size[1] and
-                   w % image_config.bucket_step == 0 and h % image_config.bucket_step == 0):
-                continue
-            
-            # Create and validate bucket
+            # Create bucket and validate
             bucket = BucketInfo.from_dims(w, h, len(buckets))
-            if not bucket.validate():
-                logger.warning(f"Invalid bucket configuration: {w}x{h}")
+            valid, error = validate_bucket_config(bucket, config)
+            
+            if not valid:
+                logger.warning(f"Invalid bucket configuration {w}x{h}: {error}")
                 continue
             
-            if validate_aspect_ratio(w, h, image_config.max_aspect_ratio):
-                buckets.append(bucket)
+            buckets.append(bucket)
+            
+            # Add flipped dimension if valid
+            if h != w:
+                flipped = BucketInfo.from_dims(h, w, len(buckets))
+                flipped_valid, flipped_error = validate_bucket_config(flipped, config)
                 
-                # Add flipped dimension if valid
-                if h != w:
-                    flipped = BucketInfo.from_dims(h, w, len(buckets))
-                    if (validate_aspect_ratio(h, w, image_config.max_aspect_ratio) and 
-                        flipped.validate()):
-                        buckets.append(flipped)
+                if flipped_valid:
+                    buckets.append(flipped)
+                else:
+                    logger.debug(f"Skipping flipped bucket {h}x{w}: {flipped_error}")
         
         except Exception as e:
             logger.warning(f"Error creating bucket for dims {dims}: {e}")
+            continue
     
     # Sort buckets by total pixels
     buckets.sort(key=lambda x: x.dimensions.total_pixels)
     
     # Log comprehensive bucket information
     if logger.isEnabledFor(logging.INFO):
-        logger.info("\nConfigured buckets:")
-        for bucket in buckets:
-            dims = bucket.dimensions
-            logger.info(
-                f"- {dims.width}x{dims.height} pixels "
-                f"(latent: {dims.width_latent}x{dims.height_latent}, "
-                f"ratio: {dims.aspect_ratio:.2f}, inverse: {dims.aspect_ratio_inverse:.2f}, "
-                f"pixels: {dims.total_pixels}, latents: {dims.total_latents}, "
-                f"class: {bucket.size_class}/{bucket.aspect_class})"
-            )
+        log_bucket_statistics(
+            {bucket.pixel_dims: [i] for i, bucket in enumerate(buckets)},
+            len(buckets)
+        )
     
     return buckets
 
@@ -195,41 +188,38 @@ def validate_bucket_config(
     bucket: BucketInfo,
     config: "Config"
 ) -> Tuple[bool, Optional[str]]:
-    """Validate bucket configuration against global settings.
-    
-    Args:
-        bucket: Bucket configuration to validate
-        config: Global configuration object
-        
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
+    """Validate bucket configuration against global settings with enhanced error reporting."""
     try:
         image_config = config.global_config.image
         w, h = bucket.pixel_dims
         
-        # Size constraints
-        if not (image_config.min_size[0] <= w <= image_config.max_size[0]):
-            return False, f"Width {w} outside allowed range {image_config.min_size[0]}-{image_config.max_size[0]}"
+        # Comprehensive validation checks with detailed messages
+        checks = [
+            (image_config.min_size[0] <= w <= image_config.max_size[0],
+             f"Width {w} outside allowed range {image_config.min_size[0]}-{image_config.max_size[0]}"),
             
-        if not (image_config.min_size[1] <= h <= image_config.max_size[1]):
-            return False, f"Height {h} outside allowed range {image_config.min_size[1]}-{image_config.max_size[1]}"
+            (image_config.min_size[1] <= h <= image_config.max_size[1],
+             f"Height {h} outside allowed range {image_config.min_size[1]}-{image_config.max_size[1]}"),
             
-        # Divisibility
-        if w % image_config.bucket_step != 0:
-            return False, f"Width {w} not divisible by bucket_step {image_config.bucket_step}"
+            (w % image_config.bucket_step == 0,
+             f"Width {w} not divisible by bucket_step {image_config.bucket_step}"),
             
-        if h % image_config.bucket_step != 0:
-            return False, f"Height {h} not divisible by bucket_step {image_config.bucket_step}"
+            (h % image_config.bucket_step == 0,
+             f"Height {h} not divisible by bucket_step {image_config.bucket_step}"),
             
-        # Aspect ratio
-        aspect = w / h
-        if aspect > image_config.max_aspect_ratio or aspect < (1 / image_config.max_aspect_ratio):
-            return False, f"Aspect ratio {aspect:.2f} outside allowed range"
-            
-        # Validate internal consistency
-        if not bucket.validate():
-            return False, "Failed internal bucket validation"
+            (validate_aspect_ratio(w, h, image_config.max_aspect_ratio),
+             f"Aspect ratio {w/h:.2f} outside allowed range")
+        ]
+        
+        # Check each validation condition
+        for condition, error_message in checks:
+            if not condition:
+                return False, error_message
+        
+        # Validate internal bucket consistency
+        valid, error = bucket.validate_with_details()
+        if not valid:
+            return False, f"Internal bucket validation failed: {error}"
             
         return True, None
         
