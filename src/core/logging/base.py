@@ -296,66 +296,7 @@ class ColoredFormatter(logging.Formatter):
 
 def get_logger(name: str, config: Optional[LogConfig] = None) -> logging.Logger:
     """Get or create a logger instance."""
-    from .setup import _logger_registry
-    
-    # If logger exists in registry, return it
-    if name in _logger_registry:
-        return _logger_registry[name][0]
-    
-    # Otherwise create new logger through setup
-    from .setup import setup_logging
-    logger, _ = setup_logging(
-        config=config,
-        module_name=name,
-        propagate=False  # Always disable propagation
-    )
-    return logger
-"""Base logging configuration and utilities."""
-from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+    # Use LogManager singleton instead of global registry
+    manager = LogManager.get_instance()
+    return manager.get_logger(name, config or LogConfig())
 
-if TYPE_CHECKING:
-    from src.data.config import Config
-
-@dataclass 
-class LogConfig:
-    """Unified logging configuration."""
-    # Basic logging config
-    console_level: str = "INFO"
-    file_level: str = "DEBUG"
-    log_dir: str = "outputs/logs"
-    filename: Optional[str] = "training.log"
-    capture_warnings: bool = True
-    console_output: bool = True
-    file_output: bool = True
-    log_cuda_memory: bool = True
-    log_system_memory: bool = True
-    performance_logging: bool = True
-    propagate: bool = True
-    
-    # Metrics config
-    metrics_window_size: int = 100
-    
-    # Progress tracking config
-    progress_tracking: bool = True
-    progress_history_aware: bool = False
-    progress_history_path: Optional[str] = "outputs/logs/progress_history.json"
-    progress_bottleneck_threshold: float = 1.5
-    progress_smoothing: float = 0.3
-    
-    @classmethod
-    def from_config(cls, config: 'Config') -> 'LogConfig':
-        """Create LogConfig from main Config object."""
-        return cls(
-            console_level=config.logging.console_level,
-            file_level=config.logging.file_level,
-            log_dir=config.logging.log_dir,
-            filename=config.logging.filename,
-            capture_warnings=config.logging.capture_warnings,
-            console_output=config.logging.console_output,
-            file_output=config.logging.file_output,
-            log_cuda_memory=config.logging.log_cuda_memory,
-            log_system_memory=config.logging.log_system_memory,
-            performance_logging=config.logging.performance_logging,
-            propagate=config.logging.propagate
-        )
