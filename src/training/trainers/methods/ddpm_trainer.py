@@ -137,12 +137,9 @@ class DDPMTrainer:
         # Initialize progress tracking
         global_step = 0
         best_loss = float('inf')
-        progress_bar = tqdm(
+        progress = logger.start_progress(
             total=total_steps,
-            disable=not is_main_process(),
-            desc=f"Training DDPM ({self.config.training.prediction_type})",
-            position=0,
-            leave=True
+            desc=f"Training DDPM ({self.config.training.prediction_type})"
         )
         
         try:
@@ -183,16 +180,13 @@ class DDPMTrainer:
                             epoch_metrics[k] += v
                         valid_steps += 1
                         
-                        # Update progress bar
-                        progress_bar.set_postfix(
-                            {
-                                'Loss': f"{loss.item():.4f}",
-                                'Epoch': f"{epoch + 1}/{num_epochs}",
-                                'Step': f"{step}/{len(self.train_dataloader)}",
-                                'Time': f"{step_time:.1f}s"
-                            },
-                            refresh=True
-                        )
+                        # Update progress with metrics
+                        progress.update(1, {
+                            'Loss': f"{loss.item():.4f}",
+                            'Epoch': f"{epoch + 1}/{num_epochs}",
+                            'Step': f"{step}/{len(self.train_dataloader)}",
+                            'Time': f"{step_time:.1f}s"
+                        })
                         
                         # Log step metrics if it's the last accumulation step
                         if (step + 1) % self.config.training.gradient_accumulation_steps == 0:
@@ -258,7 +252,7 @@ class DDPMTrainer:
             logger.error(f"Training loop failed: {str(e)}", exc_info=True)
             raise
         finally:
-            progress_bar.close()
+            progress.close()
             
             # Save final checkpoint through parent trainer
             if is_main_process():

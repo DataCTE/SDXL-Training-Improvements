@@ -193,9 +193,14 @@ class TagWeighter:
         
         # Process in larger batches for efficiency
         batch_size = 5000
-        for i in tqdm(range(0, len(captions), batch_size), desc="Processing captions"):
-            batch = captions[i:i + batch_size]
-            self.total_samples += len(batch)
+        with logger.start_progress(
+            total=len(captions) // batch_size + 1,
+            desc="Processing captions"
+        ) as progress:
+            for i in range(0, len(captions), batch_size):
+                batch = captions[i:i + batch_size]
+                self.total_samples += len(batch)
+                progress.update(1)
             
             # Batch process tags
             for caption in batch:

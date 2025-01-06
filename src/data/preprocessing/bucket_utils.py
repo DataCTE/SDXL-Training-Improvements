@@ -127,7 +127,10 @@ def group_images_by_bucket(
         raise ValueError("No valid buckets generated from config")
     
     # Process images with detailed progress
-    with logger.start_progress(len(image_paths), desc="Grouping images by bucket") as progress:
+    with logger.start_progress(
+        total=len(image_paths),
+        desc="Grouping images by bucket"
+    ) as progress:
         for idx, path in enumerate(image_paths):
             progress.update(1)
         try:

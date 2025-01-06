@@ -127,12 +127,9 @@ class FlowMatchingTrainer(SDXLTrainer):
         # Initialize progress tracking
         global_step = 0
         best_loss = float('inf')
-        progress_bar = tqdm(
+        progress = logger.start_progress(
             total=total_steps,
-            disable=not is_main_process(),
-            desc="Training Flow Matching",
-            position=0,
-            leave=True
+            desc="Training Flow Matching"
         )
         
         try:
@@ -158,11 +155,11 @@ class FlowMatchingTrainer(SDXLTrainer):
                     
                     step_time = time.time() - step_start_time
                     
-                    # Update progress bar
-                    progress_bar.set_postfix(
-                        {'Loss': f"{loss.item():.4f}", 'Time': f"{step_time:.1f}s"},
-                        refresh=True
-                    )
+                    # Update progress with metrics
+                    progress.update(1, {
+                        'Loss': f"{loss.item():.4f}",
+                        'Time': f"{step_time:.1f}s"
+                    })
                     
                     # Accumulate loss and metrics
                     accumulated_loss += loss.item()
@@ -230,7 +227,7 @@ class FlowMatchingTrainer(SDXLTrainer):
             logger.error(f"Training failed at epoch {epoch + 1}", exc_info=True)
             raise
         finally:
-            progress_bar.close()
+            progress.close()
             
             # Save final checkpoint
             if is_main_process():
