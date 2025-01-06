@@ -131,3 +131,14 @@ class MemoryError(PreprocessingError):
         - available: Available memory
     """
     pass
+
+class TagProcessingError(PreprocessingError):
+    """Raised when tag processing fails.
+    
+    Contexts:
+        - tag_type: Type of tag that failed
+        - operation: Operation that failed
+        - caption: Caption being processed
+        - cache_status: Cache status when error occurred
+    """
+    pass

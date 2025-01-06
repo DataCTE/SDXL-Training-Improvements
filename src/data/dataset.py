@@ -25,7 +25,7 @@ from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
 from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, group_images_by_bucket, log_bucket_statistics
 from src.data.preprocessing.bucket_types import BucketInfo, BucketDimensions
-from src.data.preprocessing.exceptions import CacheError, DataLoadError
+from src.data.preprocessing.exceptions import CacheError, DataLoadError, TagProcessingError
 
 logger = get_logger(__name__)
 
@@ -224,23 +224,15 @@ class AspectBucketDataset(Dataset):
             self.device_id = None
 
     def _setup_tag_weighting(self) -> None:
-        """Initialize tag weighting system with proper cache handling."""
+        """Initialize tag weighting with enhanced error handling."""
         if not self.config.tag_weighting.enable_tag_weighting:
             self.tag_weighter = None
             return
         
         try:
-            # Create tag weighter instance
-            self.tag_weighter = TagWeighter(
-                config=self.config,
-                model=self.model
-            )
+            self.tag_weighter = TagWeighter(config=self.config, model=self.model)
             
-            # Initialize tag system
             if not self.tag_weighter.initialize_tag_system():
-                logger.warning("Failed to initialize tag system from cache")
-                
-                # Compute new tag weights
                 image_captions = dict(zip(self.image_paths, self.captions))
                 self.tag_weighter = create_tag_weighter_with_index(
                     config=self.config,
@@ -248,17 +240,11 @@ class AspectBucketDataset(Dataset):
                     model=self.model
                 )
                 
-            # Verify tag coverage
             if self.tag_weighter:
-                stats = self.tag_weighter.get_tag_metadata()
-                total_images = len(self.image_paths)
-                tagged_images = len(self.tag_weighter.process_dataset_tags(self.captions))
-                coverage = (tagged_images / total_images) * 100
+                self._validate_tag_coverage()
                 
-                logger.info(f"Tag system initialized with {coverage:.1f}% coverage")
-                
-        except Exception as e:
-            logger.error(f"Failed to setup tag weighting: {e}")
+        except TagProcessingError as e:
+            logger.error(f"Tag weighting failed: {e}")
             self.tag_weighter = None
 
     # Processing Methods

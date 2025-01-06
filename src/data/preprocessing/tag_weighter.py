@@ -16,6 +16,7 @@ from src.core.logging import get_logger, LogConfig
 from src.data.utils.paths import convert_windows_path
 from src.models.sdxl import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
+from src.data.preprocessing.exceptions import TagProcessingError
 
 logger = get_logger(__name__)
 
@@ -627,32 +628,21 @@ class TagWeighter:
         }
 
     def initialize_tag_system(self) -> bool:
-        """Initialize tag system and verify cache if available."""
+        """Initialize tag system with enhanced validation."""
         try:
             if not self.cache_manager:
                 return False
             
-            # Try loading from cache first
             if self.config.tag_weighting.use_cache:
                 tag_data = self.cache_manager.load_tag_index()
-                if tag_data and self._load_cache():
-                    logger.info("Successfully loaded tag weights from cache")
-                    return True
+                if tag_data and self._validate_tag_data(tag_data):
+                    return self._load_cache()
                 
-            # Initialize fresh tag system
-            self.tag_counts = defaultdict(lambda: defaultdict(int))
-            self.tag_weights = defaultdict(lambda: defaultdict(lambda: self.default_weight))
-            self.total_samples = 0
-            
-            # Initialize category embeddings if CLIP is available
-            if self.clip_encoder:
-                self.category_embeddings = self._initialize_category_embeddings()
-            
-            return True
+            return self._initialize_fresh()
             
         except Exception as e:
-            logger.error(f"Failed to initialize tag system: {e}")
-            return False
+            raise TagProcessingError("Tag system initialization failed", 
+                context={"error": str(e), "cache_enabled": self.config.tag_weighting.use_cache})
 
 def create_tag_weighter(
     config: "Config",  # type: ignore
