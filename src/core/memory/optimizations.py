@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from src.data.config import Config
 
 from ..types import DataType, ModelWeightDtypes
-from src.core.logging import get_logger, LogConfig
+from src.core.logging import get_logger, LogConfig, UnifiedLogger
 
 logger = get_logger(__name__)
 
