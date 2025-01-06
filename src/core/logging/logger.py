@@ -6,7 +6,6 @@ import json
 import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
-from dataclasses import dataclass, field
 from collections import deque
 import numpy as np
 from tqdm import tqdm
@@ -14,6 +13,7 @@ import torch
 import wandb
 import colorama
 from colorama import Fore, Style
+from .base import LogConfig
 
 # Initialize colorama
 colorama.init(autoreset=True)

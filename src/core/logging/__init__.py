@@ -1,13 +1,13 @@
 """Unified logging system for SDXL training."""
-from .core import LogConfig, UnifiedLogger
-from .logger import ColoredFormatter, ProgressTracker, MetricsTracker
+from .base import LogConfig
+from .logger import ColoredFormatter, ProgressTracker, MetricsTracker, UnifiedLogger
 from .logging import LogManager, setup_logging, cleanup_logging
 
 __all__ = [
     "LogConfig",
-    "UnifiedLogger",
+    "UnifiedLogger", 
     "ColoredFormatter",
-    "ProgressTracker", 
+    "ProgressTracker",
     "MetricsTracker",
     "LogManager",
     "setup_logging",
