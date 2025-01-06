@@ -196,3 +196,115 @@ Key features:
 4. **Use Appropriate Levels**: Use DEBUG for detailed info, INFO for progress, WARNING for issues, ERROR for failures
 5. **Track Memory**: Regularly track memory usage in training loops
 6. **Batch Metrics**: Log related metrics together in one call to `log_metrics()`
+
+## Migration Guide
+
+If you're migrating from the old logging system, here are the key changes:
+
+### Old Code
+
+```python
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+logger.info("Starting process...")
+logger.debug("Debug info")
+```
+
+### New Code (Option 1 - Compatibility)
+
+```python
+# Using compatibility function (recommended for existing code)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)  # Returns UnifiedLogger with old interface
+logger.info("Starting process...")
+logger.debug("Debug info")
+
+# New features are available
+logger.start_progress(total=100)
+logger.update_progress(1)
+logger.log_metrics({"loss": 0.5})
+logger.log_memory()
+```
+
+### New Code (Option 2 - Full Features)
+
+```python
+from src.core.logging import setup_logging, LogConfig
+
+# Configure logging with all features
+config = LogConfig(
+    name=__name__,
+    enable_wandb=True,
+    wandb_project="my_project",
+    metrics_prefix="training/"
+)
+
+# Get configured logger
+logger = setup_logging(config=config)
+
+# Use all features
+with logger:  # Automatic cleanup
+    logger.info("Starting training...")
+    
+    # Progress tracking
+    logger.start_progress(total=epochs)
+    for epoch in range(epochs):
+        logger.update_progress(1)
+        
+        # Metrics tracking
+        logger.log_metrics({
+            "loss/train": train_loss,
+            "loss/val": val_loss,
+            "accuracy": accuracy
+        })
+        
+        # Memory tracking
+        logger.log_memory()
+```
+
+## Thread Safety
+
+The logging system is thread-safe and can be used from multiple threads:
+
+```python
+import threading
+from src.core.logging import get_logger
+
+def worker(name: str):
+    logger = get_logger(f"thread.{name}")
+    logger.info(f"Thread {name} starting...")
+    # Do work
+    logger.info(f"Thread {name} finished")
+
+# Create threads
+threads = []
+for i in range(3):
+    t = threading.Thread(target=worker, args=(f"worker_{i}",))
+    threads.append(t)
+    t.start()
+
+# Wait for all threads
+for t in threads:
+    t.join()
+```
+
+## Error Handling
+
+The system includes proper error handling:
+
+```python
+from src.core.logging import setup_logging, LogConfig, ConfigurationError
+
+try:
+    config = LogConfig(
+        name="invalid.logger",
+        log_dir="/nonexistent/path"
+    )
+    logger = setup_logging(config=config)
+except ConfigurationError as e:
+    print(f"Failed to configure logging: {e}")
+except Exception as e:
+    print(f"Unexpected error: {e}")
+```
