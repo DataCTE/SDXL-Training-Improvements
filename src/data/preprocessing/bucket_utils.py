@@ -190,3 +190,48 @@ def validate_aspect_ratio(width: int, height: int, max_ratio: float) -> bool:
     """Check if dimensions satisfy max aspect ratio constraint."""
     ratio = width / height
     return 1/max_ratio <= ratio <= max_ratio 
+
+def validate_bucket_config(
+    bucket: BucketInfo,
+    config: "Config"
+) -> Tuple[bool, Optional[str]]:
+    """Validate bucket configuration against global settings.
+    
+    Args:
+        bucket: Bucket configuration to validate
+        config: Global configuration object
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        image_config = config.global_config.image
+        w, h = bucket.pixel_dims
+        
+        # Size constraints
+        if not (image_config.min_size[0] <= w <= image_config.max_size[0]):
+            return False, f"Width {w} outside allowed range {image_config.min_size[0]}-{image_config.max_size[0]}"
+            
+        if not (image_config.min_size[1] <= h <= image_config.max_size[1]):
+            return False, f"Height {h} outside allowed range {image_config.min_size[1]}-{image_config.max_size[1]}"
+            
+        # Divisibility
+        if w % image_config.bucket_step != 0:
+            return False, f"Width {w} not divisible by bucket_step {image_config.bucket_step}"
+            
+        if h % image_config.bucket_step != 0:
+            return False, f"Height {h} not divisible by bucket_step {image_config.bucket_step}"
+            
+        # Aspect ratio
+        aspect = w / h
+        if aspect > image_config.max_aspect_ratio or aspect < (1 / image_config.max_aspect_ratio):
+            return False, f"Aspect ratio {aspect:.2f} outside allowed range"
+            
+        # Validate internal consistency
+        if not bucket.validate():
+            return False, "Failed internal bucket validation"
+            
+        return True, None
+        
+    except Exception as e:
+        return False, f"Validation error: {str(e)}" 
