@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 import torch
 import wandb
+from tqdm import tqdm
 from .base import LogConfig, ProgressConfig, MetricsConfig, ConfigurationError
 from .formatters import ColoredFormatter
 from .progress import ProgressTracker
 from .metrics import MetricsTracker
+from .progress_predictor import ProgressPredictor
 
 class UnifiedLogger:
     """Single entry point for all logging functionality."""
@@ -76,10 +78,26 @@ class UnifiedLogger:
             
         # Progress tracking setup
         self._progress = None
+        self._predictor = None
+        self._progress_bar = None
         
     def start_progress(self, total: int, desc: str = "") -> None:
-        """Start progress tracking."""
+        """Start progress tracking with smart ETA prediction."""
         if self.config.enable_progress:
+            # Initialize predictor
+            self._predictor = ProgressPredictor()
+            self._predictor.start(total)
+            
+            # Initialize progress bar
+            self._progress_bar = tqdm(
+                total=total,
+                desc=desc,
+                leave=self.config.progress_leave,
+                position=self.config.progress_position,
+                dynamic_ncols=True
+            )
+            
+            # Initialize standard progress tracker
             progress_config = ProgressConfig(
                 total=total,
                 desc=desc,
@@ -118,13 +136,49 @@ class UnifiedLogger:
             self._wandb_run.log(metrics, step=step)
             
     def update_progress(self, n: int = 1, batch_size: Optional[int] = None) -> Optional[Dict[str, float]]:
-        """Update progress and return metrics if available."""
+        """Update progress with smart ETA prediction.
+        
+        Args:
+            n: Number of steps completed
+            batch_size: Optional batch size for throughput calculation
+            
+        Returns:
+            Dictionary with progress metrics if available
+        """
+        if not self.config.enable_progress:
+            return None
+            
+        # Update standard progress metrics
+        metrics = None
         if self._progress is not None:
             metrics = self._progress.update(n, batch_size)
             if self.config.enable_metrics and metrics:
                 self.log_metrics(metrics)
-            return metrics
-        return None
+                
+        # Update predictor and get timing info
+        if self._predictor is not None:
+            timing = self._predictor.update(n)
+            current_time = timing["current_time"]
+            eta = timing["eta_seconds"]
+            
+            # Format timing for display
+            iter_time = f"{current_time*1000:.1f}ms/it"
+            eta_str = f"ETA: {self._predictor.format_time(eta)}"
+            
+            # Update progress bar
+            if self._progress_bar is not None:
+                self._progress_bar.set_postfix_str(f"{iter_time} • {eta_str}")
+                self._progress_bar.update(n)
+                
+            # Add timing to metrics
+            if metrics is None:
+                metrics = {}
+            metrics.update({
+                "progress/iter_time": current_time,
+                "progress/eta_seconds": eta
+            })
+            
+        return metrics
             
     def log_memory(self) -> None:
         """Log memory usage metrics."""
@@ -143,6 +197,11 @@ class UnifiedLogger:
             
         if self._progress is not None:
             self._progress.close()
+            
+        if self._progress_bar is not None:
+            self._progress_bar.close()
+            
+        self._predictor = None
             
     def __enter__(self) -> 'UnifiedLogger':
         """Context manager entry."""
