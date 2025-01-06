@@ -399,38 +399,43 @@ class CacheManager:
         path_str = str(path)
         return hashlib.md5(path_str.encode()).hexdigest()
 
-    def save_tag_index(self, index_data: Dict[str, Any]) -> bool:
-        """Save tag index with split files for better performance."""
-        try:
-            # Split data into statistics and image tags
-            statistics_data = {
-                "metadata": index_data["metadata"],
-                "statistics": index_data["statistics"]
-            }
-            image_tags_data = {
-                "images": index_data["images"]
-            }
-            
-            # Save statistics to cache/tags/statistics.json
-            stats_path = self.get_tag_statistics_path()
-            self._atomic_json_save(stats_path, statistics_data)
-            
-            # Save image tags to cache/tags/image_tags.json
-            tags_path = self.get_image_tags_path()
-            self._atomic_json_save(tags_path, image_tags_data)
-            
-            # Update cache index
-            with self._lock:
-                self.cache_index["tag_stats_path"] = str(stats_path)
-                self.cache_index["image_tags_path"] = str(tags_path)
-                self.cache_index["tag_index_updated"] = time.time()
-                self._save_index()
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to save tag index: {e}")
-            return False
+    def save_tag_index(self, tag_data: Dict[str, Any]) -> None:
+        """Save tag index data atomically."""
+        with self._lock:
+            try:
+                tag_stats_path = self.get_tag_statistics_path()
+                tag_images_path = self.get_image_tags_path()
+                
+                # Split data into appropriate files
+                stats_data = {
+                    "version": tag_data["version"],
+                    "metadata": tag_data["metadata"],
+                    "statistics": tag_data["statistics"]
+                }
+                
+                images_data = {
+                    "version": tag_data["version"],
+                    "updated_at": tag_data["updated_at"],
+                    "images": tag_data["images"]
+                }
+                
+                # Use atomic writes
+                self._atomic_json_save(tag_stats_path, stats_data)
+                self._atomic_json_save(tag_images_path, images_data)
+                
+                # Update cache index with tag metadata
+                self.cache_index["tag_metadata"] = {
+                    "statistics": tag_data["statistics"],
+                    "metadata": tag_data["metadata"]
+                }
+                self._save_cache_index()
+                
+            except Exception as e:
+                raise CacheError("Failed to save tag index", context={
+                    'tag_stats_path': str(tag_stats_path),
+                    'tag_images_path': str(tag_images_path),
+                    'error': str(e)
+                })
 
     def load_tag_index(self) -> Optional[Dict[str, Any]]:
         """Load tag index from split files."""

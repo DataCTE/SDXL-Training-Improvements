@@ -545,16 +545,25 @@ def create_dataset(
             tag_stats_path = cache_manager.get_tag_statistics_path()
             tag_images_path = cache_manager.get_image_tags_path()
 
-            if tag_stats_path.exists() and tag_images_path.exists() and config.tag_weighting.use_cache:
-                logger.info("Loading tag weights from verified cache...")
-                tag_weighter = TagWeighter(config, model)  # Pass model for CLIP
-                tag_weighter._load_cache()
-            else:
+            try:
+                if tag_stats_path.exists() and tag_images_path.exists() and config.tag_weighting.use_cache:
+                    logger.info("Loading tag weights from verified cache...")
+                    tag_weighter = TagWeighter(config, model)
+                    tag_weighter._load_cache()
+                    
+                    # Verify loaded cache is valid
+                    if not tag_weighter.verify_cache_validity():
+                        logger.warning("Tag cache invalid or incomplete, rebuilding...")
+                        raise ValueError("Invalid tag cache")
+                else:
+                    raise FileNotFoundError("Tag cache not found")
+                
+            except (FileNotFoundError, ValueError) as e:
                 logger.info("Computing tag weights and creating new index...")
                 tag_weighter = create_tag_weighter_with_index(
                     config=config,
                     image_captions=image_captions,
-                    model=model  # Pass model for CLIP
+                    model=model
                 )
                 
                 # Save tag statistics and metadata
