@@ -121,10 +121,20 @@ class CacheManager:
                 "images": {}
             }
         
-        # Now scan VAE latents directory for primary files
+        # Now scan VAE latents directory for primary files with progress tracking
         logger.info("Scanning latent cache...")
-        for vae_path in self.vae_latents_dir.glob("*.pt"):
+        vae_files = list(self.vae_latents_dir.glob("*.pt"))
+        predictor = ProgressPredictor()
+        predictor.start(len(vae_files))
+        
+        for i, vae_path in enumerate(vae_files):
             cache_key = vae_path.stem
+            
+            # Update progress every 100 files
+            if i % 100 == 0:
+                timing = predictor.update(100)
+                eta_str = predictor.format_time(timing["eta_seconds"])
+                logger.info(f"Scanning cache: {i}/{len(vae_files)} files (ETA: {eta_str})")
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"
             metadata_path = self.metadata_dir / f"{cache_key}.json"
             
