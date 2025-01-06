@@ -1,4 +1,5 @@
 """Centralized logging configuration for SDXL training."""
+import functools
 import logging
 import sys
 from pathlib import Path
@@ -121,3 +122,18 @@ def cleanup_logging() -> None:
             logging.error(f"Error closing handler: {str(e)}", exc_info=True)
     
     logging.info("Logging system cleanup complete")
+
+@functools.lru_cache(maxsize=None)
+def get_logger(name: str) -> UnifiedLogger:
+    """Get a logger by name.
+    
+    This is a compatibility function that provides the same interface
+    as the old get_logger function but uses the new UnifiedLogger system.
+    
+    Args:
+        name: Logger name
+        
+    Returns:
+        UnifiedLogger instance
+    """
+    return LogManager.get_instance().get_logger(name)
