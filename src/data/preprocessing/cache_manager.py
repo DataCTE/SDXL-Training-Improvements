@@ -476,27 +476,23 @@ class CacheManager:
         """Get path for image tags file."""
         return self.get_tag_index_path() / "image_tags.json"
 
-    def _atomic_json_save(self, path: Path, data: Dict[str, Any]) -> None:
-        """Save JSON data atomically with proper formatting."""
+    def _atomic_json_save(self, path: Path, data: Dict) -> None:
+        """Atomically save JSON data to file using a temporary file."""
         temp_path = path.with_suffix('.tmp')
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            temp_path.replace(path)
+                json.dump(data, f, indent=2)
+            temp_path.replace(path)  # Atomic replace
         except Exception as e:
             if temp_path.exists():
-                temp_path.unlink()
-            raise e
+                temp_path.unlink()  # Clean up temp file
+            raise CacheError(f"Failed to save JSON file: {path}", context={
+                'path': str(path),
+                'error': str(e)
+            })
 
     def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
-        """Verify cache integrity and rebuild if necessary.
-        
-        Handles both initial creation and verification of existing cache structure.
-        
-        Args:
-            image_paths: List of paths to images
-            captions: List of corresponding captions for the images
-        """
+        """Verify cache integrity and rebuild if necessary."""
         logger.info("Starting cache verification...")
         needs_rebuild = False
         
@@ -522,76 +518,79 @@ class CacheManager:
                 "images": {}
             }
             
-            try:
-                self._atomic_json_save(tag_stats_path, empty_stats)
-                self._atomic_json_save(tag_images_path, empty_images)
-                needs_rebuild = True
-            except Exception as e:
-                raise CacheError("Failed to initialize tag metadata structure", context={
-                    'tag_stats_path': str(tag_stats_path),
-                    'tag_images_path': str(tag_images_path),
-                    'error': str(e)
-                })
+            with self._lock:
+                try:
+                    # Use atomic writes for both files
+                    self._atomic_json_save(tag_stats_path, empty_stats)
+                    self._atomic_json_save(tag_images_path, empty_images)
+                    needs_rebuild = True
+                except Exception as e:
+                    raise CacheError("Failed to initialize tag metadata structure", context={
+                        'tag_stats_path': str(tag_stats_path),
+                        'tag_images_path': str(tag_images_path),
+                        'error': str(e)
+                    })
         
-        # Step 2: Verify existing structure if we didn't just create it
+        # Step 2: Verify existing structure
         if not needs_rebuild:
             try:
-                # Load and verify tag statistics
-                with open(tag_stats_path, 'r', encoding='utf-8') as f:
-                    stats_data = json.load(f)
-                with open(tag_images_path, 'r', encoding='utf-8') as f:
-                    images_data = json.load(f)
-                
-                # Verify required fields
-                required_stats_fields = ["metadata", "statistics", "version"]
-                required_images_fields = ["images", "version", "updated_at"]
-                
-                if not (all(field in stats_data for field in required_stats_fields) and
-                       all(field in images_data for field in required_images_fields)):
-                    logger.warning("Existing tag metadata missing required fields, rebuilding...")
-                    needs_rebuild = True
-                
-                # Only check image coverage if we haven't already flagged for rebuild
-                if not needs_rebuild:
-                    # Verify all images have tag entries and captions
-                    missing_tags = []
-                    missing_captions = []
-                    for path, caption in zip(image_paths, captions):
-                        if str(path) not in images_data.get("images", {}):
-                            missing_tags.append(path)
-                        if not caption:
-                            missing_captions.append(path)
-                        if len(missing_tags) > 5:  # Limit number of reported missing tags
-                            break
+                with self._lock:
+                    # Load and verify tag statistics
+                    with open(tag_stats_path, 'r', encoding='utf-8') as f:
+                        stats_data = json.load(f)
+                    with open(tag_images_path, 'r', encoding='utf-8') as f:
+                        images_data = json.load(f)
                     
-                    if missing_tags or missing_captions:
-                        logger.warning("Missing tag data or captions, rebuilding cache...")
+                    # Verify required fields
+                    required_stats_fields = ["metadata", "statistics", "version"]
+                    required_images_fields = ["images", "version", "updated_at"]
+                    
+                    if not (all(field in stats_data for field in required_stats_fields) and
+                           all(field in images_data for field in required_images_fields)):
+                        logger.warning("Existing tag metadata missing required fields, rebuilding...")
                         needs_rebuild = True
                     
+                    # Check image coverage if structure is valid
+                    if not needs_rebuild:
+                        missing_tags = []
+                        missing_captions = []
+                        for path, caption in zip(image_paths, captions):
+                            if str(path) not in images_data.get("images", {}):
+                                missing_tags.append(str(path))
+                            if not caption:
+                                missing_captions.append(str(path))
+                            if len(missing_tags) > 5:  # Limit reported missing tags
+                                break
+                        
+                        if missing_tags or missing_captions:
+                            logger.warning("Missing tag data or captions, rebuilding cache...")
+                            needs_rebuild = True
+                            
             except Exception as e:
                 logger.warning(f"Failed to verify existing tag metadata: {e}")
                 needs_rebuild = True
         
-        # Step 3: Rebuild cache if needed
+        # Step 3: Rebuild if needed
         if needs_rebuild:
             logger.info("Starting cache rebuild...")
             try:
-                self.rebuild_cache_index()
-                
-                # Verify rebuild was successful
-                if not self._verify_rebuild_success():
-                    raise CacheError("Cache rebuild failed", context={
-                        'cache_dir': str(self.cache_dir),
-                        'total_entries': len(self.cache_index.get("entries", {}))
-                    })
-                logger.info("Cache rebuild completed successfully")
-                
+                with self._lock:
+                    self.rebuild_cache_index()
+                    
+                    # Verify rebuild success
+                    if not self._verify_rebuild_success():
+                        raise CacheError("Cache rebuild failed", context={
+                            'cache_dir': str(self.cache_dir),
+                            'total_entries': len(self.cache_index.get("entries", {}))
+                        })
+                    logger.info("Cache rebuild completed successfully")
+                    
             except Exception as e:
                 raise CacheError("Failed to rebuild cache", context={
                     'cache_dir': str(self.cache_dir),
                     'error': str(e)
                 })
-        
+
     def _verify_rebuild_success(self) -> bool:
         """Verify that cache rebuild was successful."""
         try:
