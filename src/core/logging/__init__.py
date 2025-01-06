@@ -5,6 +5,7 @@ from .config import LogConfig
 from .base import LogManager, Logger, get_logger
 from .utils import EnhancedFormatter, create_enhanced_logger, TensorLogger
 from .setup import setup_logging
+from .progress import ProgressConfig, ProgressTracker
 
 # Avoid circular imports by using __all__ first
 __all__ = [
@@ -19,7 +20,9 @@ __all__ = [
     "EnhancedFormatter",
     "create_enhanced_logger",
     "TensorLogger",
-    "setup_logging"
+    "setup_logging",
+    "ProgressConfig",
+    "ProgressTracker"
 ]
 
 # Then import specialized loggers

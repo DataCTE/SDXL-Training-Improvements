@@ -17,6 +17,7 @@ from src.data.utils.paths import convert_windows_path
 from src.models.sdxl import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
 from src.data.preprocessing.exceptions import TagProcessingError
+from src.core.logging.progress import ProgressConfig, ProgressTracker
 
 logger = get_logger(__name__)
 
@@ -442,49 +443,42 @@ class TagWeighter:
 
     def process_dataset_tags(self, captions: List[str]) -> Dict[str, Any]:
         """Process all dataset captions and return tag information."""
-        logger.info("Processing dataset tags", extra={
-            'num_captions': len(captions),
-            'tag_types': list(self.tag_types.keys())
-        })
-        
         processed_tags = {}
-        try:
-            for idx, caption in enumerate(tqdm(captions, desc="Processing tags")):
+        
+        with ProgressTracker(
+            total=len(captions),
+            config=ProgressConfig(
+                desc="Processing tags",
+                show_memory=True,
+                log_interval=1000
+            ),
+            context={"tag_types": list(self.tag_types.keys())}
+        ) as tracker:
+            for caption in captions:
                 tags = self._extract_tags(caption)
-                
-                # Log periodic statistics
-                if idx > 0 and idx % 1000 == 0:
-                    logger.debug("Tag processing progress", extra={
-                        'processed': idx,
-                        'total': len(captions),
-                        'unique_tags': {t: len(self.tag_counts[t]) for t in self.tag_types}
-                    })
-                
-                # Get weights for each tag
                 weighted_tags = {
                     tag_type: [
-                        {
-                            "tag": tag,
-                            "weight": self.tag_weights[tag_type][tag]
-                        }
+                        {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
                         for tag in tags[tag_type]
                     ]
                     for tag_type in tags
                 }
                 
-                # Calculate caption weight
                 caption_weight = self.get_caption_weight(caption)
-                
                 processed_tags[caption] = {
                     "tags": weighted_tags,
                     "weight": caption_weight
                 }
                 
-            return processed_tags
-            
-        except Exception as e:
-            logger.error(f"Failed to process dataset tags: {e}")
-            return {}
+                # Update progress with statistics
+                tracker.update(1, {
+                    "unique_tags": {
+                        t: len(self.tag_counts[t]) 
+                        for t in self.tag_types
+                    }
+                })
+                
+        return processed_tags
 
     def get_tag_metadata(self) -> Dict[str, Any]:
         """Get current tag statistics and metadata.
