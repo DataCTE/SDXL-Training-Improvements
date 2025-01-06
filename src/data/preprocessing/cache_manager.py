@@ -691,13 +691,13 @@ class CacheManager:
             # Verify basic cache structure
             if not isinstance(self.cache_index, dict):
                 logger.error("Cache index is not a dictionary")
-                return False
+                return False, "Cache index is not a dictionary"
                 
             required_fields = ["entries", "stats", "tag_metadata"]
             for field in required_fields:
                 if field not in self.cache_index:
                     logger.error(f"Missing required field in cache index: {field}")
-                    return False
+                    return False, f"Missing required field in cache index: {field}"
             
             # Initialize empty structures if needed
             if not self.cache_index["entries"]:
