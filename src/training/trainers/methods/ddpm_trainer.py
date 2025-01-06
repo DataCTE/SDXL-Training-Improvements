@@ -11,7 +11,7 @@ from pathlib import Path
 import multiprocessing
 import threading
 
-from src.core.logging import get_logger
+from src.core.logging import UnifiedLogger, LogConfig
 from src.models import StableDiffusionXL
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.core.distributed import is_main_process
@@ -19,7 +19,7 @@ from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.training.schedulers.novelai_v3 import configure_noise_scheduler
 
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 class DDPMTrainer:
     """DDPM-specific trainer implementation."""

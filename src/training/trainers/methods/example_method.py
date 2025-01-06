@@ -7,13 +7,13 @@ from tqdm import tqdm
 from collections import defaultdict
 import time
 
-from src.core.logging import get_logger
+from src.core.logging import UnifiedLogger, LogConfig
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.core.distributed import is_main_process
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 class ExampleMethodTrainer(SDXLTrainer):
     """

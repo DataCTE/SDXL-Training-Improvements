@@ -9,7 +9,7 @@ from tqdm import tqdm
 from collections import defaultdict
 import time
 
-from src.core.logging import get_logger, MetricsLogger
+from src.core.logging import UnifiedLogger, LogConfig, MetricsTracker
 from src.training.trainers.sdxl_trainer import SDXLTrainer
 from src.training.schedulers import get_add_time_ids
 from src.data.config import Config
@@ -18,7 +18,7 @@ from src.core.logging import WandbLogger
 from src.core.types import DataType, ModelWeightDtypes
 from src.models.sdxl import StableDiffusionXL
 
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 class FlowMatchingTrainer(SDXLTrainer):
     """Flow Matching trainer with memory optimizations."""

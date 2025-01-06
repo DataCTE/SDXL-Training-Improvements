@@ -2,12 +2,12 @@ from typing import Optional, Type, Dict
 import torch
 from torch.utils.data import DataLoader
 from importlib import import_module
-from src.core.logging import WandbLogger, get_logger
+from src.core.logging import UnifiedLogger, LogConfig, WandbLogger
 from src.data.config import Config
 from src.models.base import ModelType
 from abc import ABC, abstractmethod
 
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 class BaseTrainer(ABC):
     """Abstract base class for all trainers."""
