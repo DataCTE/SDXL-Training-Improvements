@@ -52,14 +52,22 @@ class AspectBucketDataset(Dataset):
         self.is_train = is_train
         self._setup_device(device, device_id)
         
-        # Data initialization with path conversion
-        self.image_paths = [
-            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
-            for p in image_paths
-        ]
-        self.captions = captions
-        
-        # Cache setup
+        # Generate buckets with validation
+        try:
+            self.buckets = generate_buckets(config)
+            if not self.buckets:
+                raise DataLoadError("No valid buckets generated", context={
+                    'config': str(config.global_config.image),
+                    'supported_dims': str(config.global_config.image.supported_dims)
+                })
+            logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
+        except Exception as e:
+            raise DataLoadError("Failed to generate buckets", context={
+                'error': str(e),
+                'config': str(config.global_config.image)
+            })
+
+        # Cache setup with bucket validation
         cache_dir = convert_windows_path(config.global_config.cache.cache_dir)
         self.cache_manager = cache_manager or CacheManager(
             cache_dir=cache_dir,
@@ -68,12 +76,22 @@ class AspectBucketDataset(Dataset):
             device=self.device
         )
         
-        # Generate buckets using enhanced system
-        self.buckets = generate_buckets(config)  # Now returns List[BucketInfo]
-        logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
-        
-        # Initialize bucket indices
-        self.bucket_indices = self._load_bucket_indices_from_cache()
+        # Initialize bucket indices with validation
+        try:
+            self.bucket_indices = self._load_bucket_indices_from_cache()
+            self._validate_bucket_assignments()
+        except Exception as e:
+            raise DataLoadError("Failed to initialize bucket indices", context={
+                'error': str(e),
+                'num_buckets': len(self.buckets)
+            })
+
+        # Data paths with validation
+        self.image_paths = [
+            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
+            for p in image_paths
+        ]
+        self.captions = captions
         
         # Model components
         self.model = model
@@ -82,8 +100,32 @@ class AspectBucketDataset(Dataset):
             self.tokenizers = model.tokenizers
             self.vae = model.vae
         
-        # Tag weighting setup
-        self.tag_weighter = tag_weighter
+        # Tag weighting setup with validation
+        try:
+            self._setup_tag_weighting()
+        except Exception as e:
+            logger.warning(f"Tag weighting initialization failed: {e}")
+            self.tag_weighter = None
+
+    def _validate_bucket_assignments(self) -> None:
+        """Validate all bucket assignments for consistency."""
+        try:
+            for bucket_idx, image_indices in self.bucket_indices.items():
+                bucket = self.buckets[bucket_idx]
+                for img_idx in image_indices:
+                    img_path = self.image_paths[img_idx]
+                    try:
+                        with Image.open(img_path) as img:
+                            assigned_bucket = compute_bucket_dims(img.size, self.buckets)
+                            if not assigned_bucket or assigned_bucket != bucket:
+                                raise ValueError(f"Inconsistent bucket assignment for {img_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to validate bucket assignment for {img_path}: {e}")
+        except Exception as e:
+            raise DataLoadError("Bucket validation failed", context={
+                'error': str(e),
+                'num_buckets': len(self.buckets)
+            })
 
     # Core Dataset Methods
     def __len__(self) -> int:
