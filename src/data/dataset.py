@@ -523,6 +523,13 @@ def create_dataset(
         if config.tag_weighting.enable_tag_weighting:
             logger.info("Initializing tag weighting system...")
             
+            # Validate model availability for tag weighting
+            if model is None or not hasattr(model, 'clip_encoder_1'):
+                raise RuntimeError(
+                    "Tag weighting is enabled but CLIP model is not available. "
+                    "Please provide a valid SDXL model with CLIP encoder."
+                )
+            
             # First verify cache integrity if requested
             if verify_cache:
                 logger.info("Verifying cache and tag metadata...")
