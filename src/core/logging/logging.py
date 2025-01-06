@@ -6,7 +6,8 @@ from typing import Optional, Dict, Any, List, Union, Tuple
 import threading
 from datetime import datetime
 import colorama
-from .logger import ColoredFormatter, UnifiedLogger
+from .logger import ColoredFormatter
+from .core import UnifiedLogger
 from .base import LogConfig
 from src.data.utils.paths import convert_windows_path
 
@@ -26,12 +27,13 @@ from .base import LogConfig
 class LogManager:
     """Centralized logging manager."""
     _instance = None
-    _loggers: Dict[str, logging.Logger] = {}
+    _loggers: Dict[str, UnifiedLogger] = {}
     _tensor_loggers: Dict[str, TensorLogger] = {}
     _action_history: Dict[str, Any] = {}
     
     def __init__(self):
         self._lock = threading.Lock()
+        self._config = None
         
     @classmethod
     def get_instance(cls) -> 'LogManager':
@@ -40,11 +42,13 @@ class LogManager:
             cls._instance = cls()
         return cls._instance
     
-    def get_logger(self, name: str) -> logging.Logger:
-        """Get or create logger by name."""
+    def get_logger(self, name: str) -> UnifiedLogger:
+        """Get or create UnifiedLogger by name."""
         with self._lock:
             if name not in self._loggers:
-                self._loggers[name] = logging.getLogger(name)
+                config = self._config.copy() if self._config else LogConfig()
+                config.name = name
+                self._loggers[name] = UnifiedLogger(config)
             return self._loggers[name]
     
     def get_tensor_logger(self, name: str) -> TensorLogger:
@@ -59,48 +63,14 @@ class LogManager:
         if isinstance(config, dict):
             config = LogConfig(**config)
             
-        # Create log directory
-        log_dir = Path(config.log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
+        self._config = config
         
-        # Configure root logger
-        root_logger = logging.getLogger()
-        root_logger.setLevel(config.get_file_level())
-        
-        # Clear existing handlers
-        root_logger.handlers.clear()
-        
-        # Add console handler if enabled
-        if config.console_output:
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setLevel(config.get_console_level())
-            console_handler.setFormatter(ColoredFormatter(
-                '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            ))
-            root_logger.addHandler(console_handler)
-        
-        # Add file handler if enabled
-        if config.file_output and config.filename:
-            file_handler = logging.FileHandler(
-                log_dir / config.filename,
-                mode='a',
-                encoding='utf-8'
-            )
-            file_handler.setLevel(config.get_file_level())
-            file_handler.setFormatter(logging.Formatter(
-                '%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | '
-                '%(processName)s:%(threadName)s | %(filename)s:%(lineno)d | '
-                '%(funcName)s |\n%(message)s\n',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            ))
-            root_logger.addHandler(file_handler)
-        
-        # Configure warning capture
-        logging.captureWarnings(config.capture_warnings)
-        
-        # Store config
-        self.config = config
+        # Update existing loggers with new config
+        with self._lock:
+            for name, logger in self._loggers.items():
+                new_config = config.copy()
+                new_config.name = name
+                self._loggers[name] = UnifiedLogger(new_config)
 
 
     
