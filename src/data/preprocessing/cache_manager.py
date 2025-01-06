@@ -15,6 +15,7 @@ from src.data.config import Config
 import hashlib
 from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
 from collections import defaultdict
+from src.data.preprocessing.exceptions import CacheError
 logger = get_logger(__name__)
 
 class CacheManager:
@@ -498,88 +499,61 @@ class CacheManager:
         tag_images_path = self.get_image_tags_path()
         
         if not (tag_stats_path.exists() and tag_images_path.exists()):
-            logger.warning("Tag metadata files missing")
-            needs_rebuild = True
-        else:
-            try:
-                # Load and verify tag statistics
-                with open(tag_stats_path, 'r', encoding='utf-8') as f:
-                    stats_data = json.load(f)
-                with open(tag_images_path, 'r', encoding='utf-8') as f:
-                    images_data = json.load(f)
-                
-                # Verify required fields
-                required_stats_fields = ["metadata", "statistics", "version"]
-                required_images_fields = ["images", "version", "updated_at"]
-                
-                if not (all(field in stats_data for field in required_stats_fields) and
-                       all(field in images_data for field in required_images_fields)):
-                    logger.warning("Tag metadata files missing required fields")
-                    needs_rebuild = True
-                
-                # Verify all images have tag entries
-                if not needs_rebuild:
-                    for path in image_paths:
-                        if str(path) not in images_data.get("images", {}):
-                            logger.warning(f"Missing tag data for: {path}")
-                            needs_rebuild = True
-                            break
-                            
-            except Exception as e:
-                logger.warning(f"Failed to verify tag metadata: {e}")
-                needs_rebuild = True
+            raise CacheError("Tag metadata files missing", {
+                'tag_stats_path': str(tag_stats_path),
+                'tag_images_path': str(tag_images_path)
+            })
         
-        # Step 2: Verify latent cache entries and their integrity
-        if not needs_rebuild:
-            logger.info("Verifying latent cache entries...")
-            for path in tqdm(image_paths, desc="Verifying cache entries"):
-                cache_key = self.get_cache_key(path)
-                entry = self.cache_index["entries"].get(cache_key)
+        try:
+            # Load and verify tag statistics
+            with open(tag_stats_path, 'r', encoding='utf-8') as f:
+                stats_data = json.load(f)
+            with open(tag_images_path, 'r', encoding='utf-8') as f:
+                images_data = json.load(f)
+            
+            # Verify required fields
+            required_stats_fields = ["metadata", "statistics", "version"]
+            required_images_fields = ["images", "version", "updated_at"]
+            
+            if not (all(field in stats_data for field in required_stats_fields) and
+                   all(field in images_data for field in required_images_fields)):
+                raise CacheError("Tag metadata files missing required fields", {
+                    'missing_stats_fields': [f for f in required_stats_fields if f not in stats_data],
+                    'missing_images_fields': [f for f in required_images_fields if f not in images_data]
+                })
+            
+            # Verify all images have tag entries
+            missing_tags = []
+            for path in image_paths:
+                if str(path) not in images_data.get("images", {}):
+                    missing_tags.append(path)
+                    if len(missing_tags) > 5:  # Limit number of reported missing tags
+                        break
+            
+            if missing_tags:
+                raise CacheError("Missing tag data for images", {
+                    'missing_count': len(missing_tags),
+                    'example_paths': missing_tags[:5]
+                })
                 
-                if not entry:
-                    logger.warning(f"Missing cache entry for: {path}")
-                    needs_rebuild = True
-                    break
-                    
-                # Verify entry structure and files
-                if not self._validate_cache_entry(entry):
-                    logger.warning(f"Invalid cache entry for: {path}")
-                    needs_rebuild = True
-                    break
-                    
-                # Verify tag references
-                if not entry.get("tag_reference"):
-                    logger.warning(f"Missing tag reference for: {path}")
-                    needs_rebuild = True
-                    break
-        
-        # Step 3: Verify cache index statistics
-        if not needs_rebuild:
-            logger.info("Verifying cache index statistics...")
-            try:
-                actual_entries = len(self.cache_index["entries"])
-                reported_entries = self.cache_index["stats"]["total_entries"]
-                
-                if actual_entries != reported_entries:
-                    logger.warning("Cache index statistics mismatch")
-                    needs_rebuild = True
-                    
-            except Exception as e:
-                logger.warning(f"Failed to verify cache statistics: {e}")
-                needs_rebuild = True
-        
-        # Step 4: Rebuild if necessary
+        except Exception as e:
+            if isinstance(e, CacheError):
+                raise
+            raise CacheError("Failed to verify tag metadata", {
+                'original_error': str(e)
+            }) from e
+
+        # If we get here, rebuild cache
         if needs_rebuild:
             logger.warning("Cache verification failed. Starting complete rebuild...")
             self.rebuild_cache_index()
             
             # Verify rebuild was successful
             if not self._verify_rebuild_success():
-                logger.error("Cache rebuild failed. Manual intervention may be required.")
-            else:
-                logger.info("Cache rebuild completed successfully")
-        else:
-            logger.info("Cache verification completed successfully - all systems valid")
+                raise CacheError("Cache rebuild failed", {
+                    'cache_dir': str(self.cache_dir),
+                    'total_entries': len(self.cache_index.get("entries", {}))
+                })
         
     def _verify_rebuild_success(self) -> bool:
         """Verify that cache rebuild was successful."""

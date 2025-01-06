@@ -25,6 +25,7 @@ from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
 from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, group_images_by_bucket, log_bucket_statistics
 from src.data.preprocessing.bucket_types import BucketInfo, BucketDimensions
+from src.data.preprocessing.exceptions import CacheError, DataLoadError
 
 logger = get_logger(__name__)
 
@@ -516,8 +517,18 @@ def create_dataset(
         # Load data paths from config
         logger.info(f"Loading data from: {config.data.train_data_dir}")
         image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+        if not image_paths:
+            raise DataLoadError("No images found in data directory", {
+                'data_dir': config.data.train_data_dir
+            })
+            
         image_captions = dict(zip(image_paths, captions))
         
+        # First verify cache integrity if requested
+        if verify_cache:
+            logger.info("Verifying cache and tag metadata...")
+            cache_manager.verify_and_rebuild_cache(image_paths, captions)
+            
         # Initialize tag weighting if enabled
         tag_weighter = None
         if config.tag_weighting.enable_tag_weighting:
@@ -529,11 +540,6 @@ def create_dataset(
                     "Tag weighting is enabled but CLIP model is not available. "
                     "Please provide a valid SDXL model with CLIP encoder."
                 )
-            
-            # First verify cache integrity if requested
-            if verify_cache:
-                logger.info("Verifying cache and tag metadata...")
-                cache_manager.verify_and_rebuild_cache(image_paths, captions)
             
             # Check for existing tag cache after verification
             tag_cache_path = cache_manager.tags_dir / "tag_index.json"
@@ -623,5 +629,8 @@ def create_dataset(
         return dataset
         
     except Exception as e:
+        if isinstance(e, (CacheError, DataLoadError)):
+            logger.error(str(e))
+            raise
         logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
-        raise
+        raise RuntimeError(f"Dataset creation failed: {str(e)}") from e
