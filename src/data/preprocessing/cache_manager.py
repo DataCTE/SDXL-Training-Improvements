@@ -31,6 +31,9 @@ class CacheManager:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         
+        # Initialize lock first
+        self._lock = threading.Lock()
+        
         # Create proper subfolder structure
         self.tags_dir = self.cache_dir / "tags"
         self.latents_dir = self.cache_dir / "latents"
@@ -67,9 +70,10 @@ class CacheManager:
     
     def __setstate__(self, state):
         """Customize unpickling behavior."""
-        self.__dict__.update(state)
-        # Recreate the lock in the new process
+        # Initialize lock first
         self._lock = threading.Lock()
+        # Then update the rest of the state
+        self.__dict__.update(state)
 
     def rebuild_cache_index(self) -> None:
         """Rebuild cache index from disk as source of truth."""
