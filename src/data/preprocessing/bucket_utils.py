@@ -127,12 +127,14 @@ def group_images_by_bucket(
         raise ValueError("No valid buckets generated from config")
     
     # Process images with detailed progress
-    with logger.start_progress(
-        total=len(image_paths),
-        desc="Grouping images by bucket"
-    ) as progress:
-        for idx, path in enumerate(image_paths):
-            progress.update(1)
+    predictor = ProgressPredictor()
+    predictor.start(len(image_paths))
+        
+    for idx, path in enumerate(image_paths):
+        timing = predictor.update(1)
+        if idx % 100 == 0:  # Log progress periodically
+            eta_str = predictor.format_time(timing["eta_seconds"])
+            logger.info(f"Processing images: {idx}/{len(image_paths)} (ETA: {eta_str})")
         try:
             # Check cache first
             cache_key = cache_manager.get_cache_key(path)

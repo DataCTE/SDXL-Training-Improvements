@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from PIL import Image
 import numpy as np
 
-from src.core.logging import UnifiedLogger, LogConfig
+from src.core.logging import UnifiedLogger, LogConfig, ProgressPredictor
 from src.data.utils.paths import convert_windows_path, is_windows_path, load_data_from_directory
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXL

@@ -12,7 +12,7 @@ from tqdm import tqdm
 if TYPE_CHECKING:
     from src.data.config import Config
 
-from src.core.logging import get_logger, LogConfig
+from src.core.logging import get_logger, LogConfig, ProgressPredictor
 from src.data.utils.paths import convert_windows_path
 from src.models.sdxl import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
@@ -449,33 +449,37 @@ class TagWeighter:
         """Process all dataset captions and return tag information."""
         processed_tags = {}
         
-        with logger.start_progress(
-            total=len(captions),
-            desc="Processing tags"
-        ) as progress:
-            for caption in captions:
-                tags = self._extract_tags(caption)
-                weighted_tags = {
-                    tag_type: [
-                        {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
-                        for tag in tags[tag_type]
-                    ]
-                    for tag_type in tags
+        predictor = ProgressPredictor()
+        predictor.start(len(captions))
+        
+        for idx, caption in enumerate(captions):
+            tags = self._extract_tags(caption)
+            weighted_tags = {
+                tag_type: [
+                    {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
+                    for tag in tags[tag_type]
+                ]
+                for tag_type in tags
+            }
+            
+            caption_weight = self.get_caption_weight(caption)
+            processed_tags[caption] = {
+                "tags": weighted_tags,
+                "weight": caption_weight
+            }
+            
+            # Update progress tracking
+            timing = predictor.update(1)
+            if idx % 1000 == 0:  # Log every 1000 captions
+                eta_str = predictor.format_time(timing["eta_seconds"])
+                stats = {
+                    t: len(self.tag_counts[t]) 
+                    for t in self.tag_types
                 }
-                
-                caption_weight = self.get_caption_weight(caption)
-                processed_tags[caption] = {
-                    "tags": weighted_tags,
-                    "weight": caption_weight
-                }
-                
-                # Update progress with statistics
-                progress.update(1, {
-                    "unique_tags": {
-                        t: len(self.tag_counts[t]) 
-                        for t in self.tag_types
-                    }
-                })
+                logger.info(
+                    f"Processing tags: {idx}/{len(captions)} (ETA: {eta_str})\n"
+                    f"Unique tags per type: {stats}"
+                )
                 
         return processed_tags
 
