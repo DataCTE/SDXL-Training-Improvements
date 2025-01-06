@@ -17,7 +17,7 @@ from src.data.utils.paths import convert_windows_path
 from src.models.sdxl import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
 from src.data.preprocessing.exceptions import TagProcessingError
-from src.core.logging.progress import ProgressConfig, ProgressTracker
+from tqdm import tqdm
 
 logger = get_logger(__name__)
 
