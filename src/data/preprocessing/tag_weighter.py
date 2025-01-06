@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from src.core.logging import get_logger, LogConfig
 from src.data.utils.paths import convert_windows_path
 from src.models.sdxl import StableDiffusionXL
+from src.models.encoders import CLIPEncoder
 
 logger = get_logger(__name__)
 
@@ -64,14 +65,14 @@ class TagWeighter:
 
     def _initialize_category_embeddings(self, categories):
         """Initialize category embeddings using SDXL's CLIP."""
-        if not self.clip_encoder:
+        if not self.clip_encoder or not self.tokenizer:
             return None
         
         embeddings = {}
         with torch.no_grad():
             for category, terms in categories:
-                # Use encode_prompt instead of encode_text
-                text_embeddings = self.clip_encoder.encode_prompt(
+                # Use encode_prompt with proper structure
+                text_embeddings = CLIPEncoder.encode_prompt(
                     batch={"text": terms},
                     text_encoders=[self.clip_encoder.text_encoder],
                     tokenizers=[self.tokenizer],
@@ -84,19 +85,24 @@ class TagWeighter:
 
     def _get_semantic_category(self, phrase: str) -> str:
         """Determine category using CLIP similarity."""
-        if not self.clip_encoder:
+        if not self.clip_encoder or not self.category_embeddings:
             return "meta"
         
         with torch.no_grad():
             # Get phrase embedding using CLIP
-            phrase_embedding = self.clip_encoder.encode_text([phrase])
+            phrase_embedding = CLIPEncoder.encode_prompt(
+                batch={"text": [phrase]},
+                text_encoders=[self.clip_encoder.text_encoder],
+                tokenizers=[self.tokenizer],
+                is_train=False
+            )["pooled_prompt_embeds"]
             
             # Compare with category embeddings
             similarities = {
                 category: torch.cosine_similarity(
                     phrase_embedding, 
                     cat_embedding.unsqueeze(0)
-                )
+                ).item()
                 for category, cat_embedding in self.category_embeddings.items()
             }
             
