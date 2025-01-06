@@ -181,15 +181,42 @@ class AspectBucketDataset(Dataset):
             self.device = torch.device('cpu')
             self.device_id = None
 
-    def _setup_tag_weighting(self, config: Config, cache_dir: Path):
-        """Setup tag weighting if enabled."""
-        if config.tag_weighting.enable_tag_weighting:
-            image_captions = dict(zip(self.image_paths, self.captions))
-            self.tag_weighter = create_tag_weighter_with_index(
-                config=config,
-                image_captions=image_captions
+    def _setup_tag_weighting(self) -> None:
+        """Initialize tag weighting system with proper cache handling."""
+        if not self.config.tag_weighting.enable_tag_weighting:
+            self.tag_weighter = None
+            return
+        
+        try:
+            # Create tag weighter instance
+            self.tag_weighter = TagWeighter(
+                config=self.config,
+                model=self.model
             )
-        else:
+            
+            # Initialize tag system
+            if not self.tag_weighter.initialize_tag_system():
+                logger.warning("Failed to initialize tag system from cache")
+                
+                # Compute new tag weights
+                image_captions = dict(zip(self.image_paths, self.captions))
+                self.tag_weighter = create_tag_weighter_with_index(
+                    config=self.config,
+                    image_captions=image_captions,
+                    model=self.model
+                )
+                
+            # Verify tag coverage
+            if self.tag_weighter:
+                stats = self.tag_weighter.get_tag_metadata()
+                total_images = len(self.image_paths)
+                tagged_images = len(self.tag_weighter.process_dataset_tags(self.captions))
+                coverage = (tagged_images / total_images) * 100
+                
+                logger.info(f"Tag system initialized with {coverage:.1f}% coverage")
+                
+        except Exception as e:
+            logger.error(f"Failed to setup tag weighting: {e}")
             self.tag_weighter = None
 
     # Processing Methods
