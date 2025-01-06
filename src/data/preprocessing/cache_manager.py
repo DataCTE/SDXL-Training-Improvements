@@ -594,10 +594,10 @@ class CacheManager:
         try:
             logger.info("Starting cache verification...")
             needs_rebuild = False
-        
-        # Step 1: Check if tag metadata structure exists
-        tag_stats_path = self.get_tag_statistics_path()
-        tag_images_path = self.get_image_tags_path()
+            
+            # Step 1: Check if tag metadata structure exists
+            tag_stats_path = self.get_tag_statistics_path()
+            tag_images_path = self.get_image_tags_path()
         
         # Initialize empty structures if files don't exist
         if not (tag_stats_path.exists() and tag_images_path.exists()):
