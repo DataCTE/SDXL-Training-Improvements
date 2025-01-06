@@ -152,31 +152,57 @@ class ColoredFormatter(logging.Formatter):
         return f"{base_color}{formatted_message}{Style.RESET_ALL}"
 
 class ProgressTracker:
-    """Tracks progress with configurable window size and smoothing."""
+    """Tracks progress with throughput monitoring."""
     
     def __init__(self, total: int, desc: str = "", 
-                 window_size: int = 100, smoothing: float = 0.3):
+                 window_size: int = 100, smoothing: float = 0.3,
+                 metric_prefix: str = "throughput/"):
         self.progress = tqdm(total=total, desc=desc, smoothing=smoothing)
         self.window_size = window_size
         self.steps = deque(maxlen=window_size)
+        self.batch_sizes = deque(maxlen=window_size)
         self.last_update = time.time()
+        self.metric_prefix = metric_prefix
+        self._total_samples = 0
+        self._last_metrics = {}
         
-    def update(self, n: int = 1) -> float:
-        """Update progress and return current rate."""
+    def update(self, n: int = 1, batch_size: Optional[int] = None) -> Dict[str, float]:
+        """Update progress and return metrics."""
         self.progress.update(n)
         current = time.time()
-        self.steps.append((current - self.last_update) / n)
-        self.last_update = current
-        return self.rate
         
-    @property
-    def rate(self) -> float:
-        """Calculate current steps per second."""
+        if batch_size is not None:
+            self.batch_sizes.append(batch_size)
+            self._total_samples += batch_size
+            
+        elapsed = current - self.last_update
+        self.steps.append(elapsed / n)
+        self.last_update = current
+        
+        return self.get_metrics()
+        
+    def get_metrics(self) -> Dict[str, float]:
+        """Get current throughput metrics."""
         if not self.steps:
-            return 0.0
-        return 1.0 / np.mean(self.steps)
+            return self._last_metrics
+            
+        avg_time = sum(self.steps) / len(self.steps)
+        total_samples = sum(self.batch_sizes) if self.batch_sizes else self._total_samples
+        samples_per_sec = (
+            total_samples / sum(self.steps) if self.batch_sizes 
+            else self._total_samples / sum(self.steps)
+        )
+        
+        metrics = {
+            f"{self.metric_prefix}samples_per_sec": samples_per_sec,
+            f"{self.metric_prefix}batch_time_ms": avg_time * 1000,
+            f"{self.metric_prefix}accumulated_samples": total_samples
+        }
+        self._last_metrics = metrics
+        return metrics
         
     def close(self):
+        """Clean up progress bar."""
         self.progress.close()
 
 class MetricsTracker:

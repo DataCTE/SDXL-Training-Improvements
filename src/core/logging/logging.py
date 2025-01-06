@@ -7,8 +7,7 @@ import threading
 from datetime import datetime
 import colorama
 from .logger import ColoredFormatter
-from .core import UnifiedLogger
-from .base import LogConfig
+from .core import UnifiedLogger, LogConfig
 from src.data.utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
