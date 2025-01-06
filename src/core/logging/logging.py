@@ -8,7 +8,7 @@ from datetime import datetime
 import colorama
 from .core import UnifiedLogger
 from .base import LogConfig, ConfigurationError
-from src.data.utils.paths import convert_windows_path
+from ..utils.paths import convert_windows_path
 
 # Initialize colorama for Windows support
 colorama.init(autoreset=True)
