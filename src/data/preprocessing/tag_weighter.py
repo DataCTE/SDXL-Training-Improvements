@@ -684,7 +684,7 @@ def create_tag_weighter_with_index(
     weighter.update_statistics(captions)
     
     logger.info("Creating detailed tag index...")
-    image_tags = weighter.process_dataset_tags(image_captions)
+    image_tags = weighter.process_dataset_tags(captions)
     
     # Save to cache manager's tag directory
     logger.info("Saving tag index to cache")
