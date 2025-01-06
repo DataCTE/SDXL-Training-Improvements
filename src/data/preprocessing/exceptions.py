@@ -1,6 +1,7 @@
 """Custom exceptions for preprocessing pipeline with detailed error context."""
 from typing import Optional, Any, Dict
 from src.core.logging import get_logger, LogConfig
+import time
 
 logger = get_logger(__name__)
 
@@ -133,12 +134,13 @@ class MemoryError(PreprocessingError):
     pass
 
 class TagProcessingError(PreprocessingError):
-    """Raised when tag processing fails.
+    """Raised when tag processing fails."""
     
-    Contexts:
-        - tag_type: Type of tag that failed
-        - operation: Operation that failed
-        - caption: Caption being processed
-        - cache_status: Cache status when error occurred
-    """
-    pass
+    def __init__(self, message: str, *, context: Optional[Dict[str, Any]] = None, 
+                 tag_type: Optional[str] = None, operation: Optional[str] = None):
+        super().__init__(message, context={
+            **(context or {}),
+            "tag_type": tag_type,
+            "operation": operation,
+            "timestamp": time.time()
+        })
