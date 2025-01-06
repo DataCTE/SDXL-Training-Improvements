@@ -204,9 +204,9 @@ If you're migrating from the old logging system, here are the key changes:
 ### Old Code
 
 ```python
-from src.core.logging import get_logger
+from src.core.logging import get_logger, Logger
 
-logger = get_logger(__name__)
+logger: Logger = get_logger(__name__)
 logger.info("Starting process...")
 logger.debug("Debug info")
 ```
@@ -215,9 +215,10 @@ logger.debug("Debug info")
 
 ```python
 # Using compatibility function (recommended for existing code)
-from src.core.logging import get_logger
+from src.core.logging import get_logger, Logger
 
-logger = get_logger(__name__)  # Returns UnifiedLogger with old interface
+# Logger type alias points to UnifiedLogger for type hints
+logger: Logger = get_logger(__name__)
 logger.info("Starting process...")
 logger.debug("Debug info")
 
