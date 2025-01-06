@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Union, TYPE_CHECKING, Any
 import numpy as np
 import torch
 import time
+from tqdm import tqdm
 
 if TYPE_CHECKING:
     from src.data.config import Config
@@ -432,35 +433,54 @@ class TagWeighter:
             return [self._clean_numeric_values(x) for x in obj]
         return obj
 
-    def process_dataset_tags(self, image_captions: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
-        """Process all dataset tags and return weighted tags per image."""
-        image_tags = {}
+    def process_dataset_tags(self, captions: List[str]) -> Dict[str, Any]:
+        """Process all dataset captions and return tag information.
         
-        for image_path, caption in image_captions.items():
-            categorized_tags = self._extract_tags(caption)
+        Args:
+            captions: List of image captions to process
             
-            # Store tags with their individual weights
-            image_tags[image_path] = {
-                "tags": {
-                    category: [
-                        {"tag": tag, "weight": self.tag_weights[category][tag]}
-                        for tag in tags
+        Returns:
+            Dict containing processed tag information for each caption
+        """
+        processed_tags = {}
+        
+        try:
+            for caption in tqdm(captions, desc="Processing tags"):
+                tags = self._extract_tags(caption)
+                
+                # Get weights for each tag
+                weighted_tags = {
+                    tag_type: [
+                        {
+                            "tag": tag,
+                            "weight": self.tag_weights[tag_type][tag]
+                        }
+                        for tag in tags[tag_type]
                     ]
-                    for category, tags in categorized_tags.items()
+                    for tag_type in tags
                 }
-            }
+                
+                # Calculate caption weight
+                caption_weight = self.get_caption_weight(caption)
+                
+                processed_tags[caption] = {
+                    "tags": weighted_tags,
+                    "weight": caption_weight
+                }
+                
+            return processed_tags
             
-        return image_tags
+        except Exception as e:
+            logger.error(f"Failed to process dataset tags: {e}")
+            return {}
 
-    def get_tag_metadata(self, cache_key: Optional[str] = None) -> Dict[str, Any]:
-        """Get metadata about tag weighting for caching purposes."""
-        metadata = {
-            "config": {
-                "default_weight": self.default_weight,
-                "min_weight": self.min_weight,
-                "max_weight": self.max_weight,
-                "smoothing_factor": self.smoothing_factor
-            },
+    def get_tag_metadata(self) -> Dict[str, Any]:
+        """Get current tag statistics and metadata.
+        
+        Returns:
+            Dict containing tag statistics and metadata
+        """
+        return {
             "statistics": {
                 "total_samples": self.total_samples,
                 "tag_type_counts": {
@@ -472,15 +492,95 @@ class TagWeighter:
                     for tag_type, counts in self.tag_counts.items()
                 }
             },
-            "tag_types": self.tag_types,
-            "timestamp": time.time()
+            "tag_weights": {
+                tag_type: dict(weights)
+                for tag_type, weights in self.tag_weights.items()
+            }
         }
+
+    def get_tag_statistics(self) -> Dict[str, Any]:
+        """Get detailed tag statistics.
         
-        if cache_key:
-            metadata["cache_key"] = cache_key
+        Returns:
+            Dict containing detailed tag statistics
+        """
+        return {
+            "tag_counts": {
+                tag_type: dict(counts)
+                for tag_type, counts in self.tag_counts.items()
+            },
+            "tag_weights": {
+                tag_type: dict(weights)
+                for tag_type, weights in self.tag_weights.items()
+            },
+            "total_samples": self.total_samples
+        }
+
+    def get_tag_info(self, caption: str) -> Dict[str, Any]:
+        """Get tag information for a single caption.
+        
+        Args:
+            caption: Image caption to process
             
-        return metadata
-    
+        Returns:
+            Dict containing tag information and weights
+        """
+        try:
+            tags = self._extract_tags(caption)
+            
+            tag_info = {
+                "tags": {
+                    tag_type: [
+                        {
+                            "tag": tag,
+                            "weight": self.tag_weights[tag_type][tag]
+                        }
+                        for tag in tags[tag_type]
+                    ]
+                    for tag_type in tags
+                },
+                "weight": self.get_caption_weight(caption)
+            }
+            
+            return tag_info
+            
+        except Exception as e:
+            logger.error(f"Failed to get tag info for caption: {e}")
+            return {"tags": {}, "weight": self.default_weight}
+
+    def save_to_cache(self) -> bool:
+        """Save current tag weights and statistics to cache.
+        
+        Returns:
+            bool: True if save was successful
+        """
+        try:
+            if not self.cache_manager:
+                return False
+            
+            # Prepare tag data
+            tag_data = {
+                "version": "1.0",
+                "updated_at": time.time(),
+                "metadata": {
+                    "config": {
+                        "default_weight": self.default_weight,
+                        "min_weight": self.min_weight,
+                        "max_weight": self.max_weight,
+                        "smoothing_factor": self.smoothing_factor
+                    }
+                },
+                "statistics": self.get_tag_statistics()
+            }
+            
+            # Save through cache manager
+            self.cache_manager.save_tag_index(tag_data)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save tag data to cache: {e}")
+            return False
+
     def __getstate__(self):
         """Customize pickling behavior."""
         state = self.__dict__.copy()
