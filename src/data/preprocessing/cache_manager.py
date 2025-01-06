@@ -400,7 +400,11 @@ class CacheManager:
         return hashlib.md5(path_str.encode()).hexdigest()
 
     def save_tag_index(self, tag_data: Dict[str, Any]) -> None:
-        """Save tag index data atomically."""
+        """Save tag index data atomically with proper structure.
+        
+        Args:
+            tag_data: Dictionary containing tag metadata and statistics
+        """
         with self._lock:
             try:
                 tag_stats_path = self.get_tag_statistics_path()
@@ -419,16 +423,19 @@ class CacheManager:
                     "images": tag_data["images"]
                 }
                 
-                # Use atomic writes
+                # Use atomic writes for both files
                 self._atomic_json_save(tag_stats_path, stats_data)
                 self._atomic_json_save(tag_images_path, images_data)
                 
                 # Update cache index with tag metadata
                 self.cache_index["tag_metadata"] = {
                     "statistics": tag_data["statistics"],
-                    "metadata": tag_data["metadata"]
+                    "metadata": tag_data["metadata"],
+                    "last_updated": time.time()
                 }
-                self._save_cache_index()
+                self._save_index()
+                
+                logger.info(f"Tag index saved successfully with {len(tag_data['images'])} entries")
                 
             except Exception as e:
                 raise CacheError("Failed to save tag index", context={
@@ -474,15 +481,20 @@ class CacheManager:
         return tags_dir
 
     def get_tag_statistics_path(self) -> Path:
-        """Get path for tag statistics file."""
-        return self.get_tag_index_path() / "statistics.json"
+        """Get path to tag statistics file."""
+        return self.tags_dir / "tag_statistics.json"
 
     def get_image_tags_path(self) -> Path:
-        """Get path for image tags file."""
-        return self.get_tag_index_path() / "image_tags.json"
+        """Get path to image tags file."""
+        return self.tags_dir / "image_tags.json"
 
-    def _atomic_json_save(self, path: Path, data: Dict) -> None:
-        """Atomically save JSON data to file using a temporary file."""
+    def _atomic_json_save(self, path: Path, data: Dict[str, Any]) -> None:
+        """Save JSON data atomically using a temporary file.
+        
+        Args:
+            path: Path to save the JSON file
+            data: Dictionary data to save
+        """
         temp_path = path.with_suffix('.tmp')
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
@@ -698,3 +710,38 @@ class CacheManager:
                     'tag_images_path': str(tag_images_path),
                     'error': str(e)
                 })
+
+    def _verify_tag_metadata(self, stats_data: Dict[str, Any], images_data: Dict[str, Any]) -> bool:
+        """Verify tag metadata structure and content.
+        
+        Args:
+            stats_data: Tag statistics data
+            images_data: Image tags data
+            
+        Returns:
+            bool: True if metadata is valid
+        """
+        try:
+            # Verify required fields
+            required_stats_fields = ["metadata", "statistics", "version"]
+            required_images_fields = ["images", "version", "updated_at"]
+            
+            if not (all(field in stats_data for field in required_stats_fields) and
+                   all(field in images_data for field in required_images_fields)):
+                return False
+            
+            # Verify version compatibility
+            if (stats_data["version"] != "1.0" or 
+                images_data["version"] != "1.0"):
+                return False
+            
+            # Verify statistics structure
+            required_stats = ["total_samples", "tag_type_counts", "unique_tags"]
+            if not all(field in stats_data["statistics"] for field in required_stats):
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to verify tag metadata: {e}")
+            return False
