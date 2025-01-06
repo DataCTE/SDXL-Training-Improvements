@@ -1,11 +1,15 @@
-
-from typing import Optional, Union, Dict
+"""Unified logging system for SDXL training."""
+from typing import Optional, Union, Dict, Any
 import logging
 from pathlib import Path
 
-from .base import LogConfig, ConfigurationError
+from .base import LogConfig, ConfigurationError, MetricsConfig, ProgressConfig
 from .core import UnifiedLogger, LogManager
 from .wandb import WandbLogger, WandbConfig
+from .formatters import ColoredFormatter
+from .metrics import MetricsTracker
+from .progress import ProgressTracker
+from .progress_predictor import ProgressPredictor
 
 def setup_logging(
     config: Optional[Union[LogConfig, Dict]] = None,
@@ -15,9 +19,29 @@ def setup_logging(
     module_name: Optional[str] = None,
     capture_warnings: Optional[bool] = None,
     propagate: Optional[bool] = None,
-    console_level: Optional[Union[int, str]] = None
+    console_level: Optional[Union[int, str]] = None,
+    enable_wandb: Optional[bool] = None,
+    enable_progress: Optional[bool] = None,
+    enable_metrics: Optional[bool] = None
 ) -> UnifiedLogger:
-    """Setup logging system with configuration."""
+    """Setup logging system with enhanced configuration.
+    
+    Args:
+        config: Base configuration object or dict
+        log_dir: Override log directory
+        level: Override file logging level
+        filename: Override log filename
+        module_name: Override logger name
+        capture_warnings: Override warning capture
+        propagate: Override log propagation
+        console_level: Override console logging level
+        enable_wandb: Override W&B logging
+        enable_progress: Override progress tracking
+        enable_metrics: Override metrics tracking
+        
+    Returns:
+        Configured UnifiedLogger instance
+    """
     # Create config from parameters or use provided config
     if config is None:
         config = LogConfig()
@@ -40,6 +64,12 @@ def setup_logging(
         config.console_level = console_level
     if module_name is not None:
         config.name = module_name
+    if enable_wandb is not None:
+        config.enable_wandb = enable_wandb
+    if enable_progress is not None:
+        config.enable_progress = enable_progress
+    if enable_metrics is not None:
+        config.enable_metrics = enable_metrics
         
     # Configure warning capture
     logging.captureWarnings(config.capture_warnings)
@@ -66,25 +96,44 @@ def cleanup_logging() -> None:
     logging.info("Logging system cleanup complete")
 
 def get_logger(name: str) -> UnifiedLogger:
-    """Get a logger by name.
+    """Get a logger by name with enhanced features.
     
-    This is a compatibility function that provides the same interface
-    as the old get_logger function but uses the new UnifiedLogger system.
+    This provides a unified interface for logging with support for:
+    - Colored console output
+    - File logging
+    - W&B integration
+    - Progress tracking
+    - Metrics monitoring
+    - Memory tracking
     
     Args:
         name: Logger name
         
     Returns:
-        UnifiedLogger instance
+        UnifiedLogger instance with all configured features
     """
     return LogManager.get_instance().get_logger(name)
 
 __all__ = [
+    # Core components
     'LogConfig',
     'WandbConfig',
+    'MetricsConfig',
+    'ProgressConfig',
     'UnifiedLogger',
+    'LogManager',
+    
+    # Feature-specific
     'WandbLogger',
+    'ColoredFormatter',
+    'MetricsTracker',
+    'ProgressTracker',
+    'ProgressPredictor',
+    
+    # Exceptions
     'ConfigurationError',
+    
+    # Helper functions
     'setup_logging',
     'cleanup_logging',
     'get_logger'
