@@ -1,4 +1,4 @@
-"""Unified logging system for SDXL training."""
+
 from typing import Optional, Union, Dict
 import logging
 from pathlib import Path
