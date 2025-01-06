@@ -80,32 +80,51 @@ class UnifiedLogger:
             keep_history=self.config.metrics_history
         )
     
-    # Core logging methods
-    def debug(self, msg: str, *args, **kwargs): self.logger.debug(msg, *args, **kwargs)
-    def info(self, msg: str, *args, **kwargs): self.logger.info(msg, *args, **kwargs)
-    def warning(self, msg: str, *args, **kwargs): self.logger.warning(msg, *args, **kwargs)
-    def error(self, msg: str, *args, **kwargs): self.logger.error(msg, *args, **kwargs)
-    
-    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None):
-        """Log metrics with optional W&B integration."""
-        if self.metrics:
-            self.metrics.update(metrics, step)
+    def debug(self, msg: str, *args, **kwargs) -> None:
+        """Log debug message."""
+        self.logger.debug(msg, *args, **kwargs)
+        
+    def info(self, msg: str, *args, **kwargs) -> None:
+        """Log info message."""
+        self.logger.info(msg, *args, **kwargs)
+        
+    def warning(self, msg: str, *args, **kwargs) -> None:
+        """Log warning message."""
+        self.logger.warning(msg, *args, **kwargs)
+        
+    def error(self, msg: str, *args, **kwargs) -> None:
+        """Log error message."""
+        self.logger.error(msg, *args, **kwargs)
+        
+    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
+        """Log multiple metrics with optional step."""
+        for name, value in metrics.items():
+            self._metrics.update(name, value)
             
-        if self.wandb:
-            self.wandb.log(metrics, step=step)
+        if self._wandb_run is not None:
+            self._wandb_run.log(metrics, step=step)
             
-    def update_progress(self, n: int = 1, **kwargs):
-        """Update progress tracking."""
-        if self.progress:
-            self.progress.update(n, **kwargs)
+    def update_progress(self, n: int = 1, **kwargs) -> Optional[float]:
+        """Update progress and return current rate if available."""
+        if self._progress is not None:
+            rate = self._progress.update(n)
+            if self.config.enable_metrics:
+                self._metrics.update("progress/steps_per_sec", rate)
+            return rate
+        return None
             
-    def finish(self):
+    def finish(self) -> None:
         """Cleanup and close all logging systems."""
-        if self.wandb:
-            self.wandb.finish()
+        if self._wandb_run is not None:
+            self._wandb_run.finish()
             
-        if self.progress:
-            self.progress.close()
+        if self._progress is not None:
+            self._progress.close()
             
-        if self.metrics:
-            self.metrics.close() 
+    def __enter__(self) -> 'UnifiedLogger':
+        """Context manager entry."""
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit with cleanup."""
+        self.finish()
