@@ -68,7 +68,7 @@ def verify_memory_optimizations(
     model: torch.nn.Module,
     config: "Config",  # type: ignore
     device: torch.device,
-    logger: Optional[UnifiedLogger] = None
+    logger: Optional["UnifiedLogger"] = None
 ) -> Dict[str, bool]:
     states = {
         "cuda_available": torch.cuda.is_available(),
