@@ -99,6 +99,42 @@ class BucketInfo:
             "aspect_class": self.aspect_class
         }
     
+    def validate_with_details(self) -> Tuple[bool, Optional[str]]:
+        """Comprehensive validation with detailed error reporting."""
+        try:
+            # Validate dimensions object
+            dims_valid, dims_error = self.dimensions.validate_with_details()
+            if not dims_valid:
+                return False, f"Dimension validation failed: {dims_error}"
+            
+            # Validate consistency between redundant storage
+            checks = [
+                (self.pixel_dims == (self.dimensions.width, self.dimensions.height),
+                 "Pixel dimensions mismatch with stored dimensions"),
+                (self.latent_dims == (self.dimensions.width_latent, self.dimensions.height_latent),
+                 "Latent dimensions mismatch"),
+                (abs(self.dimensions.aspect_ratio - (self.pixel_dims[0] / self.pixel_dims[1])) < 1e-6,
+                 "Aspect ratio mismatch"),
+                (self._classify_size(self.dimensions.total_pixels) == self.size_class,
+                 "Size classification mismatch"),
+                (self._classify_aspect(self.dimensions.aspect_ratio) == self.aspect_class,
+                 "Aspect classification mismatch")
+            ]
+            
+            for check, message in checks:
+                if not check:
+                    return False, message
+            
+            return True, None
+            
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+    
+    def validate(self) -> bool:
+        """Validate bucket information."""
+        valid, _ = self.validate_with_details()
+        return valid
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'BucketInfo':
         """Create BucketInfo from dictionary with validation."""
@@ -123,8 +159,9 @@ class BucketInfo:
                 aspect_class=data["aspect_class"]
             )
             
-            if not bucket.validate():
-                raise ValueError("Invalid bucket data")
+            valid, error = bucket.validate_with_details()
+            if not valid:
+                raise ValueError(f"Invalid bucket data: {error}")
             
             return bucket
             
