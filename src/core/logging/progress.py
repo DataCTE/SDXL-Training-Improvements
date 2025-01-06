@@ -36,38 +36,41 @@ class HistoricalRun:
 class PredictionModel:
     """Adaptive prediction model based on historical data."""
     history: List[HistoricalRun] = field(default_factory=list)
-    max_history: int = 100
-    weights: Dict[str, float] = field(default_factory=lambda: {"recent": 0.6, "similar": 0.3, "global": 0.1})
+    weights: Dict[str, float] = field(default_factory=lambda: {
+        "recent": 0.5,
+        "similar": 0.3,
+        "global": 0.2
+    })
+    max_history: int = 1000
     
-    def predict_duration(self, 
-                        remaining_items: int, 
-                        current_rates: Dict[str, float],
-                        total_items: int) -> float:
-        """Make prediction using weighted historical data."""
-        if not self.history:
-            # Fallback to simple prediction
-            return self._simple_prediction(remaining_items, current_rates)
-            
+    def predict_duration(
+        self,
+        remaining_items: int,
+        current_rates: Dict[str, float],
+        total_items: int
+    ) -> float:
+        """Predict remaining duration using weighted combination of methods."""
         predictions = []
         weights = []
         
-        # Recent runs prediction
-        if recent_pred := self._predict_from_recent(remaining_items, current_rates):
-            predictions.append(recent_pred)
+        # Get predictions from each method
+        recent = self._predict_from_recent(remaining_items, current_rates)
+        similar = self._predict_from_similar_size(remaining_items, current_rates, total_items)
+        global_pred = self._predict_from_global(remaining_items, current_rates)
+        
+        # Add valid predictions with their weights
+        if recent is not None:
+            predictions.append(recent)
             weights.append(self.weights["recent"])
-            
-        # Similar size runs prediction
-        if similar_pred := self._predict_from_similar_size(remaining_items, current_rates, total_items):
-            predictions.append(similar_pred)
+        if similar is not None:
+            predictions.append(similar)
             weights.append(self.weights["similar"])
-            
-        # Global history prediction
-        if global_pred := self._predict_from_global(remaining_items, current_rates):
+        if global_pred is not None:
             predictions.append(global_pred)
             weights.append(self.weights["global"])
             
         if not predictions:
-            return self._simple_prediction(remaining_items, current_rates)
+            return float('inf')
             
         # Normalize weights
         weights = np.array(weights) / sum(weights)

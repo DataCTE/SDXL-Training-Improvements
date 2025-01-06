@@ -54,6 +54,19 @@ class LogManager:
     _metrics_buffer: Dict[str, List[float]] = {}
     _lock = threading.Lock()
     
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialize()
+            return cls._instance
+            
+    def _initialize(self):
+        """Initialize the log manager."""
+        self._loggers = {}
+        self._metrics_buffer = {}
+        self._registry_lock = threading.Lock()
+    
     @classmethod
     def get_instance(cls) -> 'LogManager':
         if cls._instance is None:
