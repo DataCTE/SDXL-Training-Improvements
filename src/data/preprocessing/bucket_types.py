@@ -79,26 +79,6 @@ class BucketInfo:
     size_class: str
     aspect_class: str
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert bucket info to serializable dictionary."""
-        return {
-            "dimensions": {
-                "width": self.dimensions.width,
-                "height": self.dimensions.height,
-                "width_latent": self.dimensions.width_latent,
-                "height_latent": self.dimensions.height_latent,
-                "aspect_ratio": self.dimensions.aspect_ratio,
-                "aspect_ratio_inverse": self.dimensions.aspect_ratio_inverse,
-                "total_pixels": self.dimensions.total_pixels,
-                "total_latents": self.dimensions.total_latents
-            },
-            "pixel_dims": list(self.pixel_dims),
-            "latent_dims": list(self.latent_dims),
-            "bucket_index": self.bucket_index,
-            "size_class": self.size_class,
-            "aspect_class": self.aspect_class
-        }
-    
     def validate_with_details(self) -> Tuple[bool, Optional[str]]:
         """Comprehensive validation with detailed error reporting."""
         try:
@@ -107,24 +87,24 @@ class BucketInfo:
             if not dims_valid:
                 return False, f"Dimension validation failed: {dims_error}"
             
-            # Validate consistency between redundant storage
+            # Validate consistency between redundant storage with specific error messages
             checks = [
                 (self.pixel_dims == (self.dimensions.width, self.dimensions.height),
-                 "Pixel dimensions mismatch with stored dimensions"),
+                 f"Pixel dimensions mismatch: expected {(self.dimensions.width, self.dimensions.height)}, got {self.pixel_dims}"),
                 (self.latent_dims == (self.dimensions.width_latent, self.dimensions.height_latent),
-                 "Latent dimensions mismatch"),
+                 f"Latent dimensions mismatch: expected {(self.dimensions.width_latent, self.dimensions.height_latent)}, got {self.latent_dims}"),
                 (abs(self.dimensions.aspect_ratio - (self.pixel_dims[0] / self.pixel_dims[1])) < 1e-6,
-                 "Aspect ratio mismatch"),
+                 f"Aspect ratio mismatch: stored {self.dimensions.aspect_ratio}, computed {self.pixel_dims[0] / self.pixel_dims[1]}"),
                 (self._classify_size(self.dimensions.total_pixels) == self.size_class,
-                 "Size classification mismatch"),
+                 f"Size classification mismatch: expected {self._classify_size(self.dimensions.total_pixels)}, got {self.size_class}"),
                 (self._classify_aspect(self.dimensions.aspect_ratio) == self.aspect_class,
-                 "Aspect classification mismatch")
+                 f"Aspect classification mismatch: expected {self._classify_aspect(self.dimensions.aspect_ratio)}, got {self.aspect_class}")
             ]
             
             for check, message in checks:
                 if not check:
                     return False, message
-            
+                    
             return True, None
             
         except Exception as e:
@@ -134,6 +114,36 @@ class BucketInfo:
         """Validate bucket information."""
         valid, _ = self.validate_with_details()
         return valid
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert bucket info to serializable dictionary with validation."""
+        try:
+            bucket_dict = {
+                "dimensions": {
+                    "width": self.dimensions.width,
+                    "height": self.dimensions.height,
+                    "width_latent": self.dimensions.width_latent,
+                    "height_latent": self.dimensions.height_latent,
+                    "aspect_ratio": float(self.dimensions.aspect_ratio),
+                    "aspect_ratio_inverse": float(self.dimensions.aspect_ratio_inverse),
+                    "total_pixels": int(self.dimensions.total_pixels),
+                    "total_latents": int(self.dimensions.total_latents)
+                },
+                "pixel_dims": list(map(int, self.pixel_dims)),
+                "latent_dims": list(map(int, self.latent_dims)),
+                "bucket_index": int(self.bucket_index),
+                "size_class": self.size_class,
+                "aspect_class": self.aspect_class
+            }
+            
+            # Validate after conversion
+            if not self.validate():
+                raise ValueError("Invalid bucket data after serialization")
+                
+            return bucket_dict
+            
+        except Exception as e:
+            raise ValueError(f"Failed to serialize bucket: {str(e)}")
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'BucketInfo':
