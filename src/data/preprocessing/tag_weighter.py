@@ -193,14 +193,17 @@ class TagWeighter:
         
         # Process in larger batches for efficiency
         batch_size = 5000
-        with logger.start_progress(
-            total=len(captions) // batch_size + 1,
-            desc="Processing captions"
-        ) as progress:
-            for i in range(0, len(captions), batch_size):
-                batch = captions[i:i + batch_size]
-                self.total_samples += len(batch)
-                progress.update(1)
+        predictor = ProgressPredictor()
+        predictor.start(len(captions))
+        
+        for i in range(0, len(captions), batch_size):
+            batch = captions[i:i + batch_size]
+            self.total_samples += len(batch)
+            
+            timing = predictor.update(1)
+            if i % (batch_size * 10) == 0:  # Log every 10 batches
+                eta_str = predictor.format_time(timing["eta_seconds"])
+                logger.info(f"Processing captions: {i}/{len(captions)} (ETA: {eta_str})")
             
             # Batch process tags
             for caption in batch:
