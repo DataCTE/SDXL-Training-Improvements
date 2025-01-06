@@ -226,13 +226,23 @@ class CacheManager:
         """Save processed tensors with proper organization for training."""
         try:
             cache_key = self.get_cache_key(path)
+            logger.debug("Saving latents to cache", extra={
+                'cache_key': cache_key,
+                'path': str(path),
+                'tensor_shapes': {k: v.shape for k,v in tensors.items()}
+            })
             
-            # Save VAE latents in vae subfolder
+            # Save VAE latents
             vae_path = self.vae_latents_dir / f"{cache_key}.pt"
             torch.save({
                 "vae_latents": tensors["vae_latents"].cpu(),
                 "time_ids": tensors["time_ids"].cpu()
             }, vae_path)
+            
+            logger.debug("Saved VAE latents", extra={
+                'path': str(vae_path),
+                'size': vae_path.stat().st_size
+            })
             
             # Save CLIP latents in clip subfolder
             clip_path = self.clip_latents_dir / f"{cache_key}.pt"

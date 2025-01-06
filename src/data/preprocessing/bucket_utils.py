@@ -16,22 +16,33 @@ logger = logging.getLogger(__name__)
 
 def generate_buckets(config: Config) -> List[BucketInfo]:
     """Generate comprehensive bucket information with enhanced validation."""
-    image_config = config.global_config.image
-    buckets = []
+    logger.info("Generating training buckets", extra={
+        'min_size': config.global_config.image.min_size,
+        'max_size': config.global_config.image.max_size,
+        'bucket_step': config.global_config.image.bucket_step
+    })
     
-    for idx, dims in enumerate(image_config.supported_dims):
+    buckets = []
+    for idx, dims in enumerate(config.global_config.image.supported_dims):
         try:
             w, h = dims[0], dims[1]
-            
-            # Create bucket and validate
             bucket = BucketInfo.from_dims(w, h, len(buckets))
             valid, error = validate_bucket_config(bucket, config)
             
             if not valid:
-                logger.warning(f"Invalid bucket configuration {w}x{h}: {error}")
+                logger.warning("Invalid bucket configuration", extra={
+                    'width': w,
+                    'height': h,
+                    'error': error
+                })
                 continue
-            
+                
             buckets.append(bucket)
+            logger.debug("Added bucket", extra={
+                'dims': f"{w}x{h}",
+                'aspect_ratio': f"{w/h:.2f}",
+                'total_pixels': w*h
+            })
             
             # Add flipped dimension if valid
             if h != w:

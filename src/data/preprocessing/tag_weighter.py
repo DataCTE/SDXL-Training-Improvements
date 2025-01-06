@@ -441,19 +441,24 @@ class TagWeighter:
         return obj
 
     def process_dataset_tags(self, captions: List[str]) -> Dict[str, Any]:
-        """Process all dataset captions and return tag information.
+        """Process all dataset captions and return tag information."""
+        logger.info("Processing dataset tags", extra={
+            'num_captions': len(captions),
+            'tag_types': list(self.tag_types.keys())
+        })
         
-        Args:
-            captions: List of image captions to process
-            
-        Returns:
-            Dict containing processed tag information for each caption
-        """
         processed_tags = {}
-        
         try:
-            for caption in tqdm(captions, desc="Processing tags"):
+            for idx, caption in enumerate(tqdm(captions, desc="Processing tags")):
                 tags = self._extract_tags(caption)
+                
+                # Log periodic statistics
+                if idx > 0 and idx % 1000 == 0:
+                    logger.debug("Tag processing progress", extra={
+                        'processed': idx,
+                        'total': len(captions),
+                        'unique_tags': {t: len(self.tag_counts[t]) for t in self.tag_types}
+                    })
                 
                 # Get weights for each tag
                 weighted_tags = {

@@ -52,15 +52,26 @@ class AspectBucketDataset(Dataset):
         self.is_train = is_train
         self._setup_device(device, device_id)
         
+        # Add structured logging for initialization
+        logger.info("Initializing AspectBucketDataset", extra={
+            'is_train': is_train,
+            'device_id': device_id,
+            'num_images': len(image_paths)
+        })
+        
         # Generate buckets with validation
         try:
             self.buckets = generate_buckets(config)
             if not self.buckets:
-                raise DataLoadError("No valid buckets generated", context={
+                logger.error("No valid buckets generated", extra={
                     'config': str(config.global_config.image),
                     'supported_dims': str(config.global_config.image.supported_dims)
                 })
-            logger.info(f"Initialized dataset with {len(self.buckets)} dynamic buckets")
+                raise DataLoadError("No valid buckets generated")
+            logger.info("Generated dynamic buckets", extra={
+                'num_buckets': len(self.buckets),
+                'bucket_sizes': [b.pixel_dims for b in self.buckets]
+            })
         except Exception as e:
             raise DataLoadError("Failed to generate buckets", context={
                 'error': str(e),
