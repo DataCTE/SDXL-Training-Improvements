@@ -206,7 +206,7 @@ class FlowMatchingTrainer(SDXLTrainer):
                             )
                     
                     global_step += 1
-                    progress_bar.update(1)
+                    progress.update(1)
                 
                 # Compute epoch average loss
                 if valid_steps > 0:

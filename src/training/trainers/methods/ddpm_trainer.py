@@ -204,7 +204,7 @@ class DDPMTrainer:
                                 )
                             
                             global_step += 1
-                            progress_bar.update(1)
+                            progress.update(1)
                         
                     except Exception as e:
                         logger.warning(f"Error in training step {step}: {str(e)}", exc_info=True)
