@@ -591,8 +591,9 @@ class CacheManager:
 
     def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
         """Verify cache integrity and rebuild if necessary."""
-        logger.info("Starting cache verification...")
-        needs_rebuild = False
+        try:
+            logger.info("Starting cache verification...")
+            needs_rebuild = False
         
         # Step 1: Check if tag metadata structure exists
         tag_stats_path = self.get_tag_statistics_path()
@@ -658,7 +659,8 @@ class CacheManager:
                     self.rebuild_cache_index()
                     
                     # Verify rebuild success
-                    if not self._verify_rebuild_success():
+                    success, error_msg = self._verify_rebuild_success()
+                    if not success:
                         raise CacheError("Cache rebuild failed", context={
                             'cache_dir': str(self.cache_dir),
                             'total_entries': len(self.cache_index.get("entries", {})),
@@ -668,7 +670,8 @@ class CacheManager:
                                 'has_entries': "entries" in self.cache_index,
                                 'has_stats': "stats" in self.cache_index,
                                 'has_tag_metadata': "tag_metadata" in self.cache_index
-                            }
+                            },
+                            'error': error_msg
                         })
                     logger.info("Cache rebuild completed successfully - ready for preprocessing")
                     
@@ -678,7 +681,7 @@ class CacheManager:
                     'error': str(e)
                 })
 
-    def _verify_rebuild_success(self) -> bool:
+    def _verify_rebuild_success(self) -> Tuple[bool, Optional[str]]:
         """Verify that cache rebuild was successful."""
         try:
             # Verify basic cache structure
@@ -740,11 +743,12 @@ class CacheManager:
                 'tag_files_exist': tag_stats_path.exists() and tag_images_path.exists()
             })
             
-            return True
+            return True, None
             
         except Exception as e:
-            logger.error(f"Failed to verify rebuild success: {e}")
-            return False
+            error_msg = f"Failed to verify rebuild success: {e}"
+            logger.error(error_msg)
+            return False, error_msg
 
     def load_bucket_info(self, cache_key: str) -> Optional["BucketInfo"]:
         """Load cached bucket information."""
