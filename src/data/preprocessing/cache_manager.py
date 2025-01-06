@@ -810,7 +810,12 @@ class CacheManager:
                 "latents_size": 0,
                 "metadata_size": 0
             },
-            "bucket_stats": defaultdict(int)
+            "bucket_stats": defaultdict(int),
+            "tag_metadata": {
+                "statistics": {},
+                "metadata": {},
+                "last_updated": time.time()
+            }
         }
 
     def initialize_tag_metadata(self) -> Dict[str, Any]:
@@ -838,6 +843,14 @@ class CacheManager:
                 # Use atomic writes for both files
                 self._atomic_json_save(tag_stats_path, empty_stats)
                 self._atomic_json_save(tag_images_path, empty_images)
+                
+                # Update cache index with tag metadata
+                self.cache_index["tag_metadata"] = {
+                    "statistics": empty_stats["statistics"],
+                    "metadata": empty_stats["metadata"],
+                    "last_updated": time.time()
+                }
+                self._save_index()
                 
                 return {
                     "statistics": empty_stats,
