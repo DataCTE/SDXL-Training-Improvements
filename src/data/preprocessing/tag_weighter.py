@@ -91,15 +91,15 @@ class TagWeighter:
             logger.error(f"Cache validation failed: {e}")
             return False
 
-    def _initialize_category_embeddings(self, categories):
-        """Initialize category embeddings using SDXL's CLIP."""
+    def _initialize_category_embeddings(self) -> Optional[Dict[str, torch.Tensor]]:
+        """Initialize category embeddings using CLIP."""
         if not self.clip_encoder or not self.tokenizer:
             return None
         
         embeddings = {}
         with torch.no_grad():
-            for category, terms in categories:
-                # Use encode_prompt with proper structure
+            for category, terms in self.tag_types.items():
+                # Encode category terms
                 text_embeddings = CLIPEncoder.encode_prompt(
                     batch={"text": terms},
                     text_encoders=[self.clip_encoder.text_encoder],
@@ -107,17 +107,23 @@ class TagWeighter:
                     is_train=False
                 )
                 # Use pooled embeddings for category representation
-                embeddings[category] = torch.mean(text_embeddings["pooled_prompt_embeds"], dim=0)
+                embeddings[category] = torch.mean(
+                    text_embeddings["pooled_prompt_embeds"], 
+                    dim=0
+                )
         
         return embeddings
 
     def _get_semantic_category(self, phrase: str) -> str:
-        """Determine category using CLIP similarity."""
+        """Determine semantic category using CLIP similarity."""
+        if not hasattr(self, 'category_embeddings'):
+            self.category_embeddings = self._initialize_category_embeddings()
+        
         if not self.clip_encoder or not self.category_embeddings:
             return "meta"
         
         with torch.no_grad():
-            # Get phrase embedding using CLIP
+            # Get phrase embedding
             phrase_embedding = CLIPEncoder.encode_prompt(
                 batch={"text": [phrase]},
                 text_encoders=[self.clip_encoder.text_encoder],
@@ -149,7 +155,7 @@ class TagWeighter:
             
             # Handle explicit category:tag format first
             for tag in (t.strip() for t in caption.split(',') if t):
-                if len(tag) > 100:
+                if len(tag) > 100:  # Skip overly long tags
                     continue
                     
                 if ':' in tag:
@@ -160,13 +166,14 @@ class TagWeighter:
                         categorized[category].append(original_tag)
                         continue
                 
-                # Semantic categorization for natural language
+                # Use semantic categorization for natural language
                 category = self._get_semantic_category(tag)
                 categorized[category].append(tag)
                     
             return categorized
             
         except Exception as e:
+            logger.error(f"Tag extraction failed: {e}")
             return {
                 "subject": [], "style": [], "quality": [], 
                 "technical": [], "meta": []
@@ -183,9 +190,9 @@ class TagWeighter:
             "meta": defaultdict(int)
         }
         
-        # Process in larger batches
+        # Process in larger batches for efficiency
         batch_size = 5000
-        for i in range(0, len(captions), batch_size):
+        for i in tqdm(range(0, len(captions), batch_size), desc="Processing captions"):
             batch = captions[i:i + batch_size]
             self.total_samples += len(batch)
             
@@ -201,8 +208,9 @@ class TagWeighter:
         
         self._compute_weights()
         
+        # Save to cache if enabled
         if self.config.tag_weighting.use_cache:
-            self._save_cache()
+            self.save_to_cache()
 
     def _compute_weights(self) -> None:
         """Compute tag weights based on in-class frequency with proper scaling."""
@@ -215,12 +223,12 @@ class TagWeighter:
                 
             for tag, count in type_counts.items():
                 # Calculate frequency within this tag type class
-                in_class_frequency = count / total_type_count  # Changed from total_samples
+                in_class_frequency = count / total_type_count
                 
                 # Apply inverse in-class frequency with smoothing
                 raw_weight = 1.0 / (in_class_frequency + self.smoothing_factor)
                 
-                # Scale to desired range while preserving relative in-class weights
+                # Scale to desired range while preserving relative weights
                 max_possible_weight = 1.0 / self.smoothing_factor
                 normalized_weight = (raw_weight - 1.0) / (max_possible_weight - 1.0)
                 scaled_weight = (
@@ -228,12 +236,10 @@ class TagWeighter:
                     (normalized_weight * (self.max_weight - self.min_weight))
                 )
                 
-                # Save the computed weight for this tag
-                self.tag_weights[tag_type][tag] = float(min(max(scaled_weight, self.min_weight), self.max_weight))
-
-            # Save weights if caching is enabled
-            if self.config.tag_weighting.use_cache:
-                self._save_cache()
+                # Save the computed weight
+                self.tag_weights[tag_type][tag] = float(
+                    min(max(scaled_weight, self.min_weight), self.max_weight)
+                )
 
     def get_caption_weight(self, caption: str) -> float:
         """Get combined weight for a caption."""
