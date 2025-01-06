@@ -29,6 +29,13 @@ class LogConfig:
     wandb_tags: Optional[List[str]] = None
     wandb_notes: Optional[str] = None
     
+    # Progress tracking config
+    progress_tracking: bool = True
+    progress_history_aware: bool = False
+    progress_history_path: Optional[str] = "outputs/logs/progress_history.json"
+    progress_bottleneck_threshold: float = 1.5
+    progress_smoothing: float = 0.3
+    
     @classmethod
     def from_global_config(cls, config) -> 'LogConfig':
         """Create LogConfig from GlobalConfig.LoggingConfig."""

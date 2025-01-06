@@ -3,7 +3,7 @@ import logging
 import sys
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 import torch
 import colorama
 from colorama import Fore, Style
@@ -307,3 +307,30 @@ def clear_action_history() -> None:
     """Clear action history with thread safety."""
     with _history_lock:
         _action_history.clear()
+
+def process_with_progress(
+    items: List[Any],
+    func: Callable,
+    desc: str = "",
+    logger: Optional[Logger] = None,
+    max_workers: Optional[int] = None,
+    segment_names: Optional[List[str]] = None,
+    **kwargs
+) -> List[Any]:
+    """Process items in parallel with progress tracking."""
+    if logger is None:
+        logger = get_logger(__name__)
+        
+    with logger.create_progress_tracker(
+        total=len(items),
+        desc=desc,
+        segment_names=segment_names,
+        **kwargs
+    ) as tracker:
+        return track_parallel_progress(
+            func=func,
+            items=items,
+            desc=desc,
+            max_workers=max_workers,
+            tracker=tracker
+        )

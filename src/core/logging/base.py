@@ -13,6 +13,8 @@ from datetime import datetime
 from functools import wraps
 
 from .config import LogConfig
+from .progress import ProgressTracker, ProgressConfig
+
 # Add a simple reduce_dict implementation here to break the cycle
 def reduce_dict(input_dict: dict, average: bool = True) -> dict:
     """Simple dictionary reduction for non-distributed case."""
@@ -65,7 +67,7 @@ class LogManager:
             return self._loggers[name]
 
 class Logger:
-    """Unified logger combining console, file, metrics, and W&B logging."""
+    """Unified logger combining console, file, metrics, and progress tracking."""
     
     def __init__(self, name: str, config: LogConfig):
         self.name = name
@@ -73,6 +75,7 @@ class Logger:
         self.logger = logging.getLogger(name)
         self.metrics_buffer = {}
         self.wandb_run = None
+        self.progress_trackers: Dict[str, ProgressTracker] = {}
         self._setup_logging()
         
     def _setup_logging(self):
@@ -234,6 +237,35 @@ class Logger:
     def critical(self, msg: str, *args, **kwargs):
         self.logger.critical(msg, *args, **kwargs)
 
+    def create_progress_tracker(
+        self,
+        total: int,
+        desc: str = "",
+        segment_names: Optional[List[str]] = None,
+        context: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> ProgressTracker:
+        """Create a new progress tracker."""
+        config = ProgressConfig(
+            desc=desc,
+            segment_names=segment_names or ["main"],
+            history_aware=self.config.progress_history_aware,
+            history_path=Path(self.config.progress_history_path) if self.config.progress_history_path else None,
+            bottleneck_threshold=self.config.progress_bottleneck_threshold,
+            smoothing=self.config.progress_smoothing,
+            **kwargs
+        )
+        
+        tracker = ProgressTracker(
+            total=total,
+            config=config,
+            logger_name=self.name,
+            context=context
+        )
+        
+        self.progress_trackers[desc or f"tracker_{len(self.progress_trackers)}"] = tracker
+        return tracker
+
 class ColoredFormatter(logging.Formatter):
     """Custom formatter for colored console output."""
     
@@ -291,6 +323,13 @@ class LogConfig:
     
     # Metrics config
     metrics_window_size: int = 100
+    
+    # Progress tracking config
+    progress_tracking: bool = True
+    progress_history_aware: bool = False
+    progress_history_path: Optional[str] = "outputs/logs/progress_history.json"
+    progress_bottleneck_threshold: float = 1.5
+    progress_smoothing: float = 0.3
     
     @classmethod
     def from_config(cls, config: 'Config') -> 'LogConfig':

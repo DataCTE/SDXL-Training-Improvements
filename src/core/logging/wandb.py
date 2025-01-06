@@ -10,6 +10,7 @@ from PIL import Image
 import logging
 from src.core.logging.base import LogConfig
 from src.data.config import Config
+from src.core.logging.progress import ProgressTracker
 
 # Use TYPE_CHECKING for type hints only
 if TYPE_CHECKING:
@@ -245,3 +246,32 @@ class WandbLogger:
             wandb.finish()
         except Exception as e:
             logger.error(f"Failed to finish W&B run: {str(e)}")
+
+    def log_progress(
+        self,
+        tracker: ProgressTracker,
+        step: Optional[int] = None,
+        commit: bool = True
+    ) -> None:
+        """Log progress metrics to W&B."""
+        if not self.enabled:
+            return
+            
+        try:
+            progress_metrics = {
+                "progress/completion": tracker.processed / tracker.total,
+                "progress/steps_per_second": tracker.steps_per_second,
+                "progress/eta": tracker.eta
+            }
+            
+            # Add segment-specific metrics
+            for name, stats in tracker.segments.items():
+                progress_metrics.update({
+                    f"progress/segments/{name}/rate": stats.avg_items_per_second,
+                    f"progress/segments/{name}/std_rate": stats.std_items_per_second
+                })
+            
+            self.log_metrics(progress_metrics, step=step, commit=commit)
+            
+        except Exception as e:
+            logger.error(f"Failed to log progress: {str(e)}")

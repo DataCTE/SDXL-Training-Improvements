@@ -7,7 +7,7 @@ from collections import defaultdict
 import time
 import numpy as np
 from functools import wraps
-from .base import get_logger, LogConfig, reduce_dict
+from .base import get_logger, LogConfig, reduce_dict, ProgressTracker
 from .wandb import WandbLogger
 
 logger = get_logger(__name__)
@@ -45,13 +45,14 @@ class TrainingMetrics:
         }
 
 class MetricsLogger:
-    """Centralized metrics logging with moving averages."""
+    """Centralized metrics logging with progress tracking."""
     
     def __init__(
         self, 
         window_size: int = 100,
         wandb_logger: Optional[WandbLogger] = None,
-        log_prefix: str = ""
+        log_prefix: str = "",
+        progress_tracker: Optional[ProgressTracker] = None
     ):
         self.window_size = window_size
         self.metrics_history = defaultdict(list)
@@ -60,6 +61,7 @@ class MetricsLogger:
         self.current_metrics = TrainingMetrics()
         self.wandb_logger = wandb_logger
         self.log_prefix = log_prefix
+        self.progress_tracker = progress_tracker
         
     def update(self, metrics: Dict[str, Any], batch_size: Optional[int] = None) -> None:
         """Update metrics history.
@@ -96,6 +98,17 @@ class MetricsLogger:
             # Update sample count
             if batch_size is not None:
                 self.total_samples += batch_size
+                
+            # Update progress if tracker exists
+            if self.progress_tracker:
+                self.progress_tracker.update(batch_size or 1)
+                
+                # Add progress metrics to tracking
+                progress_metrics = {
+                    f"{self.log_prefix}progress/steps_per_second": self.progress_tracker.steps_per_second,
+                    f"{self.log_prefix}progress/eta": self.progress_tracker.eta,
+                }
+                metrics.update(progress_metrics)
                 
         except Exception as e:
             logger.error(
