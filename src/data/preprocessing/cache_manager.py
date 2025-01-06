@@ -488,8 +488,13 @@ class CacheManager:
                 temp_path.unlink()
             raise e
 
-    def verify_and_rebuild_cache(self, image_paths: List[str]) -> None:
-        """Verify cache integrity and rebuild if necessary."""
+    def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
+        """Verify cache integrity and rebuild if necessary.
+        
+        Args:
+            image_paths: List of paths to images
+            captions: List of corresponding captions for the images
+        """
         logger.info("Starting comprehensive cache verification...")
         needs_rebuild = False
         
@@ -522,18 +527,23 @@ class CacheManager:
                     'missing_images_fields': [f for f in required_images_fields if f not in images_data]
                 })
             
-            # Verify all images have tag entries
+            # Verify all images have tag entries and captions
             missing_tags = []
-            for path in image_paths:
+            missing_captions = []
+            for path, caption in zip(image_paths, captions):
                 if str(path) not in images_data.get("images", {}):
                     missing_tags.append(path)
-                    if len(missing_tags) > 5:  # Limit number of reported missing tags
-                        break
+                if not caption:
+                    missing_captions.append(path)
+                if len(missing_tags) > 5:  # Limit number of reported missing tags
+                    break
             
-            if missing_tags:
-                raise CacheError("Missing tag data for images", {
-                    'missing_count': len(missing_tags),
-                    'example_paths': missing_tags[:5]
+            if missing_tags or missing_captions:
+                raise CacheError("Missing tag data or captions for images", {
+                    'missing_tags_count': len(missing_tags),
+                    'missing_captions_count': len(missing_captions),
+                    'example_paths': missing_tags[:5],
+                    'example_missing_captions': missing_captions[:5]
                 })
                 
         except Exception as e:
