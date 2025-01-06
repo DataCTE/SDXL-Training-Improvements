@@ -616,7 +616,8 @@ def create_dataset(
                 logger.info("Computing tag weights and creating new index...")
                 tag_weighter = create_tag_weighter_with_index(
                     config=config,
-                    image_captions=captions,
+                    image_paths=image_paths,
+                    captions=captions,
                     model=model
                 )
                 
