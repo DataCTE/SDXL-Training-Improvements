@@ -598,19 +598,23 @@ class CacheManager:
             # Step 1: Check if tag metadata structure exists
             tag_stats_path = self.get_tag_statistics_path()
             tag_images_path = self.get_image_tags_path()
-        
-        # Initialize empty structures if files don't exist
-        if not (tag_stats_path.exists() and tag_images_path.exists()):
-            logger.info("Initializing new tag metadata structure...")
-            try:
-                self.initialize_tag_metadata()
-                needs_rebuild = True
-            except Exception as e:
-                raise CacheError("Failed to initialize tag metadata structure", context={
-                    'tag_stats_path': str(tag_stats_path),
-                    'tag_images_path': str(tag_images_path),
-                    'error': str(e)
-                })
+            
+            # Initialize empty structures if files don't exist
+            if not (tag_stats_path.exists() and tag_images_path.exists()):
+                logger.info("Initializing new tag metadata structure...")
+                try:
+                    self.initialize_tag_metadata()
+                    needs_rebuild = True
+                except Exception as e:
+                    raise CacheError("Failed to initialize tag metadata structure", context={
+                        'tag_stats_path': str(tag_stats_path),
+                        'tag_images_path': str(tag_images_path),
+                        'error': str(e)
+                    })
+        except Exception as e:
+            raise CacheError("Cache verification failed", context={
+                'error': str(e)
+            })
         
         # Step 2: Verify existing structure
         if not needs_rebuild:
