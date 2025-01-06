@@ -18,7 +18,7 @@ import torch
 from torch.utils.data import DataLoader
 
 # Core imports
-from src.core.logging import setup_logging, get_logger, WandbLogger
+from src.core.logging import UnifiedLogger, LogConfig, WandbLogger
 from src.data.config import Config
 from src.data.dataset import create_dataset
 from src.models import StableDiffusionXL
@@ -26,25 +26,26 @@ from src.models.base import ModelType
 from src.training.trainers import BaseRouter
 from src.training.optimizers import AdamWBF16, AdamWScheduleFreeKahan, SOAP
 
-logger, tensor_logger = setup_logging(
+logger = UnifiedLogger(LogConfig(
+    name="main",
     log_dir="outputs/logs",
     filename="training.log",
     console_level="INFO",
     capture_warnings=True
-)
+))
 
 CONFIG_PATH = Path("src/config.yaml")
 
 def main():
     """Main training entry point."""
-    logger.info("Starting training script...", extra={'keyword': 'start'})
+    logger.info("Starting training script...")
     
     try:
         config = Config.from_yaml(CONFIG_PATH)
         
         with setup_environment():
             device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}" if torch.cuda.is_available() else "cpu")
-            logger.info(f"Using device: {device}", extra={'success': True})
+            logger.info(f"Using device: {device}")
             
             # Initialize model
             model = StableDiffusionXL.from_pretrained(
@@ -110,7 +111,7 @@ def main():
                 trainer.save_checkpoint(save_path, is_final=True)
                 logger.info(f"Saved final model to {save_path}")
             
-            logger.info("Training completed successfully", extra={'keyword': 'success'})
+            logger.info("Training completed successfully")
 
     except Exception as e:
         logger.error(f"Training failed: {str(e)}", exc_info=True)
