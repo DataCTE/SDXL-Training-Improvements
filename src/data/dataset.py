@@ -522,47 +522,34 @@ def create_dataset(
                 'data_dir': config.data.train_data_dir
             })
             
-        image_captions = dict(zip(image_paths, captions))
-        
         # First verify cache integrity if requested
         if verify_cache:
             logger.info("Verifying cache and tag metadata...")
             cache_manager.verify_and_rebuild_cache(image_paths, captions)
             
-        # Initialize tag weighting if enabled
+        # Initialize tag weighting system
         tag_weighter = None
-        if config.tag_weighting.enable_tag_weighting:
-            logger.info("Initializing tag weighting system...")
-            
-            # Validate model availability for tag weighting
-            if model is None or not hasattr(model, 'clip_encoder_1'):
-                raise RuntimeError(
-                    "Tag weighting is enabled but CLIP model is not available. "
-                    "Please provide a valid SDXL model with CLIP encoder."
-                )
-            
-            # Check for existing tag cache after verification
-            tag_stats_path = cache_manager.get_tag_statistics_path()
-            tag_images_path = cache_manager.get_image_tags_path()
-
+        if config.tag_weighting.enabled:
             try:
-                if tag_stats_path.exists() and tag_images_path.exists() and config.tag_weighting.use_cache:
+                # Check for existing tag cache after verification
+                tag_stats_path = cache_manager.get_tag_statistics_path()
+                tag_images_path = cache_manager.get_image_tags_path()
+
+                if (tag_stats_path.exists() and 
+                    tag_images_path.exists() and 
+                    config.tag_weighting.use_cache):
                     logger.info("Loading tag weights from verified cache...")
                     tag_weighter = TagWeighter(config, model)
-                    tag_weighter._load_cache()
-                    
-                    # Verify loaded cache is valid
-                    if not tag_weighter.verify_cache_validity():
-                        logger.warning("Tag cache invalid or incomplete, rebuilding...")
-                        raise ValueError("Invalid tag cache")
+                    if not tag_weighter._load_cache():
+                        raise ValueError("Failed to load tag cache")
                 else:
-                    raise FileNotFoundError("Tag cache not found")
-                
+                    raise FileNotFoundError("Tag cache not found or disabled")
+                    
             except (FileNotFoundError, ValueError) as e:
                 logger.info("Computing tag weights and creating new index...")
                 tag_weighter = create_tag_weighter_with_index(
                     config=config,
-                    image_captions=image_captions,
+                    image_captions=captions,
                     model=model
                 )
                 
@@ -591,7 +578,7 @@ def create_dataset(
                         }
                     },
                     "statistics": tag_weighter.get_tag_statistics(),
-                    "images": tag_weighter.process_dataset_tags(image_captions)
+                    "images": tag_weighter.process_dataset_tags(captions)
                 })
         
         # Create dataset instance with tag weighter
@@ -628,7 +615,7 @@ def create_dataset(
             
             # Verify tag coverage
             total_images = len(image_paths)
-            tagged_images = len(tag_weighter.process_dataset_tags(image_captions))
+            tagged_images = len(tag_weighter.process_dataset_tags(captions))
             coverage = (tagged_images / total_images) * 100
             logger.info(f"\nTag Coverage: {coverage:.2f}% ({tagged_images}/{total_images} images)")
         
