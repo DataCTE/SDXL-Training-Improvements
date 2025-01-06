@@ -542,8 +542,10 @@ def create_dataset(
                 )
             
             # Check for existing tag cache after verification
-            tag_cache_path = cache_manager.tags_dir / "tag_index.json"
-            if tag_cache_path.exists() and config.tag_weighting.use_cache:
+            tag_stats_path = cache_manager.get_tag_statistics_path()
+            tag_images_path = cache_manager.get_image_tags_path()
+
+            if tag_stats_path.exists() and tag_images_path.exists() and config.tag_weighting.use_cache:
                 logger.info("Loading tag weights from verified cache...")
                 tag_weighter = TagWeighter(config, model)  # Pass model for CLIP
                 tag_weighter._load_cache()

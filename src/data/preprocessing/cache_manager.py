@@ -503,33 +503,15 @@ class CacheManager:
         # Initialize empty structures if files don't exist
         if not (tag_stats_path.exists() and tag_images_path.exists()):
             logger.info("Initializing new tag metadata structure...")
-            empty_stats = {
-                "version": "1.0",
-                "metadata": {},
-                "statistics": {
-                    "total_samples": 0,
-                    "tag_type_counts": {},
-                    "unique_tags": {}
-                }
-            }
-            empty_images = {
-                "version": "1.0",
-                "updated_at": time.time(),
-                "images": {}
-            }
-            
-            with self._lock:
-                try:
-                    # Use atomic writes for both files
-                    self._atomic_json_save(tag_stats_path, empty_stats)
-                    self._atomic_json_save(tag_images_path, empty_images)
-                    needs_rebuild = True
-                except Exception as e:
-                    raise CacheError("Failed to initialize tag metadata structure", context={
-                        'tag_stats_path': str(tag_stats_path),
-                        'tag_images_path': str(tag_images_path),
-                        'error': str(e)
-                    })
+            try:
+                self.initialize_tag_metadata()
+                needs_rebuild = True
+            except Exception as e:
+                raise CacheError("Failed to initialize tag metadata structure", context={
+                    'tag_stats_path': str(tag_stats_path),
+                    'tag_images_path': str(tag_images_path),
+                    'error': str(e)
+                })
         
         # Step 2: Verify existing structure
         if not needs_rebuild:
@@ -674,3 +656,40 @@ class CacheManager:
             },
             "bucket_stats": defaultdict(int)
         }
+
+    def initialize_tag_metadata(self) -> Dict[str, Any]:
+        """Initialize empty tag metadata structure."""
+        empty_stats = {
+            "version": "1.0",
+            "metadata": {},
+            "statistics": {
+                "total_samples": 0,
+                "tag_type_counts": {},
+                "unique_tags": {}
+            }
+        }
+        empty_images = {
+            "version": "1.0",
+            "updated_at": time.time(),
+            "images": {}
+        }
+        
+        with self._lock:
+            try:
+                tag_stats_path = self.get_tag_statistics_path()
+                tag_images_path = self.get_image_tags_path()
+                
+                # Use atomic writes for both files
+                self._atomic_json_save(tag_stats_path, empty_stats)
+                self._atomic_json_save(tag_images_path, empty_images)
+                
+                return {
+                    "statistics": empty_stats,
+                    "images": empty_images
+                }
+            except Exception as e:
+                raise CacheError("Failed to initialize tag metadata", context={
+                    'tag_stats_path': str(tag_stats_path),
+                    'tag_images_path': str(tag_images_path),
+                    'error': str(e)
+                })
