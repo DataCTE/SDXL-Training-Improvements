@@ -466,7 +466,7 @@ class TagWeighter:
                 }
                 
                 # Update progress with statistics
-                tracker.update(1, {
+                progress.update(1, {
                     "unique_tags": {
                         t: len(self.tag_counts[t]) 
                         for t in self.tag_types
