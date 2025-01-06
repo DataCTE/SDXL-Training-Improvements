@@ -518,7 +518,7 @@ def create_dataset(
         logger.info(f"Loading data from: {config.data.train_data_dir}")
         image_paths, captions = load_data_from_directory(config.data.train_data_dir)
         if not image_paths:
-            raise DataLoadError("No images found in data directory", {
+            raise DataLoadError("No images found in data directory", context={
                 'data_dir': config.data.train_data_dir
             })
             

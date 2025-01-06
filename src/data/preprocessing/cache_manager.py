@@ -491,78 +491,105 @@ class CacheManager:
     def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
         """Verify cache integrity and rebuild if necessary.
         
+        Handles both initial creation and verification of existing cache structure.
+        
         Args:
             image_paths: List of paths to images
             captions: List of corresponding captions for the images
         """
-        logger.info("Starting comprehensive cache verification...")
+        logger.info("Starting cache verification...")
         needs_rebuild = False
         
-        # Step 1: Verify tag metadata files and structure
-        logger.info("Verifying tag metadata...")
+        # Step 1: Check if tag metadata structure exists
         tag_stats_path = self.get_tag_statistics_path()
         tag_images_path = self.get_image_tags_path()
         
+        # Initialize empty structures if files don't exist
         if not (tag_stats_path.exists() and tag_images_path.exists()):
-            raise CacheError("Tag metadata files missing", {
-                'tag_stats_path': str(tag_stats_path),
-                'tag_images_path': str(tag_images_path)
-            })
+            logger.info("Initializing new tag metadata structure...")
+            empty_stats = {
+                "version": "1.0",
+                "metadata": {},
+                "statistics": {
+                    "total_samples": 0,
+                    "tag_type_counts": {},
+                    "unique_tags": {}
+                }
+            }
+            empty_images = {
+                "version": "1.0",
+                "updated_at": time.time(),
+                "images": {}
+            }
+            
+            try:
+                self._atomic_json_save(tag_stats_path, empty_stats)
+                self._atomic_json_save(tag_images_path, empty_images)
+                needs_rebuild = True
+            except Exception as e:
+                raise CacheError("Failed to initialize tag metadata structure", context={
+                    'tag_stats_path': str(tag_stats_path),
+                    'tag_images_path': str(tag_images_path),
+                    'error': str(e)
+                })
         
-        try:
-            # Load and verify tag statistics
-            with open(tag_stats_path, 'r', encoding='utf-8') as f:
-                stats_data = json.load(f)
-            with open(tag_images_path, 'r', encoding='utf-8') as f:
-                images_data = json.load(f)
-            
-            # Verify required fields
-            required_stats_fields = ["metadata", "statistics", "version"]
-            required_images_fields = ["images", "version", "updated_at"]
-            
-            if not (all(field in stats_data for field in required_stats_fields) and
-                   all(field in images_data for field in required_images_fields)):
-                raise CacheError("Tag metadata files missing required fields", {
-                    'missing_stats_fields': [f for f in required_stats_fields if f not in stats_data],
-                    'missing_images_fields': [f for f in required_images_fields if f not in images_data]
-                })
-            
-            # Verify all images have tag entries and captions
-            missing_tags = []
-            missing_captions = []
-            for path, caption in zip(image_paths, captions):
-                if str(path) not in images_data.get("images", {}):
-                    missing_tags.append(path)
-                if not caption:
-                    missing_captions.append(path)
-                if len(missing_tags) > 5:  # Limit number of reported missing tags
-                    break
-            
-            if missing_tags or missing_captions:
-                raise CacheError("Missing tag data or captions for images", {
-                    'missing_tags_count': len(missing_tags),
-                    'missing_captions_count': len(missing_captions),
-                    'example_paths': missing_tags[:5],
-                    'example_missing_captions': missing_captions[:5]
-                })
+        # Step 2: Verify existing structure if we didn't just create it
+        if not needs_rebuild:
+            try:
+                # Load and verify tag statistics
+                with open(tag_stats_path, 'r', encoding='utf-8') as f:
+                    stats_data = json.load(f)
+                with open(tag_images_path, 'r', encoding='utf-8') as f:
+                    images_data = json.load(f)
                 
-        except Exception as e:
-            if isinstance(e, CacheError):
-                raise
-            raise CacheError("Failed to verify tag metadata", {
-                'original_error': str(e)
-            }) from e
-
-        # If we get here, rebuild cache
+                # Verify required fields
+                required_stats_fields = ["metadata", "statistics", "version"]
+                required_images_fields = ["images", "version", "updated_at"]
+                
+                if not (all(field in stats_data for field in required_stats_fields) and
+                       all(field in images_data for field in required_images_fields)):
+                    logger.warning("Existing tag metadata missing required fields, rebuilding...")
+                    needs_rebuild = True
+                
+                # Only check image coverage if we haven't already flagged for rebuild
+                if not needs_rebuild:
+                    # Verify all images have tag entries and captions
+                    missing_tags = []
+                    missing_captions = []
+                    for path, caption in zip(image_paths, captions):
+                        if str(path) not in images_data.get("images", {}):
+                            missing_tags.append(path)
+                        if not caption:
+                            missing_captions.append(path)
+                        if len(missing_tags) > 5:  # Limit number of reported missing tags
+                            break
+                    
+                    if missing_tags or missing_captions:
+                        logger.warning("Missing tag data or captions, rebuilding cache...")
+                        needs_rebuild = True
+                    
+            except Exception as e:
+                logger.warning(f"Failed to verify existing tag metadata: {e}")
+                needs_rebuild = True
+        
+        # Step 3: Rebuild cache if needed
         if needs_rebuild:
-            logger.warning("Cache verification failed. Starting complete rebuild...")
-            self.rebuild_cache_index()
-            
-            # Verify rebuild was successful
-            if not self._verify_rebuild_success():
-                raise CacheError("Cache rebuild failed", {
+            logger.info("Starting cache rebuild...")
+            try:
+                self.rebuild_cache_index()
+                
+                # Verify rebuild was successful
+                if not self._verify_rebuild_success():
+                    raise CacheError("Cache rebuild failed", context={
+                        'cache_dir': str(self.cache_dir),
+                        'total_entries': len(self.cache_index.get("entries", {}))
+                    })
+                logger.info("Cache rebuild completed successfully")
+                
+            except Exception as e:
+                raise CacheError("Failed to rebuild cache", context={
                     'cache_dir': str(self.cache_dir),
-                    'total_entries': len(self.cache_index.get("entries", {}))
+                    'error': str(e)
                 })
         
     def _verify_rebuild_success(self) -> bool:

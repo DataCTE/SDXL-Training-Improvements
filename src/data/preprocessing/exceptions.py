@@ -76,7 +76,9 @@ class CacheError(PreprocessingError):
         - operation: Cache operation that failed
         - file_size: Size of file being cached
     """
-    pass
+    def __init__(self, message: str, *, context: Optional[Dict[str, Any]] = None):
+        """Initialize with message and optional context dictionary."""
+        super().__init__(message, context=context)
 
 class DtypeError(PreprocessingError):
     """Raised when dtype conversion or validation fails.
