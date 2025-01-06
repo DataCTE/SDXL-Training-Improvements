@@ -70,9 +70,15 @@ class TagWeighter:
         embeddings = {}
         with torch.no_grad():
             for category, terms in categories:
-                # Use CLIP to get embeddings
-                text_embeddings = self.clip_encoder.encode_text(terms)
-                embeddings[category] = torch.mean(text_embeddings, dim=0)
+                # Use encode_prompt instead of encode_text
+                text_embeddings = self.clip_encoder.encode_prompt(
+                    batch={"text": terms},
+                    text_encoders=[self.clip_encoder.text_encoder],
+                    tokenizers=[self.tokenizer],
+                    is_train=False
+                )
+                # Use pooled embeddings for category representation
+                embeddings[category] = torch.mean(text_embeddings["pooled_prompt_embeds"], dim=0)
         
         return embeddings
 
