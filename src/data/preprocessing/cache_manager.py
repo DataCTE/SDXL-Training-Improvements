@@ -745,3 +745,31 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to verify tag metadata: {e}")
             return False
+
+    def verify_tag_cache(self, image_paths: List[str], captions: List[str]) -> bool:
+        """Verify tag cache integrity and coverage."""
+        try:
+            tag_stats_path = self.get_tag_statistics_path()
+            tag_images_path = self.get_image_tags_path()
+            
+            if not (tag_stats_path.exists() and tag_images_path.exists()):
+                return False
+            
+            # Load and verify tag data
+            with self._lock:
+                with open(tag_stats_path, 'r', encoding='utf-8') as f:
+                    stats_data = json.load(f)
+                with open(tag_images_path, 'r', encoding='utf-8') as f:
+                    images_data = json.load(f)
+                    
+                # Verify structure and version
+                if not self._verify_tag_metadata(stats_data, images_data):
+                    return False
+                    
+                # Check coverage
+                image_tags = images_data.get("images", {})
+                return all(str(path) in image_tags for path in image_paths)
+                
+        except Exception as e:
+            logger.error(f"Tag cache verification failed: {e}")
+            return False
