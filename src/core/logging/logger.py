@@ -55,10 +55,12 @@ class UnifiedLogger:
         """Initialize logger with configuration."""
         self.config = LogConfig(**config) if isinstance(config, dict) else config or LogConfig()
         self._setup_logging()
-        self._metrics: Dict[str, deque] = {}
+        self._metrics = MetricsTracker(
+            window_size=self.config.metrics_window,
+            keep_history=self.config.metrics_history
+        )
         self._progress = None
         self._wandb_run = None
-        self._lock = threading.Lock()
         
     def _setup_logging(self):
         """Configure logging handlers."""
@@ -85,32 +87,140 @@ class UnifiedLogger:
         if self.config.enable_wandb:
             self._setup_wandb()
             
+class ColoredFormatter(logging.Formatter):
+    """Enhanced formatter with colored output and context tracking."""
+    
+    COLORS = {
+        'DEBUG': Fore.CYAN + Style.DIM,
+        'INFO': Fore.GREEN,
+        'WARNING': Fore.YELLOW + Style.BRIGHT,
+        'ERROR': Fore.RED + Style.BRIGHT,
+        'CRITICAL': Fore.MAGENTA + Style.BRIGHT + Style.DIM
+    }
+
+    HIGHLIGHT_COLORS = {
+        'file_path': Fore.BLUE,
+        'line_number': Fore.CYAN,
+        'function': Fore.MAGENTA,
+        'error': Fore.RED + Style.BRIGHT,
+        'success': Fore.GREEN + Style.BRIGHT,
+        'warning': Fore.YELLOW + Style.BRIGHT
+    }
+
+    KEYWORDS = {
+        'start': (Fore.CYAN, ['Starting', 'Initializing', 'Beginning']),
+        'success': (Fore.GREEN, ['Complete', 'Finished', 'Saved', 'Success']),
+        'error': (Fore.RED, ['Error', 'Failed', 'Exception']),
+        'warning': (Fore.YELLOW, ['Warning', 'Caution']),
+        'progress': (Fore.BLUE, ['Processing', 'Loading', 'Computing'])
+    }
+
+    def __init__(self, fmt=None, datefmt=None, colored=True):
+        super().__init__(fmt or '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+                        datefmt or '%Y-%m-%d %H:%M:%S')
+        self.colored = colored
+
+    def format(self, record):
+        if not self.colored:
+            return super().format(record)
+            
+        # Create a copy of the record
+        filtered_record = logging.makeLogRecord(record.__dict__)
+        
+        # Get base color for level
+        base_color = self.COLORS.get(record.levelname, '')
+        
+        # Format with parent
+        formatted_message = super().format(filtered_record)
+        
+        # Apply keyword highlighting
+        for keyword, (color, words) in self.KEYWORDS.items():
+            for word in words:
+                if word in formatted_message:
+                    formatted_message = formatted_message.replace(
+                        word, f"{color}{word}{Style.RESET_ALL}")
+                    setattr(record, 'keyword', keyword)
+        
+        # Apply context highlighting
+        for context, color in self.HIGHLIGHT_COLORS.items():
+            if hasattr(record, context):
+                value = getattr(record, context)
+                formatted_message = formatted_message.replace(
+                    str(value), f"{color}{value}{Style.RESET_ALL}")
+        
+        return f"{base_color}{formatted_message}{Style.RESET_ALL}"
+
+class ProgressTracker:
+    """Tracks progress with configurable window size and smoothing."""
+    
+    def __init__(self, total: int, desc: str = "", 
+                 window_size: int = 100, smoothing: float = 0.3):
+        self.progress = tqdm(total=total, desc=desc, smoothing=smoothing)
+        self.window_size = window_size
+        self.steps = deque(maxlen=window_size)
+        self.last_update = time.time()
+        
+    def update(self, n: int = 1) -> float:
+        """Update progress and return current rate."""
+        self.progress.update(n)
+        current = time.time()
+        self.steps.append((current - self.last_update) / n)
+        self.last_update = current
+        return self.rate
+        
+    @property
+    def rate(self) -> float:
+        """Calculate current steps per second."""
+        if not self.steps:
+            return 0.0
+        return 1.0 / np.mean(self.steps)
+        
+    def close(self):
+        self.progress.close()
+
+class MetricsTracker:
+    """Tracks metrics with configurable window size and history."""
+    
+    def __init__(self, window_size: int = 100, keep_history: bool = True):
+        self.window_size = window_size
+        self.keep_history = keep_history
+        self.metrics: Dict[str, deque] = {}
+        self.history: Dict[str, List[float]] = {}
+        self._lock = threading.Lock()
+        
+    def update(self, name: str, value: float) -> None:
+        """Update metric value."""
+        with self._lock:
+            if name not in self.metrics:
+                self.metrics[name] = deque(maxlen=self.window_size)
+                if self.keep_history:
+                    self.history[name] = []
+                    
+            self.metrics[name].append(value)
+            if self.keep_history:
+                self.history[name].append(value)
+                
+    def get_average(self, name: str) -> Optional[float]:
+        """Get current average for metric."""
+        values = self.metrics.get(name)
+        if values:
+            return float(np.mean(values))
+        return None
+        
+    def get_all_averages(self) -> Dict[str, float]:
+        """Get current averages for all metrics."""
+        return {
+            name: float(np.mean(values))
+            for name, values in self.metrics.items()
+        }
+        
+    def get_history(self, name: str) -> Optional[List[float]]:
+        """Get full history for metric if available."""
+        return self.history.get(name)
+
     def _get_formatter(self, colored: bool = True) -> logging.Formatter:
         """Get log formatter with optional colors."""
-        if not colored:
-            return logging.Formatter(
-                '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-            
-        class ColoredFormatter(logging.Formatter):
-            COLORS = {
-                'DEBUG': Fore.CYAN,
-                'INFO': Fore.GREEN,
-                'WARNING': Fore.YELLOW,
-                'ERROR': Fore.RED,
-                'CRITICAL': Fore.MAGENTA
-            }
-            
-            def format(self, record):
-                color = self.COLORS.get(record.levelname, '')
-                record.levelname = f"{color}{record.levelname}{Style.RESET_ALL}"
-                return super().format(record)
-                
-        return ColoredFormatter(
-            '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        return ColoredFormatter(colored=colored)
         
     def _setup_wandb(self):
         """Initialize W&B logging."""
@@ -127,37 +237,30 @@ class UnifiedLogger:
     def start_progress(self, total: int, desc: str = "") -> None:
         """Start progress tracking."""
         if self.config.enable_progress:
-            self._progress = tqdm(
+            self._progress = ProgressTracker(
                 total=total,
                 desc=desc,
+                window_size=self.config.progress_window,
                 smoothing=self.config.progress_smoothing
             )
             
     def update_progress(self, n: int = 1) -> None:
         """Update progress tracker."""
         if self._progress:
-            self._progress.update(n)
-            
+            rate = self._progress.update(n)
             if self.config.enable_metrics:
-                self.log_metric("progress/steps_per_sec", self._progress.format_dict["rate"])
+                self.log_metric("progress/steps_per_sec", rate)
                 
     def log_metric(self, name: str, value: float, step: Optional[int] = None) -> None:
         """Log a metric value."""
         if self.config.enable_metrics:
-            with self._lock:
-                if name not in self._metrics:
-                    self._metrics[name] = deque(maxlen=self.config.metrics_window)
-                self._metrics[name].append(value)
-                
-                if self.config.enable_wandb and self._wandb_run:
-                    self._wandb_run.log({name: value}, step=step)
+            self._metrics.update(name, value)
+            if self.config.enable_wandb and self._wandb_run:
+                self._wandb_run.log({name: value}, step=step)
                     
     def get_metrics(self) -> Dict[str, float]:
         """Get current metric averages."""
-        return {
-            name: float(np.mean(values))
-            for name, values in self._metrics.items()
-        }
+        return self._metrics.get_all_averages()
         
     def log_memory(self) -> None:
         """Log memory usage metrics."""
