@@ -97,26 +97,53 @@ class TagWeighter:
             return False
 
     def _get_tag_category(self, tag: str) -> str:
-        """Determine tag category based on simple prefix matching."""
+        """Determine tag category using semantic understanding.
+        
+        Categories:
+        - subject: The main focus/subject matter (people, objects, scenes, etc)
+        - style: Artistic style, medium, or aesthetic qualities
+        - quality: Image quality attributes and specifications
+        - technical: Technical aspects of composition and photography
+        - meta: Metadata and other administrative tags
+        """
         tag = tag.lower().strip()
         
-        # Check for explicit category prefix (e.g., "subject:", "style:")
+        # Check for explicit category prefix
         if ":" in tag:
             category = tag.split(":")[0]
             if category in self.tag_types:
                 return category
+                
+        # Remove common tag prefixes/suffixes for cleaner analysis
+        tag = tag.replace("_", " ").strip()
+        words = tag.split()
         
-        # Simple heuristic categorization
-        if any(word in tag for word in ["person", "people", "animal", "object", "scene"]):
+        # Subject indicators: Nouns describing physical things, beings, or scenes
+        if any(word.endswith(('ing', 'ed')) for word in words):  # Actions/states
             return "subject"
-        elif any(word in tag for word in ["style", "art", "painting", "drawing"]):
+        if len(words) >= 2 and any(w in ['in', 'at', 'on', 'with'] for w in words):  # Spatial relations
+            return "subject"
+        
+        # Style indicators: Artistic techniques, periods, movements
+        if any(word.endswith(('ism', 'esque', 'like')) for word in words):  # Artistic movements/similarities
             return "style"
-        elif any(word in tag for word in ["quality", "resolution", "detail"]):
+        if any(word.endswith(('tone', 'color', 'shade')) for word in words):  # Visual properties
+            return "style"
+            
+        # Quality indicators: Technical specifications and quality descriptors
+        if any(word.isdigit() or word.endswith(('k', 'p', 'fps')) for word in words):  # Technical specs
             return "quality"
-        elif any(word in tag for word in ["lighting", "composition", "angle", "focus"]):
+        if any(word in ['high', 'low', 'best', 'poor'] for w in words):  # Quality levels
+            return "quality"
+            
+        # Technical indicators: Photography and composition terms
+        if any(word in ['close', 'wide', 'depth', 'field', 'ratio', 'light'] for w in words):
+            return "technical"
+        if any(word.endswith(('shot', 'view', 'angle')) for word in words):
             return "technical"
             
-        return "meta"  # Default category
+        # Default to meta for organizational/administrative tags
+        return "meta"
 
     def _extract_tags(self, caption: str) -> Dict[str, List[str]]:
         """Extract and categorize tags from caption."""
