@@ -208,7 +208,7 @@ class TagWeighter:
             }
             
             # Process in larger batches for efficiency
-            batch_size = 5000
+            batch_size = 100
             predictor = ProgressPredictor()
             predictor.start(len(captions))
             
@@ -508,7 +508,7 @@ class TagWeighter:
                 
                 # Update progress tracking
                 timing = predictor.update(1)
-                if idx % 1000 == 0:  # Log every 1000 captions
+                if idx % 100 == 0:  # Log every 100 captions
                     eta_str = predictor.format_time(timing["eta_seconds"])
                     stats = {
                         t: len(self.tag_counts[t]) 
