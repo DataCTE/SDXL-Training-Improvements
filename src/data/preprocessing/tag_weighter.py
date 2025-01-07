@@ -12,13 +12,20 @@ from tqdm import tqdm
 if TYPE_CHECKING:
     from src.data.config import Config
 
-from src.core.logging import UnifiedLogger, LogConfig, ProgressPredictor, get_logger
+from src.core.logging import UnifiedLogger, LogConfig, ProgressPredictor, get_logger, setup_logging
 from src.data.utils.paths import convert_windows_path
 from src.models.sdxl import StableDiffusionXL
 from src.models.encoders import CLIPEncoder
 from src.data.preprocessing.exceptions import TagProcessingError
 
-logger = UnifiedLogger(LogConfig(name=__name__))
+logger = setup_logging(
+    LogConfig(
+        name=__name__,
+        enable_progress=True,
+        enable_metrics=True,
+        enable_memory=True
+    )
+)
 
 def default_int():
     return 0
