@@ -35,7 +35,11 @@ class CacheManager:
         self.cache_dir = convert_path_to_pathlib(cache_dir, make_absolute=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache_size = max_cache_size
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is None:
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA device not available. This model requires a GPU to run efficiently.")
+            device = torch.device("cuda")
+        self.device = device
         self.config = config
         
         # Initialize lock first
