@@ -144,18 +144,18 @@ class TagWeighter:
             has_action = any(token.pos_ == 'VERB' for token in doc)
             has_quality = any(token.pos_ == 'ADJ' for token in doc)
             has_technical = any(token.like_num or token.text.endswith(('k', 'p', 'fps')) for token in doc)
-        
-        # Style-specific patterns
-        style_suffixes = ('ism', 'esque', 'like', 'tone', 'color', 'shade')
-        has_style = any(token.text.endswith(style_suffixes) for token in doc)
-        
-        # Technical photography terms
-        tech_terms = {'close', 'wide', 'depth', 'field', 'ratio', 'light', 'shot', 'view', 'angle'}
-        has_tech_term = any(token.text in tech_terms for token in doc)
-        
-        # Determine category based on linguistic features
-        if has_subject or (has_action and not has_technical):
-            return "subject"
+
+            # Style-specific patterns
+            style_suffixes = ('ism', 'esque', 'like', 'tone', 'color', 'shade')
+            has_style = any(token.text.endswith(style_suffixes) for token in doc)
+            
+            # Technical photography terms
+            tech_terms = {'close', 'wide', 'depth', 'field', 'ratio', 'light', 'shot', 'view', 'angle'}
+            has_tech_term = any(token.text in tech_terms for token in doc)
+            
+            # Determine category based on linguistic features
+            if has_subject or (has_action and not has_technical):
+                return "subject"
         elif has_style or any(ent.label_ == 'WORK_OF_ART' for ent in doc.ents):
             return "style"
         elif has_technical or has_tech_term:
