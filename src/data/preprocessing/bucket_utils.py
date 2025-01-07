@@ -2,7 +2,7 @@
 from typing import List, Tuple, Dict, TYPE_CHECKING, Optional
 import logging
 from collections import defaultdict
-from src.core.logging import get_logger, ProgressPredictor
+from src.core.logging import UnifiedLogger, LogConfig, ProgressPredictor
 from src.data.config import Config
 import torch
 from PIL import Image
@@ -12,7 +12,7 @@ from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
 if TYPE_CHECKING:
     from src.data.preprocessing.cache_manager import CacheManager
 
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 def generate_buckets(config: Config) -> List[BucketInfo]:
     """Generate comprehensive bucket information with enhanced validation."""

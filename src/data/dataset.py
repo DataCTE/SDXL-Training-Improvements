@@ -28,7 +28,7 @@ from src.data.preprocessing.bucket_types import BucketInfo, BucketDimensions
 from src.data.preprocessing.exceptions import CacheError, DataLoadError, TagProcessingError
 from src.core.logging import UnifiedLogger, LogConfig
 
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""
