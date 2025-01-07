@@ -137,9 +137,9 @@ class TagWeighter:
             except Exception as e:
                 logger.error(f"SpaCy parsing failed for tag '{tag}': {e}")
                 return "meta"  # Default to meta on parsing failure
-        
-        # Extract linguistic features
-        has_subject = any(token.dep_ in ['nsubj', 'dobj'] for token in doc)
+
+            # Extract linguistic features
+            has_subject = any(token.dep_ in ['nsubj', 'dobj'] for token in doc)
         has_location = any(token.dep_ == 'pobj' for token in doc)
         has_action = any(token.pos_ == 'VERB' for token in doc)
         has_quality = any(token.pos_ == 'ADJ' for token in doc)
@@ -202,9 +202,9 @@ class TagWeighter:
                 "technical": defaultdict(int),
                 "meta": defaultdict(int)
             }
-        
-        # Process in larger batches for efficiency
-        batch_size = 5000
+            
+            # Process in larger batches for efficiency
+            batch_size = 5000
         predictor = ProgressPredictor()
         predictor.start(len(captions))
         
@@ -481,7 +481,7 @@ class TagWeighter:
             
             predictor = ProgressPredictor()
             predictor.start(len(captions))
-        
+            
         for idx, caption in enumerate(captions):
             tags = self._extract_tags(caption)
             weighted_tags = {
