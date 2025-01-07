@@ -482,8 +482,11 @@ class AspectBucketDataset(Dataset):
             img = Image.open(image_path).convert('RGB')
             original_size = img.size
             
-            # Get bucket info
+            # Get bucket info with validation
             bucket_info = compute_bucket_dims(original_size, self.buckets)
+            if bucket_info is None:
+                logger.warning(f"No suitable bucket found for image {image_path} with size {original_size}")
+                return None
             
             # Prepare image tensor
             img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
@@ -496,12 +499,9 @@ class AspectBucketDataset(Dataset):
                 vae_latents = vae_latents * self.vae.config.scaling_factor
             
             # Validate VAE latents shape
-            expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])  # VAE shape is (C, H, W)
-            if vae_latents.shape[1:] != expected_shape[1:]:  # Only check spatial dimensions
-                logger.warning(
-                    f"VAE latent shape mismatch for {image_path}: "
-                    f"expected {expected_shape}, got {vae_latents.shape}"
-                )
+            expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])
+            if vae_latents.shape[1:] != expected_shape[1:]:
+                logger.warning(f"VAE latent shape mismatch for {image_path}")
                 return None
             
             return {
