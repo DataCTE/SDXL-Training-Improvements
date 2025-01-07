@@ -133,11 +133,11 @@ class TagWeighter:
         # Quality indicators: Technical specifications and quality descriptors
         if any(word.isdigit() or word.endswith(('k', 'p', 'fps')) for word in words):  # Technical specs
             return "quality"
-        if any(word in ['high', 'low', 'best', 'poor'] for w in words):  # Quality levels
+        if any(w in ['high', 'low', 'best', 'poor'] for w in words):  # Quality levels
             return "quality"
             
         # Technical indicators: Photography and composition terms
-        if any(word in ['close', 'wide', 'depth', 'field', 'ratio', 'light'] for w in words):
+        if any(w in ['close', 'wide', 'depth', 'field', 'ratio', 'light'] for w in words):
             return "technical"
         if any(word.endswith(('shot', 'view', 'angle')) for word in words):
             return "technical"
