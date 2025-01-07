@@ -59,6 +59,13 @@ class AspectBucketDataset(Dataset):
             'device_id': device_id,
             'num_images': len(image_paths)
         })
+
+        # Data paths with validation
+        self.image_paths = [
+            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
+            for p in image_paths
+        ]
+        self.captions = captions
         
         # Generate buckets with validation
         try:
@@ -97,13 +104,6 @@ class AspectBucketDataset(Dataset):
                 'error': str(e),
                 'num_buckets': len(self.buckets)
             })
-
-        # Data paths with validation
-        self.image_paths = [
-            str(convert_windows_path(p) if is_windows_path(p) else Path(p))
-            for p in image_paths
-        ]
-        self.captions = captions
         
         # Model components
         self.model = model
