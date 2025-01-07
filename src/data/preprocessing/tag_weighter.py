@@ -135,7 +135,7 @@ class TagWeighter:
         has_location = any(token.dep_ == 'pobj' for token in doc)
         has_action = any(token.pos_ == 'VERB' for token in doc)
         has_quality = any(token.pos_ == 'ADJ' for token in doc)
-        has_technical = any(token.like_num or token.text.endswith(('k', 'p', 'fps')))
+        has_technical = any(token.like_num or token.text.endswith(('k', 'p', 'fps')) for token in doc)
         
         # Style-specific patterns
         style_suffixes = ('ism', 'esque', 'like', 'tone', 'color', 'shade')
