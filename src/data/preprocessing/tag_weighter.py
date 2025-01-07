@@ -41,7 +41,7 @@ class TagWeighter:
     def __init__(
         self,
         config: "Config",  # type: ignore
-        model: Optional["StableDiffusionXL"] = None  # Add model parameter
+        model: Optional["StableDiffusionXL"] = None  # Parameter kept for compatibility
     ):
         """Initialize tag weighting system."""
         self.config = config
@@ -52,16 +52,13 @@ class TagWeighter:
         self.max_weight = config.tag_weighting.max_weight
         self.smoothing_factor = config.tag_weighting.smoothing_factor
         
-        # Use SDXL's CLIP encoders
-        self.clip_encoder = model.clip_encoder_1 if model else None
-        self.tokenizer = model.tokenizer_1 if model else None
-        
-        # Initialize tag types and embeddings
+        # Initialize tag categories
         self.tag_types = {
-            "subject": ["person", "object", "animal", "vehicle", "building", "landscape"],
-            "style": ["painting", "anime", "drawing", "photograph", "digital art", "sketch", "watercolor"],
-            "quality": ["high quality", "detailed", "sharp", "professional", "masterpiece"],
-            "technical": ["lighting", "composition", "focus", "exposure", "angle", "depth"]
+            "subject": [],  # Will be populated dynamically
+            "style": [],
+            "quality": [],
+            "technical": [],
+            "meta": []
         }
         
         # Initialize counters with proper defaults
@@ -99,93 +96,50 @@ class TagWeighter:
             logger.error(f"Cache validation failed: {e}")
             return False
 
-    def _initialize_category_embeddings(self) -> Optional[Dict[str, torch.Tensor]]:
-        """Initialize category embeddings using CLIP."""
-        if not self.clip_encoder or not self.tokenizer:
-            return None
+    def _get_tag_category(self, tag: str) -> str:
+        """Determine tag category based on simple prefix matching."""
+        tag = tag.lower().strip()
         
-        embeddings = {}
-        with torch.no_grad():
-            for category, terms in self.tag_types.items():
-                # Encode category terms
-                text_embeddings = CLIPEncoder.encode_prompt(
-                    batch={"text": terms},
-                    text_encoders=[self.clip_encoder.text_encoder],
-                    tokenizers=[self.tokenizer],
-                    is_train=False
-                )
-                # Use pooled embeddings for category representation
-                embeddings[category] = torch.mean(
-                    text_embeddings["pooled_prompt_embeds"], 
-                    dim=0
-                )
+        # Check for explicit category prefix (e.g., "subject:", "style:")
+        if ":" in tag:
+            category = tag.split(":")[0]
+            if category in self.tag_types:
+                return category
         
-        return embeddings
-
-    def _get_semantic_category(self, phrase: str) -> str:
-        """Determine semantic category using CLIP similarity."""
-        if not hasattr(self, 'category_embeddings'):
-            self.category_embeddings = self._initialize_category_embeddings()
-        
-        if not self.clip_encoder or not self.category_embeddings:
-            return "meta"
-        
-        with torch.no_grad():
-            # Get phrase embedding
-            phrase_embedding = CLIPEncoder.encode_prompt(
-                batch={"text": [phrase]},
-                text_encoders=[self.clip_encoder.text_encoder],
-                tokenizers=[self.tokenizer],
-                is_train=False
-            )["pooled_prompt_embeds"]
+        # Simple heuristic categorization
+        if any(word in tag for word in ["person", "people", "animal", "object", "scene"]):
+            return "subject"
+        elif any(word in tag for word in ["style", "art", "painting", "drawing"]):
+            return "style"
+        elif any(word in tag for word in ["quality", "resolution", "detail"]):
+            return "quality"
+        elif any(word in tag for word in ["lighting", "composition", "angle", "focus"]):
+            return "technical"
             
-            # Compare with category embeddings
-            similarities = {
-                category: torch.cosine_similarity(
-                    phrase_embedding, 
-                    cat_embedding.unsqueeze(0)
-                ).item()
-                for category, cat_embedding in self.category_embeddings.items()
-            }
-            
-            return max(similarities.items(), key=lambda x: x[1])[0]
+        return "meta"  # Default category
 
     def _extract_tags(self, caption: str) -> Dict[str, List[str]]:
         """Extract and categorize tags from caption."""
         try:
-            categorized = {
-                "subject": [],
-                "style": [],
-                "quality": [],
-                "technical": [],
-                "meta": []
-            }
+            categorized = {category: [] for category in self.tag_types}
             
-            # Handle explicit category:tag format first
+            # Split caption into individual tags
             for tag in (t.strip() for t in caption.split(',') if t):
                 if len(tag) > 100:  # Skip overly long tags
                     continue
-                    
-                if ':' in tag:
-                    parts = tag.lower().split(':')
-                    category = parts[0]
-                    if category in categorized:
-                        original_tag = ':'.join(tag.split(':')[1:])
-                        categorized[category].append(original_tag)
-                        continue
                 
-                # Use semantic categorization for natural language
-                category = self._get_semantic_category(tag)
-                categorized[category].append(tag)
+                # Get category and clean tag
+                category = self._get_tag_category(tag)
+                clean_tag = tag.split(":")[-1].strip() if ":" in tag else tag.strip()
+                
+                if clean_tag:
+                    categorized[category].append(clean_tag)
                     
             return categorized
             
         except Exception as e:
             logger.error(f"Tag extraction failed: {e}")
-            return {
-                "subject": [], "style": [], "quality": [], 
-                "technical": [], "meta": []
-            }
+            return {category: [] for category in self.tag_types}
 
     def update_statistics(self, captions: List[str]) -> None:
         """Update tag statistics from captions."""
