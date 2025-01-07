@@ -1,5 +1,6 @@
 """Bucket calculation utilities for SDXL training."""
 from typing import List, Tuple, Dict, TYPE_CHECKING, Optional
+import logging
 from collections import defaultdict
 from src.core.logging import get_logger, ProgressPredictor
 from src.data.config import Config
