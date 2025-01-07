@@ -114,8 +114,13 @@ class UnifiedLogger:
                     tags=self.config.wandb_tags,
                     config=vars(self.config)
                 )
+                self.logger.info("Initialized W&B logging", extra={
+                    'project': self.config.wandb_project,
+                    'run_name': self.config.wandb_name,
+                    'tags': self.config.wandb_tags
+                })
             except Exception as e:
-                self.logger.warning(f"Failed to initialize W&B: {e}")
+                self.logger.warning(f"Failed to initialize W&B: {e}", exc_info=True)
                 
         # Metrics tracking setup
         if self.config.enable_metrics:
@@ -176,8 +181,14 @@ class UnifiedLogger:
         """Log error message."""
         self.logger.error(msg, *args, **kwargs)
         
-    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
-        """Log multiple metrics with optional step."""
+    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None, context: Optional[Dict[str, Any]] = None) -> None:
+        """Log multiple metrics with optional step and context.
+        
+        Args:
+            metrics: Dictionary of metric names and values
+            step: Optional global step number
+            context: Optional context dictionary for additional logging info
+        """
         if not self.config.enable_metrics:
             return
             
@@ -187,12 +198,28 @@ class UnifiedLogger:
         if self._wandb_run is not None:
             self._wandb_run.log(metrics, step=step)
             
-    def update_progress(self, n: int = 1, batch_size: Optional[int] = None) -> Optional[Dict[str, float]]:
-        """Update progress with smart ETA prediction.
+        # Log with context if provided
+        if context:
+            self.logger.info("Metrics update", extra={
+                'metrics': metrics,
+                'step': step,
+                **context
+            })
+            
+    def update_progress(
+        self,
+        n: int = 1,
+        batch_size: Optional[int] = None,
+        prefix: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, float]]:
+        """Update progress with smart ETA prediction and enhanced logging.
         
         Args:
             n: Number of steps completed
             batch_size: Optional batch size for throughput calculation
+            prefix: Optional prefix for progress description
+            context: Optional context dictionary for additional logging info
             
         Returns:
             Dictionary with progress metrics if available
@@ -217,10 +244,25 @@ class UnifiedLogger:
             iter_time = f"{current_time*1000:.1f}ms/it"
             eta_str = f"ETA: {self._predictor.format_time(eta)}"
             
-            # Update progress bar
+            # Update progress bar with enhanced info
             if self._progress_bar is not None:
-                self._progress_bar.set_postfix_str(f"{iter_time} • {eta_str}")
+                desc = f"{prefix + ': ' if prefix else ''}"
+                status = f"{iter_time} • {eta_str}"
+                if context:
+                    extra_info = " • ".join(f"{k}: {v}" for k, v in context.items())
+                    status = f"{status} • {extra_info}"
+                self._progress_bar.set_postfix_str(status)
                 self._progress_bar.update(n)
+                
+                # Log detailed progress at intervals
+                if self._completed_items % max(100, self._total_items // 20) == 0:
+                    self.logger.info(f"Progress update: {progress:.1f}%", extra={
+                        'completed': self._completed_items,
+                        'total': self._total_items,
+                        'eta_seconds': eta,
+                        'iter_time': current_time,
+                        **(context or {})
+                    })
                 
             # Add timing to metrics
             if metrics is None:
