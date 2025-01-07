@@ -245,10 +245,9 @@ class AspectBucketDataset(Dataset):
             self.tag_weighter = TagWeighter(config=self.config, model=self.model)
             
             if not self.tag_weighter.initialize_tag_system():
-                image_captions = dict(zip(self.image_paths, self.captions))
                 self.tag_weighter = create_tag_weighter_with_index(
                     config=self.config,
-                    image_captions=image_captions,
+                    captions=self.captions,
                     model=self.model
                 )
                 
@@ -614,12 +613,15 @@ def create_dataset(
                     
             except (FileNotFoundError, ValueError) as e:
                 logger.info("Computing tag weights and creating new index...")
-                tag_weighter = create_tag_weighter_with_index(
-                    config=config,
-                    image_paths=image_paths,
-                    captions=captions,
-                    model=model
-                )
+                try:
+                    tag_weighter = create_tag_weighter_with_index(
+                        config=config,
+                        captions=captions,
+                        model=model
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create tag weighter: {e}")
+                    raise RuntimeError(f"Dataset creation failed: {str(e)}") from e
                 
                 # Save tag statistics and metadata
                 logger.info("Saving tag statistics...")
