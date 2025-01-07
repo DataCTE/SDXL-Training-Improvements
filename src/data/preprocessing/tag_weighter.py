@@ -487,38 +487,41 @@ class TagWeighter:
         try:
             processed_tags = {}
             
+            # Increase batch size for better performance
+            batch_size = 1000
             predictor = ProgressPredictor()
             predictor.start(len(captions))
             
-            for idx, caption in enumerate(captions):
-                tags = self._extract_tags(caption)
-                weighted_tags = {
-                    tag_type: [
-                        {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
-                        for tag in tags[tag_type]
-                    ]
-                    for tag_type in tags
-                }
+            # Pre-compute tag categories for all captions in batches
+            for i in range(0, len(captions), batch_size):
+                batch = captions[i:i + batch_size]
                 
-                caption_weight = self.get_caption_weight(caption)
-                processed_tags[caption] = {
-                    "tags": weighted_tags,
-                    "weight": caption_weight
-                }
-                
-                # Update progress tracking
-                timing = predictor.update(1)
-                if idx % 100 == 0:  # Log every 100 captions
-                    eta_str = predictor.format_time(timing["eta_seconds"])
-                    stats = {
-                        t: len(self.tag_counts[t]) 
-                        for t in self.tag_types
+                # Process batch of captions
+                for caption in batch:
+                    tags = self._extract_tags(caption)
+                    weighted_tags = {
+                        tag_type: [
+                            {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
+                            for tag in set(tags[tag_type])  # Use set to deduplicate tags
+                        ]
+                        for tag_type in tags
                     }
+                    
+                    processed_tags[caption] = {
+                        "tags": weighted_tags,
+                        "weight": self.get_caption_weight(caption)
+                    }
+                
+                # Update progress less frequently
+                if i % (batch_size * 5) == 0:
+                    timing = predictor.update(len(batch))
+                    eta_str = predictor.format_time(timing["eta_seconds"])
+                    stats = {t: len(self.tag_counts[t]) for t in self.tag_types}
                     logger.info(
-                        f"Processing tags: {idx}/{len(captions)} (ETA: {eta_str})\n"
+                        f"Processing tags: {i}/{len(captions)} (ETA: {eta_str})\n"
                         f"Unique tags per type: {stats}"
                     )
-                    
+            
             return processed_tags
                     
         except Exception as e:
