@@ -23,7 +23,7 @@ def generate_buckets(config: Config) -> List[BucketInfo]:
     })
     
     buckets = []
-    for idx, dims in enumerate(config.global_config.image.supported_dims):
+    for dims in config.global_config.image.supported_dims:
         try:
             w, h = dims[0], dims[1]
             bucket = BucketInfo.from_dims(w, h, len(buckets))
@@ -75,20 +75,10 @@ def compute_bucket_dims(
     max_size_diff: float = 0.25,
     max_aspect_diff: float = 0.1
 ) -> Optional[BucketInfo]:
-    """Find closest bucket with improved metrics and validation.
-    
-    Args:
-        original_size: Original image dimensions (width, height)
-        buckets: List of available buckets
-        max_size_diff: Maximum allowed size difference ratio (default: 0.25)
-        max_aspect_diff: Maximum allowed aspect ratio difference (default: 0.1)
-        
-    Returns:
-        BucketInfo or None if no suitable bucket found
-    """
+    """Find closest bucket with improved metrics and validation."""
     try:
         if not buckets:
-            logger.warning("No buckets available for image sizing")
+            logger.warning("No buckets available")
             return None
             
         w, h = original_size
@@ -99,31 +89,24 @@ def compute_bucket_dims(
         original_ratio = w / h
         original_pixels = w * h
         
-        # Filter valid buckets based on constraints
-        valid_buckets = []
+        # Find best matching bucket
+        best_bucket = None
+        best_score = float('inf')
+        
         for bucket in buckets:
             try:
                 size_diff = abs(bucket.dimensions.total_pixels - original_pixels) / original_pixels
                 aspect_diff = abs(bucket.dimensions.aspect_ratio - original_ratio)
                 
                 if size_diff <= max_size_diff and aspect_diff <= max_aspect_diff:
-                    valid_buckets.append((bucket, size_diff, aspect_diff))
-            except Exception as e:
-                logger.debug(f"Error computing bucket metrics: {e}")
+                    score = size_diff * 0.6 + aspect_diff * 0.4
+                    if score < best_score:
+                        best_score = score
+                        best_bucket = bucket
+            except Exception:
                 continue
         
-        if not valid_buckets:
-            logger.debug(f"No valid bucket found for size {w}x{h} (ratio: {original_ratio:.2f})")
-            return None
-        
-        # Score buckets using weighted metrics
-        def compute_score(size_diff: float, aspect_diff: float) -> float:
-            size_weight = 0.6
-            aspect_weight = 0.4
-            return size_diff * size_weight + aspect_diff * aspect_weight
-        
-        # Return bucket with lowest score
-        return min(valid_buckets, key=lambda x: compute_score(x[1], x[2]))[0]
+        return best_bucket
         
     except Exception as e:
         logger.error(f"Failed to compute bucket dimensions: {e}")
