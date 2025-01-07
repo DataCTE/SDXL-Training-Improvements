@@ -116,19 +116,27 @@ class TagWeighter:
         - technical: Technical aspects of composition and photography
         - meta: Metadata and other administrative tags
         """
-        tag = tag.lower().strip()
-        
-        # Check for explicit category prefix
-        if ":" in tag:
-            category = tag.split(":")[0]
-            if category in self.tag_types:
-                return category
-                
-        # Remove common tag prefixes/suffixes for cleaner analysis
-        tag = tag.replace("_", " ").strip()
-        
-        # Parse with spaCy
-        doc = self.nlp(tag)
+        try:
+            tag = tag.lower().strip()
+            
+            # Check for explicit category prefix
+            if ":" in tag:
+                try:
+                    category = tag.split(":")[0]
+                    if category in self.tag_types:
+                        return category
+                except Exception as e:
+                    logger.warning(f"Error parsing category prefix: {e}")
+                    
+            # Remove common tag prefixes/suffixes for cleaner analysis
+            tag = tag.replace("_", " ").strip()
+            
+            try:
+                # Parse with spaCy
+                doc = self.nlp(tag)
+            except Exception as e:
+                logger.error(f"SpaCy parsing failed for tag '{tag}': {e}")
+                return "meta"  # Default to meta on parsing failure
         
         # Extract linguistic features
         has_subject = any(token.dep_ in ['nsubj', 'dobj'] for token in doc)
@@ -185,14 +193,15 @@ class TagWeighter:
 
     def update_statistics(self, captions: List[str]) -> None:
         """Update tag statistics from captions."""
-        # Pre-allocate counters
-        tag_counts = {
-            "subject": defaultdict(int),
-            "style": defaultdict(int),
-            "quality": defaultdict(int),
-            "technical": defaultdict(int),
-            "meta": defaultdict(int)
-        }
+        try:
+            # Pre-allocate counters
+            tag_counts = {
+                "subject": defaultdict(int),
+                "style": defaultdict(int),
+                "quality": defaultdict(int),
+                "technical": defaultdict(int),
+                "meta": defaultdict(int)
+            }
         
         # Process in larger batches for efficiency
         batch_size = 5000
@@ -256,18 +265,31 @@ class TagWeighter:
 
     def get_caption_weight(self, caption: str) -> float:
         """Get combined weight for a caption."""
-        categorized_tags = self._extract_tags(caption)
-        weights = []
-        
-        for tag_type, tags in categorized_tags.items():
-            type_weights = [self.tag_weights[tag_type][tag] for tag in tags]
-            if type_weights:
-                weights.append(np.mean(type_weights))
-        
-        if not weights:
-            return self.default_weight
+        try:
+            categorized_tags = self._extract_tags(caption)
+            weights = []
             
-        return float(np.exp(np.mean(np.log(weights))))
+            for tag_type, tags in categorized_tags.items():
+                try:
+                    type_weights = [self.tag_weights[tag_type][tag] for tag in tags]
+                    if type_weights:
+                        weights.append(np.mean(type_weights))
+                except Exception as e:
+                    logger.warning(f"Error processing weights for {tag_type}: {e}")
+                    continue
+            
+            if not weights:
+                return self.default_weight
+                
+            try:
+                return float(np.exp(np.mean(np.log(weights))))
+            except Exception as e:
+                logger.error(f"Error calculating geometric mean: {e}")
+                return self.default_weight
+                
+        except Exception as e:
+            logger.error(f"Error calculating caption weight: {e}")
+            return self.default_weight
 
     def get_caption_weight_details(self, caption: str) -> Dict[str, Any]:
         """Get detailed weights for all tags in a caption with enhanced metadata.
@@ -454,10 +476,11 @@ class TagWeighter:
 
     def process_dataset_tags(self, captions: List[str]) -> Dict[str, Any]:
         """Process all dataset captions and return tag information."""
-        processed_tags = {}
-        
-        predictor = ProgressPredictor()
-        predictor.start(len(captions))
+        try:
+            processed_tags = {}
+            
+            predictor = ProgressPredictor()
+            predictor.start(len(captions))
         
         for idx, caption in enumerate(captions):
             tags = self._extract_tags(caption)
