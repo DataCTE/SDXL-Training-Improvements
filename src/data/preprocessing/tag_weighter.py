@@ -200,10 +200,11 @@ class TagWeighter:
             batch = captions[i:i + batch_size]
             self.total_samples += len(batch)
             
-            timing = predictor.update(1)
+            timing = predictor.update(len(batch))  # Update with actual batch size
             if i % (batch_size * 10) == 0:  # Log every 10 batches
+                progress = (i + len(batch)) / len(captions) * 100
                 eta_str = predictor.format_time(timing["eta_seconds"])
-                logger.info(f"Processing captions: {i}/{len(captions)} (ETA: {eta_str})")
+                logger.info(f"Processing captions: {i}/{len(captions)} ({progress:.1f}%) (ETA: {eta_str})")
             
             # Batch process tags
             for caption in batch:
