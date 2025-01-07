@@ -104,7 +104,7 @@ class UnifiedLogger:
             
     def _setup_tracking_features(self) -> None:
         """Initialize tracking features based on configuration."""
-        # W&B initialization
+        # W&B initialization with enhanced error handling
         self._wandb_run = None
         if self.config.enable_wandb:
             try:
@@ -112,15 +112,26 @@ class UnifiedLogger:
                     project=self.config.wandb_project,
                     name=self.config.wandb_name,
                     tags=self.config.wandb_tags,
-                    config=vars(self.config)
+                    config=vars(self.config),
+                    resume=True,  # Enable run resumption
+                    settings=wandb.Settings(
+                        start_method="thread",
+                        _disable_stats=True
+                    )
                 )
                 self.logger.info("Initialized W&B logging", extra={
                     'project': self.config.wandb_project,
                     'run_name': self.config.wandb_name,
-                    'tags': self.config.wandb_tags
+                    'tags': self.config.wandb_tags,
+                    'run_id': self._wandb_run.id,
+                    'run_url': self._wandb_run.get_url()
                 })
             except Exception as e:
-                self.logger.warning(f"Failed to initialize W&B: {e}", exc_info=True)
+                self.logger.warning(
+                    "Failed to initialize W&B logging. Continuing without W&B.", 
+                    extra={'error': str(e)}, 
+                    exc_info=True
+                )
                 
         # Metrics tracking setup
         if self.config.enable_metrics:
@@ -133,10 +144,14 @@ class UnifiedLogger:
         else:
             self._metrics = None
             
-        # Progress tracking setup
+        # Progress tracking setup with memory tracking
         self._progress = None
         self._predictor = None
         self._progress_bar = None
+        self._completed_items = 0
+        self._total_items = 0
+        self._last_memory_check = 0
+        self._memory_check_interval = 10  # Check memory every 10 updates
         
     def start_progress(self, total: int, desc: str = "") -> None:
         """Start progress tracking with smart ETA prediction."""
@@ -266,13 +281,23 @@ class UnifiedLogger:
                         **(context or {})
                     })
                 
-            # Add timing to metrics
+            # Add timing and memory metrics
             if metrics is None:
                 metrics = {}
             metrics.update({
                 "progress/iter_time": current_time,
-                "progress/eta_seconds": eta
+                "progress/eta_seconds": eta,
+                "progress/percent_complete": progress
             })
+            
+            # Periodic memory tracking
+            if self.config.enable_memory and torch.cuda.is_available():
+                if self._completed_items % self._memory_check_interval == 0:
+                    metrics.update({
+                        "memory/gpu_allocated_gb": torch.cuda.memory_allocated() / 1e9,
+                        "memory/gpu_reserved_gb": torch.cuda.memory_reserved() / 1e9,
+                        "memory/gpu_max_allocated_gb": torch.cuda.max_memory_allocated() / 1e9
+                    })
             
         return metrics
             
