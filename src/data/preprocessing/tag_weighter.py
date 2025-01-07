@@ -156,17 +156,21 @@ class TagWeighter:
             # Determine category based on linguistic features
             if has_subject or (has_action and not has_technical):
                 return "subject"
-        elif has_style or any(ent.label_ == 'WORK_OF_ART' for ent in doc.ents):
-            return "style"
-        elif has_technical or has_tech_term:
-            return "technical"
-        elif has_quality and not (has_subject or has_style):
-            return "quality"
-        elif has_location and not has_subject:
-            return "subject"  # Locations are treated as subjects
+            if has_style or any(ent.label_ == 'WORK_OF_ART' for ent in doc.ents):
+                return "style"
+            if has_technical or has_tech_term:
+                return "technical"
+            if has_quality and not (has_subject or has_style):
+                return "quality"
+            if has_location and not has_subject:
+                return "subject"  # Locations are treated as subjects
             
-        # Default to meta for organizational/administrative tags
-        return "meta"
+            # Default to meta for organizational/administrative tags
+            return "meta"
+            
+        except Exception as e:
+            logger.error(f"Error in tag categorization: {e}")
+            return "meta"
 
     def _extract_tags(self, caption: str) -> Dict[str, List[str]]:
         """Extract and categorize tags from caption."""
@@ -205,34 +209,38 @@ class TagWeighter:
             
             # Process in larger batches for efficiency
             batch_size = 5000
-        predictor = ProgressPredictor()
-        predictor.start(len(captions))
-        
-        for i in range(0, len(captions), batch_size):
-            batch = captions[i:i + batch_size]
-            self.total_samples += len(batch)
+            predictor = ProgressPredictor()
+            predictor.start(len(captions))
             
-            timing = predictor.update(len(batch))  # Update with actual batch size
-            if i % (batch_size * 10) == 0:  # Log every 10 batches
-                progress = (i + len(batch)) / len(captions) * 100
-                eta_str = predictor.format_time(timing["eta_seconds"])
-                logger.info(f"Processing captions: {i}/{len(captions)} ({progress:.1f}%) (ETA: {eta_str})")
+            for i in range(0, len(captions), batch_size):
+                batch = captions[i:i + batch_size]
+                self.total_samples += len(batch)
+                
+                timing = predictor.update(len(batch))  # Update with actual batch size
+                if i % (batch_size * 10) == 0:  # Log every 10 batches
+                    progress = (i + len(batch)) / len(captions) * 100
+                    eta_str = predictor.format_time(timing["eta_seconds"])
+                    logger.info(f"Processing captions: {i}/{len(captions)} ({progress:.1f}%) (ETA: {eta_str})")
+                
+                # Batch process tags
+                for caption in batch:
+                    for tag_type, tags in self._extract_tags(caption).items():
+                        for tag in tags:
+                            tag_counts[tag_type][tag] += 1
             
-            # Batch process tags
-            for caption in batch:
-                for tag_type, tags in self._extract_tags(caption).items():
-                    for tag in tags:
-                        tag_counts[tag_type][tag] += 1
-        
-        # Bulk update counts
-        for tag_type, counts in tag_counts.items():
-            self.tag_counts[tag_type].update(counts)
-        
-        self._compute_weights()
-        
-        # Save to cache if enabled
-        if self.config.tag_weighting.use_cache:
-            self.save_to_cache()
+            # Bulk update counts
+            for tag_type, counts in tag_counts.items():
+                self.tag_counts[tag_type].update(counts)
+            
+            self._compute_weights()
+            
+            # Save to cache if enabled
+            if self.config.tag_weighting.use_cache:
+                self.save_to_cache()
+            
+        except Exception as e:
+            logger.error(f"Failed to update tag statistics: {e}")
+            raise TagProcessingError("Failed to update tag statistics", context={"error": str(e)})
 
     def _compute_weights(self) -> None:
         """Compute tag weights based on in-class frequency with proper scaling."""
@@ -516,36 +524,6 @@ class TagWeighter:
         except Exception as e:
             logger.error(f"Failed to process dataset tags: {e}")
             return {}
-        for idx, caption in enumerate(captions):
-            tags = self._extract_tags(caption)
-            weighted_tags = {
-                tag_type: [
-                    {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
-                    for tag in tags[tag_type]
-                ]
-                for tag_type in tags
-            }
-            
-            caption_weight = self.get_caption_weight(caption)
-            processed_tags[caption] = {
-                "tags": weighted_tags,
-                "weight": caption_weight
-            }
-            
-            # Update progress tracking
-            timing = predictor.update(1)
-            if idx % 1000 == 0:  # Log every 1000 captions
-                eta_str = predictor.format_time(timing["eta_seconds"])
-                stats = {
-                    t: len(self.tag_counts[t]) 
-                    for t in self.tag_types
-                }
-                logger.info(
-                    f"Processing tags: {idx}/{len(captions)} (ETA: {eta_str})\n"
-                    f"Unique tags per type: {stats}"
-                )
-                
-        return processed_tags
 
     def get_tag_metadata(self) -> Dict[str, Any]:
         """Get current tag statistics and metadata.
@@ -709,6 +687,33 @@ class TagWeighter:
         except Exception as e:
             raise TagProcessingError("Tag system initialization failed", 
                 context={"error": str(e), "cache_enabled": self.config.tag_weighting.use_cache})
+
+    def _validate_tag_data(self, tag_data: Dict[str, Any]) -> bool:
+        """Validate loaded tag data structure and content."""
+        try:
+            # Check version
+            if "version" not in tag_data:
+                return False
+            
+            # Check required sections
+            required_sections = ["metadata", "statistics"]
+            if not all(section in tag_data for section in required_sections):
+                return False
+            
+            # Validate statistics
+            if not isinstance(tag_data["statistics"], dict):
+                return False
+            
+            # Validate tag counts and weights exist
+            stats = tag_data["statistics"]
+            if "tag_counts" not in stats or "tag_weights" not in stats:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Tag data validation failed: {e}")
+            return False
 
 def create_tag_weighter(
     config: "Config",  # type: ignore

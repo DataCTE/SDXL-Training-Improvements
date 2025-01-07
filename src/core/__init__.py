@@ -17,7 +17,7 @@ from .distributed import (
     get_world_size,
     reduce_dict
 )
-from .logging import get_logger, LogConfig, LogManager, Logger, ProgressConfig, ProgressTracker, WandbLogger
+from .logging import get_logger, LogConfig, LogManager, UnifiedLogger, ProgressConfig, ProgressTracker, WandbLogger
 
 __all__ = [
     "DataType",
@@ -41,7 +41,7 @@ __all__ = [
     "get_logger",
     "LogConfig", 
     "LogManager",
-    "Logger",
+    "UnifiedLogger",
     "ProgressConfig",
     "ProgressTracker",
     "WandbLogger"
