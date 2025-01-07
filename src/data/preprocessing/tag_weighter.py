@@ -140,10 +140,10 @@ class TagWeighter:
 
             # Extract linguistic features
             has_subject = any(token.dep_ in ['nsubj', 'dobj'] for token in doc)
-        has_location = any(token.dep_ == 'pobj' for token in doc)
-        has_action = any(token.pos_ == 'VERB' for token in doc)
-        has_quality = any(token.pos_ == 'ADJ' for token in doc)
-        has_technical = any(token.like_num or token.text.endswith(('k', 'p', 'fps')) for token in doc)
+            has_location = any(token.dep_ == 'pobj' for token in doc)
+            has_action = any(token.pos_ == 'VERB' for token in doc)
+            has_quality = any(token.pos_ == 'ADJ' for token in doc)
+            has_technical = any(token.like_num or token.text.endswith(('k', 'p', 'fps')) for token in doc)
         
         # Style-specific patterns
         style_suffixes = ('ism', 'esque', 'like', 'tone', 'color', 'shade')
@@ -482,6 +482,40 @@ class TagWeighter:
             predictor = ProgressPredictor()
             predictor.start(len(captions))
             
+            for idx, caption in enumerate(captions):
+                tags = self._extract_tags(caption)
+                weighted_tags = {
+                    tag_type: [
+                        {"tag": tag, "weight": self.tag_weights[tag_type][tag]}
+                        for tag in tags[tag_type]
+                    ]
+                    for tag_type in tags
+                }
+                
+                caption_weight = self.get_caption_weight(caption)
+                processed_tags[caption] = {
+                    "tags": weighted_tags,
+                    "weight": caption_weight
+                }
+                
+                # Update progress tracking
+                timing = predictor.update(1)
+                if idx % 1000 == 0:  # Log every 1000 captions
+                    eta_str = predictor.format_time(timing["eta_seconds"])
+                    stats = {
+                        t: len(self.tag_counts[t]) 
+                        for t in self.tag_types
+                    }
+                    logger.info(
+                        f"Processing tags: {idx}/{len(captions)} (ETA: {eta_str})\n"
+                        f"Unique tags per type: {stats}"
+                    )
+                    
+            return processed_tags
+                    
+        except Exception as e:
+            logger.error(f"Failed to process dataset tags: {e}")
+            return {}
         for idx, caption in enumerate(captions):
             tags = self._extract_tags(caption)
             weighted_tags = {
