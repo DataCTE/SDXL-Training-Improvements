@@ -287,7 +287,7 @@ class UnifiedLogger:
             metrics.update({
                 "progress/iter_time": current_time,
                 "progress/eta_seconds": eta,
-                "progress/percent_complete": progress
+                "progress/percent_complete": timing["progress"]
             })
             
             # Periodic memory tracking
