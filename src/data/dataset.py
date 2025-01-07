@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from PIL import Image
 import numpy as np
 
-from src.core.logging import UnifiedLogger, LogConfig, ProgressPredictor
+from src.core.logging import UnifiedLogger, LogConfig, ProgressPredictor, get_logger
 from src.data.utils.paths import convert_windows_path, is_windows_path, load_data_from_directory
 from src.data.config import Config
 from src.models.sdxl import StableDiffusionXL
@@ -28,7 +28,7 @@ from src.data.preprocessing.bucket_types import BucketInfo, BucketDimensions
 from src.data.preprocessing.exceptions import CacheError, DataLoadError, TagProcessingError
 from src.core.logging import UnifiedLogger, LogConfig
 
-logger = UnifiedLogger(LogConfig(name=__name__))
+logger = get_logger(__name__)
 
 class AspectBucketDataset(Dataset):
     """Enhanced SDXL dataset with extreme memory handling and 100x speedups."""

@@ -5,14 +5,14 @@ import time
 import torch
 import threading
 from typing import Dict, Optional, Union, Any, List, Tuple
-from src.core.logging import get_logger, ProgressPredictor
+from src.core.logging import get_logger, ProgressPredictor, UnifiedLogger, LogConfig
 from src.data.utils.paths import convert_windows_path, convert_path_to_pathlib, convert_paths
 from src.data.config import Config
 import hashlib
 from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
 from collections import defaultdict
 from src.data.preprocessing.exceptions import CacheError
-logger = get_logger(__name__)
+logger = UnifiedLogger(LogConfig(name=__name__))
 
 class CacheManager:
     """Manages caching of preprocessed latents with comprehensive bucket information."""
