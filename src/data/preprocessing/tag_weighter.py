@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Union, TYPE_CHECKING, Any
 import numpy as np
 import torch
 import time
+import spacy
 from tqdm import tqdm
 
 if TYPE_CHECKING:
@@ -45,6 +46,15 @@ class TagWeighter:
     ):
         """Initialize tag weighting system."""
         self.config = config
+        
+        # Initialize spaCy NLP
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            raise ImportError(
+                "SpaCy model 'en_core_web_sm' not found. "
+                "Please install it with: python -m spacy download en_core_web_sm"
+            )
         
         # Core settings
         self.default_weight = config.tag_weighting.default_weight
@@ -97,7 +107,7 @@ class TagWeighter:
             return False
 
     def _get_tag_category(self, tag: str) -> str:
-        """Determine tag category using semantic understanding.
+        """Determine tag category using semantic understanding with spaCy NLP.
         
         Categories:
         - subject: The main focus/subject matter (people, objects, scenes, etc)
@@ -116,31 +126,36 @@ class TagWeighter:
                 
         # Remove common tag prefixes/suffixes for cleaner analysis
         tag = tag.replace("_", " ").strip()
-        words = tag.split()
         
-        # Subject indicators: Nouns describing physical things, beings, or scenes
-        if any(word.endswith(('ing', 'ed')) for word in words):  # Actions/states
-            return "subject"
-        if len(words) >= 2 and any(w in ['in', 'at', 'on', 'with'] for w in words):  # Spatial relations
-            return "subject"
+        # Parse with spaCy
+        doc = self.nlp(tag)
         
-        # Style indicators: Artistic techniques, periods, movements
-        if any(word.endswith(('ism', 'esque', 'like')) for word in words):  # Artistic movements/similarities
+        # Extract linguistic features
+        has_subject = any(token.dep_ in ['nsubj', 'dobj'] for token in doc)
+        has_location = any(token.dep_ == 'pobj' for token in doc)
+        has_action = any(token.pos_ == 'VERB' for token in doc)
+        has_quality = any(token.pos_ == 'ADJ' for token in doc)
+        has_technical = any(token.like_num or token.text.endswith(('k', 'p', 'fps')))
+        
+        # Style-specific patterns
+        style_suffixes = ('ism', 'esque', 'like', 'tone', 'color', 'shade')
+        has_style = any(token.text.endswith(style_suffixes) for token in doc)
+        
+        # Technical photography terms
+        tech_terms = {'close', 'wide', 'depth', 'field', 'ratio', 'light', 'shot', 'view', 'angle'}
+        has_tech_term = any(token.text in tech_terms for token in doc)
+        
+        # Determine category based on linguistic features
+        if has_subject or (has_action and not has_technical):
+            return "subject"
+        elif has_style or any(ent.label_ == 'WORK_OF_ART' for ent in doc.ents):
             return "style"
-        if any(word.endswith(('tone', 'color', 'shade')) for word in words):  # Visual properties
-            return "style"
-            
-        # Quality indicators: Technical specifications and quality descriptors
-        if any(word.isdigit() or word.endswith(('k', 'p', 'fps')) for word in words):  # Technical specs
-            return "quality"
-        if any(w in ['high', 'low', 'best', 'poor'] for w in words):  # Quality levels
-            return "quality"
-            
-        # Technical indicators: Photography and composition terms
-        if any(w in ['close', 'wide', 'depth', 'field', 'ratio', 'light'] for w in words):
+        elif has_technical or has_tech_term:
             return "technical"
-        if any(word.endswith(('shot', 'view', 'angle')) for word in words):
-            return "technical"
+        elif has_quality and not (has_subject or has_style):
+            return "quality"
+        elif has_location and not has_subject:
+            return "subject"  # Locations are treated as subjects
             
         # Default to meta for organizational/administrative tags
         return "meta"
