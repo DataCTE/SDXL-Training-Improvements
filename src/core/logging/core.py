@@ -256,9 +256,11 @@ class UnifiedLogger:
                 
                 # Log detailed progress at intervals
                 if self._completed_items % max(100, self._total_items // 20) == 0:
-                    self.logger.info(f"Progress update: {progress:.1f}%", extra={
+                    progress_pct = (self._completed_items / self._total_items * 100) if self._total_items > 0 else 0
+                    self.logger.info(f"Progress update: {progress_pct:.1f}%", extra={
                         'completed': self._completed_items,
                         'total': self._total_items,
+                        'progress_percent': progress_pct,
                         'eta_seconds': eta,
                         'iter_time': current_time,
                         **(context or {})
