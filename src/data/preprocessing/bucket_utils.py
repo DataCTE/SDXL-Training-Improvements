@@ -61,12 +61,11 @@ def generate_buckets(config: Config) -> List[BucketInfo]:
     # Sort buckets by total pixels
     buckets.sort(key=lambda x: x.dimensions.total_pixels)
     
-    # Log comprehensive bucket information
-    if logger.isEnabledFor(logging.INFO):
-        log_bucket_statistics(
-            {bucket.pixel_dims: [i] for i, bucket in enumerate(buckets)},
-            len(buckets)
-        )
+    # Always log bucket statistics
+    log_bucket_statistics(
+        {bucket.pixel_dims: [i] for i, bucket in enumerate(buckets)},
+        len(buckets)
+    )
     
     return buckets
 
