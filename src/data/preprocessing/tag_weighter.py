@@ -673,9 +673,9 @@ def create_tag_weighter(
 
 def create_tag_weighter_with_index(
     config: "Config",
-    image_paths: List[str],
+    image_paths: List[str], 
     captions: List[str],
-    model: Optional["StableDiffusionXL"] = None  # Add model parameter
+    model: Optional["StableDiffusionXL"] = None
 ) -> TagWeighter:
     """Create and initialize tag weighter with index."""
     weighter = TagWeighter(config, model=model)  # Pass model to TagWeighter
