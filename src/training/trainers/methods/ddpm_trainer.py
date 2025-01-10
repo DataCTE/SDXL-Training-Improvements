@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import multiprocessing
 import threading
+import numpy as np
 
 from src.core.logging import UnifiedLogger, LogConfig
 from src.models import StableDiffusionXL
@@ -18,6 +19,7 @@ from src.core.distributed import is_main_process
 from src.core.types import DataType, ModelWeightDtypes
 from src.data.config import Config
 from src.training.schedulers.novelai_v3 import configure_noise_scheduler
+from src.data.dataset import BucketBatchSampler
 
 logger = UnifiedLogger(LogConfig(name=__name__))
 
@@ -45,90 +47,73 @@ class DDPMTrainer:
         self.wandb_logger = wandb_logger
         self.config = config
         
-        # Create a new dataloader with proper multiprocessing settings
+        # Create a new dataloader with bucket-aware batching
         dataset = train_dataloader.dataset
+        
+        # Ensure cache manager is initialized in main process
+        if dataset.cache_manager is None:
+            from src.data.preprocessing import CacheManager
+            dataset.cache_manager = CacheManager(
+                cache_dir=config.global_config.cache.cache_dir,
+                config=config,
+                max_cache_size=config.global_config.cache.max_cache_size,
+                device=device
+            )
+            
+            # Load tag index to ensure it's available
+            tag_index = dataset.cache_manager.load_tag_index()
+            if tag_index is None:
+                logger.warning("No tag index found in cache")
+        
+        # Get dataloader kwargs from config
+        dataloader_kwargs = config.training.dataloader_kwargs
+        
+        # Create a bucket sampler
+        bucket_sampler = BucketBatchSampler(
+            dataset.bucket_indices,
+            batch_size=config.training.batch_size,
+            drop_last=True,
+            shuffle=dataset.is_train
+        )
+        
+        # Create dataloader with bucket sampler
         self.train_dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=train_dataloader.batch_size,
-            shuffle=train_dataloader.dataset.is_train,
-            num_workers=config.training.num_workers,
-            pin_memory=True,
-            drop_last=True,
-            collate_fn=dataset.collate_fn if hasattr(dataset, 'collate_fn') else None,
-            persistent_workers=True,
-            multiprocessing_context='spawn'
+            batch_sampler=bucket_sampler,  # Use bucket sampler instead of batch_size
+            num_workers=dataloader_kwargs["num_workers"],
+            pin_memory=dataloader_kwargs["pin_memory"],
+            worker_init_fn=self._worker_init_fn
         )
-        
-        # Log CUDA worker info
-        if torch.cuda.is_available() and config.training.num_workers > 0:
-            logger.info(
-                "Using spawn method for DataLoader workers with CUDA. "
-                "This may have a small startup overhead but is required for stability."
-            )
-        
-        # Remove tag weight caching since weights now come from dataset
-        self.default_weight = config.tag_weighting.default_weight
-        
-        # Verify effective batch size with fixed gradient accumulation
-        self.effective_batch_size = (
-            config.training.batch_size * 
-            config.training.gradient_accumulation_steps  # Use config value
-        )
-        logger.info(
-            f"Effective batch size: {self.effective_batch_size} "
-            f"(batch_size={config.training.batch_size} × "
-            f"gradient_accumulation_steps={config.training.gradient_accumulation_steps})"
-        )
-        
-        # Enable memory optimizations on individual components
-        if hasattr(self.model.unet, "enable_gradient_checkpointing"):
-            logger.info("Enabling gradient checkpointing for UNet")
-            self.model.unet.enable_gradient_checkpointing()
-        
-        if hasattr(self.model.vae, "enable_gradient_checkpointing"):
-            logger.info("Enabling gradient checkpointing for VAE")
-            self.model.vae.enable_gradient_checkpointing()
-        
-        # Enable xformers memory efficient attention if available
-        if config.training.enable_xformers:
-            logger.info("Enabling xformers memory efficient attention")
-            if hasattr(self.model.unet, "enable_xformers_memory_efficient_attention"):
-                self.model.unet.enable_xformers_memory_efficient_attention()
-                logger.info("Enabled xformers for UNet")
-            if hasattr(self.model.vae, "enable_xformers_memory_efficient_attention"):
-                self.model.vae.enable_xformers_memory_efficient_attention()
-                logger.info("Enabled xformers for VAE")
-        
-        # Move model to device
-        self.model.to(device)
-        
-        # Enable CPU offload if available
-        if hasattr(self.model, "enable_model_cpu_offload"):
-            logger.info("Enabling model CPU offload")
-            self.model.enable_model_cpu_offload()
-        
-        # Set up mixed precision training
-        self.mixed_precision = config.training.mixed_precision
-        if self.mixed_precision != "no":
-            self.scaler = GradScaler()
         
         # Initialize noise scheduler
         self.noise_scheduler = configure_noise_scheduler(config, device)
+    
+    @staticmethod
+    def _worker_init_fn(worker_id: int) -> None:
+        """Initialize worker process."""
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is None:
+            return
+            
+        dataset = worker_info.dataset
         
-        # Handle optimizer-specific dtype conversions
-        if config.optimizer.optimizer_type == "adamw_bf16":
-            logger.info("Converting model to bfloat16 format for AdamWBF16 optimizer")
-            bfloat16_weights = ModelWeightDtypes.from_single_dtype(DataType.BFLOAT_16)
-            self.model.unet.to(bfloat16_weights.unet.to_torch_dtype())
-            self.model.vae.to(bfloat16_weights.vae.to_torch_dtype())
-            self.model.text_encoder_1.to(bfloat16_weights.text_encoder.to_torch_dtype())
-            self.model.text_encoder_2.to(bfloat16_weights.text_encoder_2.to_torch_dtype())
-            model_dtype = torch.bfloat16
+        # Set worker device
+        if torch.cuda.is_available():
+            device_id = worker_id % torch.cuda.device_count()
+            torch.cuda.set_device(device_id)
+            dataset.device = torch.device(f'cuda:{device_id}')
         else:
-            model_dtype = next(self.model.parameters()).dtype
-        
-        logger.info(f"Model components using dtype: {model_dtype}")
-        
+            dataset.device = torch.device('cpu')
+            
+        # Initialize cache manager for worker
+        from src.data.preprocessing import CacheManager
+        dataset.cache_manager = CacheManager(
+            cache_dir=dataset.config.global_config.cache.cache_dir,
+            config=dataset.config,
+            max_cache_size=dataset.config.global_config.cache.max_cache_size,
+            device=dataset.device
+        )
+    
     def train(self, num_epochs: int):
         """Execute training loop with proper gradient accumulation."""
         total_steps = len(self.train_dataloader) * num_epochs
@@ -352,12 +337,35 @@ class DDPMTrainer:
 
             # Apply tag weights from metadata if present
             if "tag_info" in batch["metadata"]:
-                tag_weights = torch.tensor(
-                    [m["tag_info"]["total_weight"] for m in batch["metadata"]], 
-                    device=self.device, 
-                    dtype=model_dtype
-                )
-                loss = loss * tag_weights.mean()
+                # Extract all tag weights from each image's tag info
+                batch_weights = []
+                for m in batch["metadata"]:
+                    tag_info = m["tag_info"]
+                    image_weights = []
+                    for tag_type, tags in tag_info["tags"].items():
+                        for tag_data in tags:
+                            image_weights.append(tag_data["weight"])
+                    # Use mean of all tag weights for this image if any exist
+                    if image_weights:
+                        batch_weights.append(sum(image_weights) / len(image_weights))
+                    else:
+                        logger.warning("Image found with no tag weights, skipping weight application")
+                        batch_weights = None
+                        break
+                
+                # Apply weights if we have them for all images
+                if batch_weights:
+                    tag_weights = torch.tensor(batch_weights, device=self.device, dtype=model_dtype)
+                    loss = loss * tag_weights.mean()
+                    
+                    # Log weight statistics for debugging
+                    if self.wandb_logger:
+                        self.wandb_logger.log({
+                            "tag_weights/mean": tag_weights.mean().item(),
+                            "tag_weights/std": tag_weights.std().item() if len(tag_weights) > 1 else 0.0,
+                            "tag_weights/min": tag_weights.min().item(),
+                            "tag_weights/max": tag_weights.max().item()
+                        })
 
             # Ensure loss is finite and properly scaled
             if not torch.isfinite(loss):

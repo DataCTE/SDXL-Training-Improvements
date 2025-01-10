@@ -22,8 +22,9 @@ class BucketDimensions:
             if width <= 0 or height <= 0:
                 raise ValueError(f"Invalid dimensions: {width}x{height}")
             
-            if width % 8 != 0 or height % 8 != 0:
-                raise ValueError(f"Dimensions must be divisible by 8: {width}x{height}")
+            # Round dimensions to nearest multiple of 8
+            width = ((width + 7) // 8) * 8
+            height = ((height + 7) // 8) * 8
                 
             return cls(
                 width=width,
@@ -37,20 +38,6 @@ class BucketDimensions:
             )
         except Exception as e:
             raise ValueError(f"Failed to create bucket dimensions: {str(e)}")
-    
-    def validate(self) -> bool:
-        """Validate internal consistency of dimensions."""
-        checks = [
-            self.width > 0,
-            self.height > 0,
-            self.width_latent == self.width // 8,
-            self.height_latent == self.height // 8,
-            np.isclose(self.aspect_ratio, self.width / self.height),
-            np.isclose(self.aspect_ratio_inverse, 1 / self.aspect_ratio),
-            self.total_pixels == self.width * self.height,
-            self.total_latents == self.width_latent * self.height_latent
-        ]
-        return all(checks)
     
     def validate_with_details(self) -> Tuple[bool, Optional[str]]:
         """Validate dimensions with detailed error reporting."""
@@ -110,11 +97,6 @@ class BucketInfo:
         except Exception as e:
             return False, f"Validation error: {str(e)}"
     
-    def validate(self) -> bool:
-        """Validate bucket information."""
-        valid, _ = self.validate_with_details()
-        return valid
-    
     def to_dict(self) -> Dict[str, Any]:
         """Convert bucket info to serializable dictionary with validation."""
         try:
@@ -137,8 +119,9 @@ class BucketInfo:
             }
             
             # Validate after conversion
-            if not self.validate():
-                raise ValueError("Invalid bucket data after serialization")
+            valid, error = self.validate_with_details()
+            if not valid:
+                raise ValueError(f"Invalid bucket data after serialization: {error}")
                 
             return bucket_dict
             
@@ -199,17 +182,18 @@ class BucketInfo:
         dimensions = BucketDimensions.from_pixels(width, height)
         
         # Validate dimension consistency
-        if not dimensions.validate():
-            raise ValueError(f"Invalid dimensions for bucket: {width}x{height}")
+        valid, error = dimensions.validate_with_details()
+        if not valid:
+            raise ValueError(f"Invalid dimensions for bucket: {width}x{height} - {error}")
         
-        # Classify bucket
+        # Classify bucket using the rounded dimensions
         size_class = cls._classify_size(dimensions.total_pixels)
         aspect_class = cls._classify_aspect(dimensions.aspect_ratio)
         
         return cls(
             dimensions=dimensions,
-            pixel_dims=(width, height),
-            latent_dims=(width // 8, height // 8),
+            pixel_dims=(dimensions.width, dimensions.height),  # Use rounded dimensions
+            latent_dims=(dimensions.width_latent, dimensions.height_latent),  # Use computed latent dims
             bucket_index=bucket_index,
             size_class=size_class,
             aspect_class=aspect_class
@@ -233,24 +217,4 @@ class BucketInfo:
         elif ratio > 1.0:
             return "landscape"
         else:
-            return "portrait"
-    
-    def validate(self) -> bool:
-        """Comprehensive validation of all stored information."""
-        try:
-            # Validate dimensions object
-            if not self.dimensions.validate():
-                return False
-            
-            # Validate consistency between redundant storage
-            checks = [
-                self.pixel_dims == (self.dimensions.width, self.dimensions.height),
-                self.latent_dims == (self.dimensions.width_latent, self.dimensions.height_latent),
-                self.dimensions.aspect_ratio == self.pixel_dims[0] / self.pixel_dims[1],
-                self._classify_size(self.dimensions.total_pixels) == self.size_class,
-                self._classify_aspect(self.dimensions.aspect_ratio) == self.aspect_class
-            ]
-            return all(checks)
-            
-        except Exception:
-            return False 
+            return "portrait" 

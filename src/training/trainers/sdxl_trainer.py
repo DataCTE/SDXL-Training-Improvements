@@ -8,6 +8,7 @@ from src.core.logging import UnifiedLogger, LogConfig, WandbLogger
 from src.data.config import Config
 from src.training.trainers.base_router import BaseTrainer
 from src.core.distributed import is_main_process
+from src.core.types import ModelWeightDtypes, DataType
 
 logger = UnifiedLogger(LogConfig(name=__name__))
 
@@ -36,6 +37,92 @@ class SDXLTrainer(BaseTrainer):
         
         # Get gradient accumulation steps from config
         self.gradient_accumulation_steps = config.training.gradient_accumulation_steps
+        
+        # Handle optimizer-specific dtype conversions
+        if config.optimizer.optimizer_type == "adamw_bf16":
+            logger.info("Converting model components to bfloat16 format")
+            
+            # Create bfloat16 weight configuration
+            bfloat16_weights = ModelWeightDtypes.from_single_dtype(DataType.BFLOAT_16)
+            
+            # Convert model components and ensure they're on GPU
+            try:
+                logger.info("Moving model components to device and warming up VRAM...")
+                
+                # UNet is always trained
+                model_dtype = bfloat16_weights.unet.to_torch_dtype()
+                self.model.unet.to(device=self.device)
+                self.model.unet.to(model_dtype)
+                
+                # Warmup UNet by running a forward pass with matching dtypes
+                dummy_latents = torch.randn(1, 4, 128, 128, device=self.device, dtype=model_dtype)
+                dummy_timesteps = torch.ones(1, device=self.device, dtype=model_dtype)
+                dummy_encoder_hidden_states = torch.randn(1, 77, 2048, device=self.device, dtype=model_dtype)
+                dummy_added_cond_kwargs = {
+                    "text_embeds": torch.randn(1, 1280, device=self.device, dtype=model_dtype),
+                    "time_ids": torch.randn(1, 6, device=self.device, dtype=model_dtype)
+                }
+                _ = self.model.unet(
+                    dummy_latents,
+                    dummy_timesteps,
+                    encoder_hidden_states=dummy_encoder_hidden_states,
+                    added_cond_kwargs=dummy_added_cond_kwargs
+                )
+                torch.cuda.synchronize()
+                logger.info("Converted UNet to bfloat16 and warmed up")
+                
+                # VAE stays in float16 for stability
+                if hasattr(self.model, 'vae'):
+                    vae_dtype = torch.float16
+                    self.model.vae.to(device=self.device)
+                    self.model.vae.to(vae_dtype)
+                    # Warmup VAE with float16 - use RGB input (3 channels)
+                    dummy_images = torch.randn(1, 3, 1024, 1024, device=self.device, dtype=vae_dtype)  # RGB input
+                    _ = self.model.vae.encode(dummy_images)
+                    torch.cuda.synchronize()
+                    logger.info("VAE moved to device and warmed up")
+                
+                # Text encoders
+                if hasattr(self.model, 'text_encoder_1'):
+                    text_encoder_dtype = bfloat16_weights.text_encoder.to_torch_dtype()
+                    self.model.text_encoder_1.to(device=self.device)
+                    self.model.text_encoder_1.to(text_encoder_dtype)
+                    # Warmup text encoder 1
+                    dummy_text = torch.ones((1, 77), dtype=torch.long, device=self.device)  # Input IDs stay as long
+                    _ = self.model.text_encoder_1(dummy_text)
+                    torch.cuda.synchronize()
+                    logger.info("Converted text_encoder_1 to bfloat16 and warmed up")
+                    
+                if hasattr(self.model, 'text_encoder_2'):
+                    text_encoder_2_dtype = bfloat16_weights.text_encoder_2.to_torch_dtype()
+                    self.model.text_encoder_2.to(device=self.device)
+                    self.model.text_encoder_2.to(text_encoder_2_dtype)
+                    # Warmup text encoder 2
+                    _ = self.model.text_encoder_2(dummy_text)  # Reuse dummy_text since format is same
+                    torch.cuda.synchronize()
+                    logger.info("Converted text_encoder_2 to bfloat16 and warmed up")
+                
+                model_dtype = torch.bfloat16
+                
+                # Clear any remaining memory
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                
+                # Log memory usage
+                if torch.cuda.is_available():
+                    allocated = torch.cuda.memory_allocated() / (1024 * 1024 * 1024)  # Convert to GB
+                    reserved = torch.cuda.memory_reserved() / (1024 * 1024 * 1024)    # Convert to GB
+                    max_memory = torch.cuda.max_memory_allocated() / (1024 * 1024 * 1024)  # Convert to GB
+                    logger.info(f"GPU Memory: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved, {max_memory:.2f}GB peak")
+                
+            except Exception as e:
+                logger.error(f"Failed to convert model components: {e}")
+                raise
+                
+        else:
+            model_dtype = next(self.model.parameters()).dtype
+        
+        logger.info(f"Model components using dtype: {model_dtype}")
         
         # Initialize specific training method through composition
         if config.training.method.lower() == "ddpm":

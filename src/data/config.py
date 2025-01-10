@@ -152,32 +152,32 @@ class MethodConfig:
 
 @dataclass
 class TrainingConfig:
+    """Training configuration with proper defaults."""
+    method: str = "ddpm"
+    num_epochs: int = 10
     batch_size: int = 4
-    num_epochs: int = 100
-    save_every: int = 1
-    method: str = "ddpm"  # or "flow_matching"
-    prediction_type: str = "epsilon" # epsilon, v_prediction
-    num_workers: int = 4
-    pin_memory: bool = True
-    gradient_accumulation_steps: int = 4  # Fixed to 4 steps for stable training
-    mixed_precision: str = "fp16"  # or "bf16", "no"
+    gradient_accumulation_steps: int = 1
+    mixed_precision: str = "bf16"
     enable_xformers: bool = True
+    num_workers: int = 4
+    prediction_type: str = "v_prediction"
+    method_config: MethodConfig = field(default_factory=MethodConfig)
+    save_every: int = 1
+    pin_memory: bool = True
     clip_grad_norm: float = 1.0
     num_inference_steps: int = 50
-    method_config: MethodConfig = field(default_factory=MethodConfig)
     debug_mode: bool = False
     save_final_model: bool = True
 
     @property
     def dataloader_kwargs(self) -> dict:
-        """Get DataLoader configuration."""
+        """Get dataloader configuration."""
         return {
             "batch_size": self.batch_size,
             "num_workers": self.num_workers,
-            "pin_memory": self.pin_memory,
-            "shuffle": True,
-            "drop_last": True,  # Important for stable training
-            "persistent_workers": True if self.num_workers > 0 else False
+            "pin_memory": True,
+            "drop_last": True,
+            "persistent_workers": True
         }
 
 @dataclass
@@ -281,6 +281,7 @@ class TagWeightingConfig:
     """Configuration for tag weighting."""
     enable_tag_weighting: bool = False
     use_cache: bool = True
+    required: bool = False  # Whether tag weighting is required for training
     min_weight: float = 0.1
     max_weight: float = 3.0
     default_weight: float = 1.0
@@ -292,6 +293,7 @@ class TagWeightingConfig:
         return {
             "enable_tag_weighting": self.enable_tag_weighting,
             "use_cache": self.use_cache,
+            "required": self.required,
             "min_weight": self.min_weight,
             "max_weight": self.max_weight,
             "default_weight": self.default_weight,

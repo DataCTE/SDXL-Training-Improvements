@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 def generate_buckets(config: Config) -> List[BucketInfo]:
-    """Generate comprehensive bucket information with enhanced validation."""
+    """Generate comprehensive bucket information with dynamic sizing."""
     logger.info("Generating training buckets", extra={
         'min_size': config.global_config.image.min_size,
         'max_size': config.global_config.image.max_size,
@@ -23,57 +23,97 @@ def generate_buckets(config: Config) -> List[BucketInfo]:
     })
     
     buckets = []
-    for dims in config.global_config.image.supported_dims:
+    min_w, min_h = config.global_config.image.min_size
+    max_w, max_h = config.global_config.image.max_size
+    step = 64  # More granular step size
+    
+    # Generate base dimensions
+    widths = list(range(min_w, max_w + 1, step))
+    heights = list(range(min_h, max_h + 1, step))
+    
+    # Add common resolutions
+    common_sizes = [
+        (1024, 1024),  # Square
+        (1024, 1536), (1536, 1024),  # 2:3 and 3:2
+        (1024, 1280), (1280, 1024),  # 4:5 and 5:4
+        (1152, 896), (896, 1152),    # Similar to 4:3
+        (1216, 832), (832, 1216),    # Similar to 3:2
+        (1152, 1152),                # Larger square
+        (1280, 1536), (1536, 1280),  # Larger 4:5
+        (1408, 1024), (1024, 1408),  # Custom common size
+    ]
+    
+    # Add buckets for common sizes first
+    for w, h in common_sizes:
         try:
-            w, h = dims[0], dims[1]
             bucket = BucketInfo.from_dims(w, h, len(buckets))
             valid, error = validate_bucket_config(bucket, config)
             
-            if not valid:
-                logger.warning("Invalid bucket configuration", extra={
-                    'width': w,
-                    'height': h,
-                    'error': error
-                })
+            if valid:
+                buckets.append(bucket)
+                logger.debug(f"Added common bucket {w}x{h}")
+            else:
+                logger.debug(f"Invalid bucket {w}x{h}: {error}")
+        except Exception as e:
+            logger.debug(f"Skipping common size {w}x{h}: {e}")
+    
+    # Generate additional buckets with aspect ratio constraints
+    max_ratio = config.global_config.image.max_aspect_ratio
+    
+    for w in widths:
+        for h in heights:
+            # Skip if dimensions match existing bucket
+            if any(b.pixel_dims == (w, h) for b in buckets):
                 continue
                 
-            buckets.append(bucket)
-            logger.debug("Added bucket", extra={
-                'dims': f"{w}x{h}",
-                'aspect_ratio': f"{w/h:.2f}",
-                'total_pixels': w*h
-            })
-            
-            # Add flipped dimension if valid
-            if h != w:
-                flipped = BucketInfo.from_dims(h, w, len(buckets))
-                flipped_valid, flipped_error = validate_bucket_config(flipped, config)
+            try:
+                # Check aspect ratio
+                ratio = w / h
+                if not (1/max_ratio <= ratio <= max_ratio):
+                    continue
                 
-                if flipped_valid:
-                    buckets.append(flipped)
-                else:
-                    logger.debug(f"Skipping flipped bucket {h}x{w}: {flipped_error}")
-        
-        except Exception as e:
-            logger.warning(f"Error creating bucket for dims {dims}: {e}")
-            continue
+                bucket = BucketInfo.from_dims(w, h, len(buckets))
+                valid, error = validate_bucket_config(bucket, config)
+                
+                if valid:
+                    buckets.append(bucket)
+                    logger.debug(f"Added dynamic bucket {w}x{h}")
+                    
+            except Exception as e:
+                logger.debug(f"Skipping dimensions {w}x{h}: {e}")
     
-    # Sort buckets by total pixels
-    buckets.sort(key=lambda x: x.dimensions.total_pixels)
+    # Sort buckets by total pixels and deduplicate
+    buckets.sort(key=lambda x: (x.dimensions.total_pixels, x.dimensions.aspect_ratio))
     
-    # Always log bucket statistics
+    # Remove buckets that are too similar
+    filtered_buckets = []
+    for bucket in buckets:
+        # Check if this bucket is too similar to any existing filtered bucket
+        is_unique = True
+        for existing in filtered_buckets:
+            size_diff = abs(bucket.dimensions.total_pixels - existing.dimensions.total_pixels) / bucket.dimensions.total_pixels
+            aspect_diff = abs(bucket.dimensions.aspect_ratio - existing.dimensions.aspect_ratio)
+            
+            if size_diff < 0.1 and aspect_diff < 0.1:  # 10% similarity threshold
+                is_unique = False
+                break
+                
+        if is_unique:
+            filtered_buckets.append(bucket)
+    
+    # Log final bucket statistics
     log_bucket_statistics(
-        {bucket.pixel_dims: [i] for i, bucket in enumerate(buckets)},
-        len(buckets)
+        {bucket.pixel_dims: [i] for i, bucket in enumerate(filtered_buckets)},
+        len(filtered_buckets)
     )
     
-    return buckets
+    return filtered_buckets
 
 def compute_bucket_dims(
     original_size: Tuple[int, int],
     buckets: List[BucketInfo],
-    max_size_diff: float = 0.25,
-    max_aspect_diff: float = 0.1
+    max_size_diff: float = 0.3,
+    max_aspect_diff: float = 0.15
 ) -> Optional[BucketInfo]:
     """Find closest bucket with improved metrics and validation."""
     try:
@@ -89,22 +129,48 @@ def compute_bucket_dims(
         original_ratio = w / h
         original_pixels = w * h
         
-        # Find best matching bucket
+        # Find best matching bucket with weighted scoring
         best_bucket = None
         best_score = float('inf')
         
         for bucket in buckets:
             try:
+                # Calculate size difference as percentage
                 size_diff = abs(bucket.dimensions.total_pixels - original_pixels) / original_pixels
+                
+                # Calculate aspect ratio difference with tolerance for similar ratios
                 aspect_diff = abs(bucket.dimensions.aspect_ratio - original_ratio)
+                if aspect_diff > 1:  # Handle reciprocal aspect ratios
+                    aspect_diff = abs(1/bucket.dimensions.aspect_ratio - original_ratio)
+                
+                # Weight size difference more heavily for extreme cases
+                size_weight = 0.7 if size_diff > 0.2 else 0.5
+                aspect_weight = 1.0 - size_weight
                 
                 if size_diff <= max_size_diff and aspect_diff <= max_aspect_diff:
-                    score = size_diff * 0.6 + aspect_diff * 0.4
+                    score = size_diff * size_weight + aspect_diff * aspect_weight
                     if score < best_score:
                         best_score = score
                         best_bucket = bucket
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Error evaluating bucket: {e}")
                 continue
+        
+        if best_bucket is None:
+            # Create a new bucket if none found
+            try:
+                # Round dimensions to nearest bucket step
+                step = 64  # More granular bucket step
+                w = ((w + step - 1) // step) * step
+                h = ((h + step - 1) // step) * step
+                
+                # Create new bucket
+                new_bucket = BucketInfo.from_dims(w, h, len(buckets))
+                logger.info(f"Created new bucket for size {w}x{h}")
+                return new_bucket
+            except Exception as e:
+                logger.error(f"Failed to create new bucket: {e}")
+                return None
         
         return best_bucket
         
@@ -206,26 +272,41 @@ def validate_bucket_config(
     bucket: BucketInfo,
     config: "Config"
 ) -> Tuple[bool, Optional[str]]:
-    """Validate bucket configuration against global settings with enhanced error reporting."""
+    """Validate bucket configuration with flexible constraints."""
     try:
         image_config = config.global_config.image
         w, h = bucket.pixel_dims
         
-        # Comprehensive validation checks with detailed messages
+        # More flexible validation checks
+        min_w, min_h = image_config.min_size
+        max_w, max_h = image_config.max_size
+        
+        # Allow some tolerance around min/max sizes
+        size_tolerance = 0.1  # 10% tolerance
+        min_w = int(min_w * (1 - size_tolerance))
+        min_h = int(min_h * (1 - size_tolerance))
+        max_w = int(max_w * (1 + size_tolerance))
+        max_h = int(max_h * (1 + size_tolerance))
+        
+        # First validate internal bucket consistency
+        valid, error = bucket.validate_with_details()
+        if not valid:
+            return False, f"Internal validation failed: {error}"
+        
+        # Then validate against config constraints
         checks = [
-            (image_config.min_size[0] <= w <= image_config.max_size[0],
-             f"Width {w} outside allowed range {image_config.min_size[0]}-{image_config.max_size[0]}"),
+            (min_w <= w <= max_w,
+             f"Width {w} outside allowed range {min_w}-{max_w}"),
             
-            (image_config.min_size[1] <= h <= image_config.max_size[1],
-             f"Height {h} outside allowed range {image_config.min_size[1]}-{image_config.max_size[1]}"),
+            (min_h <= h <= max_h,
+             f"Height {h} outside allowed range {min_h}-{max_h}"),
             
-            (w % image_config.bucket_step == 0,
-             f"Width {w} not divisible by bucket_step {image_config.bucket_step}"),
+            # More flexible step size validation
+            (w % 8 == 0 and h % 8 == 0,
+             f"Dimensions must be divisible by 8: {w}x{h}"),
             
-            (h % image_config.bucket_step == 0,
-             f"Height {h} not divisible by bucket_step {image_config.bucket_step}"),
-            
-            (validate_aspect_ratio(w, h, image_config.max_aspect_ratio),
+            # More flexible aspect ratio validation
+            (validate_aspect_ratio(w, h, image_config.max_aspect_ratio * 1.2),  # 20% more tolerance
              f"Aspect ratio {w/h:.2f} outside allowed range")
         ]
         
@@ -233,11 +314,6 @@ def validate_bucket_config(
         for condition, error_message in checks:
             if not condition:
                 return False, error_message
-        
-        # Validate internal bucket consistency
-        valid, error = bucket.validate_with_details()
-        if not valid:
-            return False, f"Internal bucket validation failed: {error}"
             
         return True, None
         

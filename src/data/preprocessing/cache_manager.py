@@ -12,6 +12,9 @@ import hashlib
 from src.data.preprocessing.bucket_types import BucketDimensions, BucketInfo
 from collections import defaultdict
 from src.data.preprocessing.exceptions import CacheError
+import os
+import zlib
+
 logger = setup_logging(
     LogConfig(
         name=__name__,
@@ -20,6 +23,14 @@ logger = setup_logging(
         enable_memory=True
     )
 )
+
+def _get_json_encoder():
+    """Get the best available JSON encoder."""
+    try:
+        import orjson
+        return orjson
+    except ImportError:
+        return None
 
 class CacheManager:
     """Manages caching of preprocessed latents with comprehensive bucket information."""
@@ -41,6 +52,9 @@ class CacheManager:
             device = torch.device("cuda")
         self.device = device
         self.config = config
+        
+        # Try to get orjson for better performance
+        self._json_encoder = _get_json_encoder()
         
         # Initialize lock first
         self._lock = threading.Lock()
@@ -69,7 +83,7 @@ class CacheManager:
         # Initialize cache index
         self.index_path = self.cache_dir / "cache_index.json"
         self._lock = threading.Lock()
-        self.cache_index = self.load_cache_index()
+        self.cache_index = self._load_cache_index()
 
     def __getstate__(self):
         """Customize pickling behavior."""
@@ -88,6 +102,8 @@ class CacheManager:
 
     def rebuild_cache_index(self) -> None:
         """Rebuild cache index from disk as source of truth."""
+        logger.info("Starting rebuild_cache_index")
+        
         new_index = {
             "version": "1.0",
             "created_at": time.time(),
@@ -100,7 +116,7 @@ class CacheManager:
                 "metadata_size": 0
             },
             "tag_metadata": {},
-            "bucket_stats": defaultdict(int)
+            "bucket_stats": {}
         }
         
         # First, verify and load tag metadata
@@ -108,7 +124,6 @@ class CacheManager:
         tag_stats_path = self.get_tag_statistics_path()
         tag_images_path = self.get_image_tags_path()
         
-        tag_metadata_valid = False
         if tag_stats_path.exists() and tag_images_path.exists():
             try:
                 with open(tag_stats_path, 'r', encoding='utf-8') as f:
@@ -123,12 +138,10 @@ class CacheManager:
                         "metadata": stats_data["metadata"],
                         "images": images_data["images"]
                     }
-                    tag_metadata_valid = True
                     logger.info("Tag metadata verified successfully")
             except Exception as e:
                 logger.warning(f"Tag metadata verification failed: {e}")
-        
-        if not tag_metadata_valid:
+        else:
             logger.warning("Tag metadata invalid or missing, will need to be rebuilt")
             new_index["tag_metadata"] = {
                 "statistics": {},
@@ -136,157 +149,100 @@ class CacheManager:
                 "images": {}
             }
         
-        # Now scan VAE latents directory for primary files with progress tracking
+        # Now scan VAE latents directory for primary files
         logger.info("Scanning latent cache...")
         vae_files = list(self.vae_latents_dir.glob("*.pt"))
         
         if not vae_files:
             logger.info("No cached files found, initializing empty cache")
-            return new_index
-            
-        predictor = ProgressPredictor()
-        predictor.start(len(vae_files))
-        
-        processed = 0
-        update_interval = 20  # Fixed update interval for stability
-        
-        for i, vae_path in enumerate(vae_files):
-            cache_key = vae_path.stem
-            processed += 1
-            
-            # Update progress more frequently with percentage
-            if processed >= update_interval:
-                timing = predictor.update(processed)
-                progress = (i + 1) / len(vae_files) * 100
-                eta_str = predictor.format_time(timing["eta_seconds"])
-                logger.info(f"Scanning cache: {i+1}/{len(vae_files)} files ({progress:.1f}%) (ETA: {eta_str})")
-                processed = 0  # Reset counter
-                
-                # Force Python to process any pending events
-                time.sleep(0.001)
-            
-            clip_path = convert_path_to_pathlib(self.clip_latents_dir / f"{cache_key}.pt")
-            metadata_path = convert_path_to_pathlib(self.metadata_dir / f"{cache_key}.json")
-            
-            # Only process if we have all required files
-            if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
-                continue
-                
-            try:
-                # Get file sizes
-                vae_size = vae_path.stat().st_size
-                clip_size = clip_path.stat().st_size
-                metadata_size = metadata_path.stat().st_size
-                
-                with open(metadata_path) as f:
-                    metadata = json.load(f)
-                
-                # Update bucket statistics
-                if metadata.get("bucket_info"):
-                    bucket_idx = metadata["bucket_info"].get("bucket_index")
-                    if bucket_idx is not None:
-                        new_index["bucket_stats"][bucket_idx] += 1
-                
-                entry = {
-                    "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
-                    "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
-                    "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
-                    "created_at": metadata.get("created_at", time.time()),
-                    "is_valid": True,
-                    "file_sizes": {
-                        "vae": vae_size,
-                        "clip": clip_size,
-                        "metadata": metadata_size,
-                        "total": vae_size + clip_size + metadata_size
-                    },
-                    "bucket_info": metadata.get("bucket_info"),
-                    "tag_reference": metadata.get("tag_reference")
-                }
-                
-                new_index["entries"][cache_key] = entry
-                new_index["stats"]["total_entries"] += 1
-                new_index["stats"]["total_size"] += entry["file_sizes"]["total"]
-                new_index["stats"]["latents_size"] += vae_size + clip_size
-                new_index["stats"]["metadata_size"] += metadata_size
-                
-            except Exception as e:
-                logger.warning(f"Failed to process cache files for {cache_key}: {e}")
-                continue
-            
-            # Only process if we have all required files
-            if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
-                continue
-            
-            try:
-                # Get file sizes
-                vae_size = vae_path.stat().st_size
-                clip_size = clip_path.stat().st_size
-                metadata_size = metadata_path.stat().st_size
-                
-                with open(metadata_path) as f:
-                    metadata = json.load(f)
-                
-                # Verify metadata structure
-                required_fields = {
-                    "vae_latent_path", "clip_latent_path", "text",
-                    "bucket_info", "created_at", "tag_reference"
-                }
-                
-                if not all(field in metadata for field in required_fields):
-                    logger.warning(f"Incomplete metadata for {cache_key}, skipping")
-                    continue
-                
-                # Update bucket statistics
-                if metadata.get("bucket_info"):
-                    bucket_idx = metadata["bucket_info"].get("bucket_index")
-                    if bucket_idx is not None:
-                        new_index["bucket_stats"][bucket_idx] += 1
-                
-                entry = {
-                    "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
-                    "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
-                    "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
-                    "created_at": metadata.get("created_at", time.time()),
-                    "is_valid": True,
-                    "file_sizes": {
-                        "vae": vae_size,
-                        "clip": clip_size,
-                        "metadata": metadata_size,
-                        "total": vae_size + clip_size + metadata_size
-                    },
-                    "bucket_info": metadata.get("bucket_info"),
-                    "tag_reference": metadata.get("tag_reference")
-                }
-                
-                new_index["entries"][cache_key] = entry
-                new_index["stats"]["total_entries"] += 1
-                new_index["stats"]["total_size"] += entry["file_sizes"]["total"]
-                new_index["stats"]["latents_size"] += vae_size + clip_size
-                new_index["stats"]["metadata_size"] += metadata_size
-                
-            except Exception as e:
-                logger.warning(f"Failed to process cache files for {cache_key}: {e}")
-        
-        # Update cache index
-        with self._lock:
             self.cache_index = new_index
             self._save_index()
+            return
+            
+        # Process files with progress tracking
+        total_files = len(vae_files)
+        logger.info(f"Found {total_files} files to process")
         
-        # Log cache statistics
-        logger.info(f"Cache index rebuilt with {new_index['stats']['total_entries']} entries")
-        logger.info(f"Total cache size: {new_index['stats']['total_size'] / (1024*1024):.2f} MB")
-        logger.info(f"Latents size: {new_index['stats']['latents_size'] / (1024*1024):.2f} MB")
-        logger.info(f"Metadata size: {new_index['stats']['metadata_size'] / (1024*1024):.2f} MB")
+        for i, vae_path in enumerate(vae_files, 1):
+            try:
+                cache_key = vae_path.stem
+                clip_path = self.clip_latents_dir / f"{cache_key}.pt"
+                metadata_path = self.metadata_dir / f"{cache_key}.json"
+                
+                if not (vae_path.exists() and clip_path.exists() and metadata_path.exists()):
+                    continue
+                
+                # Get file sizes
+                sizes = {
+                    'vae': vae_path.stat().st_size,
+                    'clip': clip_path.stat().st_size,
+                    'metadata': metadata_path.stat().st_size
+                }
+                
+                # Read metadata
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+                
+                # Update bucket statistics - ensure string keys
+                if metadata.get("bucket_info"):
+                    bucket_idx = metadata["bucket_info"].get("bucket_index")
+                    if bucket_idx is not None:
+                        bucket_key = str(bucket_idx)  # Convert to string
+                        if bucket_key not in new_index["bucket_stats"]:
+                            new_index["bucket_stats"][bucket_key] = 0
+                        new_index["bucket_stats"][bucket_key] += 1
+                
+                # Create entry
+                entry = {
+                    "vae_latent_path": str(vae_path.relative_to(self.latents_dir)),
+                    "clip_latent_path": str(clip_path.relative_to(self.latents_dir)),
+                    "metadata_path": str(metadata_path.relative_to(self.latents_dir)),
+                    "created_at": metadata.get("created_at", time.time()),
+                    "is_valid": True,
+                    "file_sizes": {
+                        "vae": sizes['vae'],
+                        "clip": sizes['clip'],
+                        "metadata": sizes['metadata'],
+                        "total": sum(sizes.values())
+                    },
+                    "bucket_info": metadata.get("bucket_info"),
+                    "tag_reference": metadata.get("tag_reference")
+                }
+                
+                # Update index
+                new_index["entries"][cache_key] = entry
+                new_index["stats"]["total_entries"] += 1
+                new_index["stats"]["total_size"] += entry["file_sizes"]["total"]
+                new_index["stats"]["latents_size"] += sizes['vae'] + sizes['clip']
+                new_index["stats"]["metadata_size"] += sizes['metadata']
+                
+                # Log progress every 5%
+                if i % max(total_files // 20, 1) == 0:
+                    progress = (i / total_files) * 100
+                    logger.info(f"Processing files: {i}/{total_files} ({progress:.1f}%)")
+                
+            except Exception as e:
+                logger.warning(f"Failed to process cache files for {vae_path.stem}: {e}")
+                continue
         
-        # Log bucket distribution
-        if new_index["bucket_stats"]:
-            logger.info("\nBucket distribution:")
-            for bucket_idx, count in sorted(new_index["bucket_stats"].items()):
-                logger.info(f"Bucket {bucket_idx}: {count} images")
+        # Save the new index
+        logger.info("Saving cache index...")
+        self.cache_index = new_index
+        self._save_index()
+        
+        # Log final statistics
+        logger.info(f"Cache rebuild completed with {new_index['stats']['total_entries']} entries")
 
     def get_uncached_paths(self, image_paths: List[str]) -> List[str]:
         """Get list of paths that need processing."""
+        logger.info(f"Checking cache status for {len(image_paths)} paths...")
+        start_time = time.time()
+        
         uncached = []
+        processed = 0
+        last_log = time.time()
+        log_interval = 5.0  # Log every 5 seconds
+        
         for path in image_paths:
             path_str = str(convert_path_to_pathlib(path))
             cache_key = self.get_cache_key(path_str)
@@ -294,6 +250,28 @@ class CacheManager:
             
             if not cache_entry or not self._validate_cache_entry(cache_entry):
                 uncached.append(path)
+            
+            processed += 1
+            current_time = time.time()
+            
+            # Log progress periodically
+            if current_time - last_log > log_interval:
+                progress = (processed / len(image_paths)) * 100
+                elapsed = current_time - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                eta = (len(image_paths) - processed) / rate if rate > 0 else 0
+                
+                logger.info(
+                    f"Cache check progress: {processed}/{len(image_paths)} ({progress:.1f}%) "
+                    f"Found {len(uncached)} uncached (Rate: {rate:.1f} files/s, ETA: {eta:.1f}s)"
+                )
+                last_log = current_time
+        
+        total_time = time.time() - start_time
+        logger.info(
+            f"Cache check completed in {total_time:.2f}s. "
+            f"Found {len(uncached)} uncached paths out of {len(image_paths)} total"
+        )
                 
         return uncached
 
@@ -461,106 +439,208 @@ class CacheManager:
     def _validate_cache_entry(self, entry: Dict[str, Any]) -> bool:
         """Validate cache entry files exist and are valid."""
         try:
-            vae_path = self.latents_dir / entry["vae_latent_path"]
-            clip_path = self.latents_dir / entry["clip_latent_path"]
-            metadata_path = self.latents_dir / entry["metadata_path"]
+            # Quick validation of entry structure
+            if not entry or not entry.get("is_valid", False):
+                return False
+                
+            # Get all required paths at once
+            required_paths = [
+                self.latents_dir / entry["vae_latent_path"],
+                self.latents_dir / entry["clip_latent_path"],
+                self.latents_dir / entry["metadata_path"]
+            ]
             
-            return (
-                vae_path.exists() and
-                clip_path.exists() and
-                metadata_path.exists() and
-                entry.get("is_valid", False)
-            )
+            # Use a single list comprehension for existence check
+            return all(path.exists() for path in required_paths)
+            
         except Exception:
             return False
 
     def _save_index(self) -> None:
-        """Save cache index to disk atomically."""
+        """Save cache index to disk with progress logging."""
         temp_path = self.index_path.with_suffix('.tmp')
+        
         try:
-            with open(temp_path, 'w') as f:
-                json.dump(self.cache_index, f, indent=2)
-            temp_path.replace(self.index_path)
+            logger.info("Starting cache index save...")
+            
+            # JSON encoding
+            logger.info("Encoding cache data to JSON...")
+            if self._json_encoder:
+                json_data = self._json_encoder.dumps(self.cache_index)
+            else:
+                json_data = json.dumps(
+                    self.cache_index,
+                    separators=(',', ':'),
+                    ensure_ascii=False
+                ).encode('utf-8')
+            
+            # Compress
+            logger.info("Compressing data...")
+            compressed_data = zlib.compress(json_data, level=1)
+            
+            # Write to temp file
+            logger.info("Writing compressed data...")
+            with open(temp_path, 'wb', buffering=1024*1024) as f:
+                f.write(compressed_data)
+            
+            # Atomic replace
+            logger.info("Performing atomic file replacement...")
+            os.replace(str(temp_path), str(self.index_path))
+            
+            logger.info("Cache index saved successfully")
+            
         except Exception as e:
             logger.error(f"Failed to save cache index: {e}")
             if temp_path.exists():
                 temp_path.unlink()
+            raise
+            
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def _load_cache_index(self) -> Dict[str, Any]:
+        """Load main cache index from disk with compression support."""
+        try:
+            if self.index_path.exists():
+                with open(self.index_path, 'rb') as f:
+                    compressed_data = f.read()
+                    
+                # Decompress data
+                json_data = zlib.decompress(compressed_data)
+                
+                # Use the best available JSON decoder
+                if self._json_encoder:
+                    return self._json_encoder.loads(json_data)
+                else:
+                    return json.loads(json_data)
+        except zlib.error:
+            # Handle old uncompressed format
+            try:
+                with open(self.index_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load uncompressed cache index: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to load cache index: {e}")
+        
+        # Return new cache index if loading fails or file doesn't exist
+        return {
+            "version": "1.0",
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "entries": {},
+            "stats": {
+                "total_entries": 0,
+                "total_size": 0,
+                "latents_size": 0,
+                "metadata_size": 0
+            },
+            "bucket_stats": defaultdict(int),
+            "tag_metadata": {
+                "statistics": {},
+                "metadata": {},
+                "last_updated": time.time()
+            }
+        }
+
+    def _log_cache_statistics(self, new_index: Dict[str, Any]) -> None:
+        """Log cache statistics efficiently."""
+        stats = new_index["stats"]
+        
+        # Prepare all statistics in memory first
+        log_messages = [
+            f"Cache index rebuilt with {stats['total_entries']} entries",
+            f"Total cache size: {stats['total_size'] / (1024*1024):.2f} MB",
+            f"Latents size: {stats['latents_size'] / (1024*1024):.2f} MB",
+            f"Metadata size: {stats['metadata_size'] / (1024*1024):.2f} MB"
+        ]
+        
+        # Add bucket distribution if exists
+        if new_index["bucket_stats"]:
+            log_messages.append("\nBucket distribution:")
+            # Pre-sort and format bucket stats
+            bucket_stats = sorted(new_index["bucket_stats"].items())
+            log_messages.extend(
+                f"Bucket {idx}: {count} images"
+                for idx, count in bucket_stats
+            )
+        
+        # Log all messages at once
+        logger.info("\n".join(log_messages))
 
     def get_cache_key(self, path: Union[str, Path]) -> str:
         """Generate cache key from path."""
         path_str = str(convert_path_to_pathlib(path))
         return hashlib.md5(path_str.encode()).hexdigest()
 
-    def save_tag_index(self, tag_data: Dict[str, Any]) -> None:
-        """Save tag index data atomically with proper structure.
-        
-        Args:
-            tag_data: Dictionary containing tag metadata and statistics
-        """
-        with self._lock:
-            try:
-                tag_stats_path = self.get_tag_statistics_path()
-                tag_images_path = self.get_image_tags_path()
+    def save_tag_index(self, index_data: Dict[str, Any]) -> None:
+        """Save tag index with validation."""
+        try:
+            logger.info("Saving tag index...")
+            
+            # Validate index data structure
+            required_sections = ["metadata", "statistics"]
+            for section in required_sections:
+                if section not in index_data:
+                    raise ValueError(f"Missing required section: {section}")
+            
+            # Ensure images section exists
+            if "images" not in index_data:
+                index_data["images"] = {}
+            
+            # Save to file
+            tag_index_path = self.get_tag_statistics_path()
+            tag_index_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(tag_index_path, 'w') as f:
+                json.dump(index_data, f, indent=2)
                 
-                # Split data into appropriate files
-                stats_data = {
-                    "version": tag_data["version"],
-                    "metadata": tag_data["metadata"],
-                    "statistics": tag_data["statistics"]
-                }
+            logger.info(f"Tag index saved to {tag_index_path}")
+            
+            # Save image tags separately for faster access
+            if "images" in index_data:
+                image_tags_path = self.get_image_tags_path()
+                with open(image_tags_path, 'w') as f:
+                    json.dump(index_data["images"], f, indent=2)
+                logger.info(f"Image tags saved to {image_tags_path}")
                 
-                images_data = {
-                    "version": tag_data["version"],
-                    "updated_at": tag_data["updated_at"],
-                    "images": tag_data["images"]
-                }
-                
-                # Use atomic writes for both files
-                self._atomic_json_save(tag_stats_path, stats_data)
-                self._atomic_json_save(tag_images_path, images_data)
-                
-                # Update cache index with tag metadata
-                self.cache_index["tag_metadata"] = {
-                    "statistics": tag_data["statistics"],
-                    "metadata": tag_data["metadata"],
-                    "last_updated": time.time()
-                }
-                self._save_index()
-                
-                logger.info(f"Tag index saved successfully with {len(tag_data['images'])} entries")
-                
-            except Exception as e:
-                raise CacheError("Failed to save tag index", context={
-                    'tag_stats_path': str(tag_stats_path),
-                    'tag_images_path': str(tag_images_path),
-                    'error': str(e)
-                })
+        except Exception as e:
+            logger.error(f"Failed to save tag index: {e}")
+            raise
 
     def load_tag_index(self) -> Optional[Dict[str, Any]]:
-        """Load tag index from split files."""
+        """Load tag index with validation."""
         try:
-            # Load statistics
-            stats_path = self.get_tag_statistics_path()
-            if not stats_path.exists():
+            logger.info("Loading tag index...")
+            tag_index_path = self.get_tag_statistics_path()
+            
+            if not tag_index_path.exists():
+                logger.warning(f"Tag index not found at {tag_index_path}")
                 return None
             
-            with open(stats_path, 'r', encoding='utf-8') as f:
-                statistics_data = json.load(f)
+            with open(tag_index_path) as f:
+                index_data = json.load(f)
             
-            # Load image tags
-            tags_path = self.get_image_tags_path()
-            if tags_path.exists():
-                with open(tags_path, 'r', encoding='utf-8') as f:
-                    image_tags_data = json.load(f)
+            # Validate structure
+            required_sections = ["metadata", "statistics"]
+            for section in required_sections:
+                if section not in index_data:
+                    logger.warning(f"Tag index missing required section: {section}")
+                    return None
+            
+            # Load image tags if they exist
+            image_tags_path = self.get_image_tags_path()
+            if image_tags_path.exists():
+                with open(image_tags_path) as f:
+                    index_data["images"] = json.load(f)
+                logger.info(f"Loaded {len(index_data['images'])} image tags")
             else:
-                image_tags_data = {"images": {}}
+                logger.warning("Image tags file not found")
+                index_data["images"] = {}
             
-            # Combine data
-            return {
-                "metadata": statistics_data["metadata"],
-                "statistics": statistics_data["statistics"],
-                "images": image_tags_data["images"]
-            }
+            logger.info("Successfully loaded tag index")
+            return index_data
             
         except Exception as e:
             logger.error(f"Failed to load tag index: {e}")
@@ -600,101 +680,107 @@ class CacheManager:
                 'error': str(e)
             })
 
-    def verify_and_rebuild_cache(self, image_paths: List[str], captions: List[str]) -> None:
-        """Verify cache integrity and rebuild if necessary."""
+    def verify_and_rebuild_cache(
+        self,
+        image_paths: List[Union[str, Path]],
+        verify_existing: bool = True
+    ) -> None:
+        """Verify cache integrity and rebuild if necessary.
+        
+        Args:
+            image_paths: List of image paths to verify
+            verify_existing: If False, only verify entries that don't exist or are invalid
+        """
         try:
             logger.info("Starting cache verification...")
-            needs_rebuild = False
+            invalid_entries = []
+            missing_entries = []
             
-            # Step 1: Check if tag metadata structure exists
-            tag_stats_path = self.get_tag_statistics_path()
-            tag_images_path = self.get_image_tags_path()
-            
-            # Initialize empty structures if files don't exist
-            if not (tag_stats_path.exists() and tag_images_path.exists()):
-                logger.info("Initializing new tag metadata structure...")
+            # Check each image path
+            for path in image_paths:
+                cache_key = self.get_cache_key(path)
+                entry = self.cache_index["entries"].get(cache_key)
+                
+                if not entry:
+                    missing_entries.append(path)
+                    continue
+                    
+                if not entry.get("is_valid", False):
+                    invalid_entries.append(cache_key)
+                    continue
+                    
+                # Skip verification of existing valid entries if not requested
+                if not verify_existing:
+                    continue
+                    
+                # Verify file existence and integrity
                 try:
-                    self.initialize_tag_metadata()
-                    needs_rebuild = True
-                except Exception as e:
-                    raise CacheError("Failed to initialize tag metadata structure", context={
-                        'tag_stats_path': str(tag_stats_path),
-                        'tag_images_path': str(tag_images_path),
-                        'error': str(e)
-                    })
-        except Exception as e:
-            raise CacheError("Cache verification failed", context={
-                'error': str(e)
-            })
-        
-        # Step 2: Verify existing structure
-        if not needs_rebuild:
-            try:
-                with self._lock:
-                    # Load and verify tag statistics
-                    with open(tag_stats_path, 'r', encoding='utf-8') as f:
-                        stats_data = json.load(f)
-                    with open(tag_images_path, 'r', encoding='utf-8') as f:
-                        images_data = json.load(f)
+                    vae_path = self.latents_dir / entry["vae_latent_path"]
+                    clip_path = self.latents_dir / entry["clip_latent_path"]
+                    metadata_path = self.latents_dir / entry["metadata_path"]
                     
-                    # Verify required fields
-                    required_stats_fields = ["metadata", "statistics", "version"]
-                    required_images_fields = ["images", "version", "updated_at"]
-                    
-                    if not (all(field in stats_data for field in required_stats_fields) and
-                           all(field in images_data for field in required_images_fields)):
-                        logger.warning("Existing tag metadata missing required fields, rebuilding...")
-                        needs_rebuild = True
-                    
-                    # Check image coverage if structure is valid
-                    if not needs_rebuild:
-                        missing_tags = []
-                        missing_captions = []
-                        for path, caption in zip(image_paths, captions):
-                            if str(path) not in images_data.get("images", {}):
-                                missing_tags.append(str(path))
-                            if not caption:
-                                missing_captions.append(str(path))
-                            if len(missing_tags) > 5:  # Limit reported missing tags
-                                break
+                    if not all(p.exists() for p in [vae_path, clip_path, metadata_path]):
+                        invalid_entries.append(cache_key)
+                        continue
                         
-                        if missing_tags or missing_captions:
-                            logger.warning("Missing tag data or captions, rebuilding cache...")
-                            needs_rebuild = True
+                    # Load files to verify integrity
+                    try:
+                        vae_data = torch.load(vae_path, map_location="cpu")
+                        clip_data = torch.load(clip_path, map_location="cpu")
+                        with open(metadata_path) as f:
+                            metadata = json.loads(f.read())
                             
-            except Exception as e:
-                logger.warning(f"Failed to verify existing tag metadata: {e}")
-                needs_rebuild = True
-        
-        # Step 3: Rebuild if needed
-        if needs_rebuild:
-            logger.info("Starting cache rebuild...")
-            try:
-                with self._lock:
-                    self.rebuild_cache_index()
-                    
-                    # Verify rebuild success
-                    success, error_msg = self._verify_rebuild_success()
-                    if not success:
-                        raise CacheError("Cache rebuild failed", context={
-                            'cache_dir': str(self.cache_dir),
-                            'total_entries': len(self.cache_index.get("entries", {})),
-                            'tag_stats_exists': self.get_tag_statistics_path().exists(),
-                            'tag_images_exists': self.get_image_tags_path().exists(),
-                            'cache_structure': {
-                                'has_entries': "entries" in self.cache_index,
-                                'has_stats': "stats" in self.cache_index,
-                                'has_tag_metadata': "tag_metadata" in self.cache_index
-                            },
-                            'error': error_msg
-                        })
-                    logger.info("Cache rebuild completed successfully - ready for preprocessing")
-                    
-            except Exception as e:
-                raise CacheError("Failed to rebuild cache", context={
-                    'cache_dir': str(self.cache_dir),
-                    'error': str(e)
-                })
+                        # Verify expected keys exist
+                        if not all(k in vae_data for k in ["vae_latents", "time_ids"]):
+                            invalid_entries.append(cache_key)
+                            continue
+                            
+                        if not all(k in clip_data for k in ["prompt_embeds", "pooled_prompt_embeds"]):
+                            invalid_entries.append(cache_key)
+                            continue
+                            
+                        if not all(k in metadata for k in ["text", "bucket_info", "created_at"]):
+                            invalid_entries.append(cache_key)
+                            continue
+                            
+                    except Exception:
+                        invalid_entries.append(cache_key)
+                        continue
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to verify cache entry {cache_key}: {e}")
+                    invalid_entries.append(cache_key)
+            
+            # Remove invalid entries
+            if invalid_entries:
+                logger.warning(f"Found {len(invalid_entries)} invalid cache entries")
+                for key in invalid_entries:
+                    entry = self.cache_index["entries"].get(key)
+                    if entry:
+                        # Remove associated files
+                        try:
+                            for path_key in ["vae_latent_path", "clip_latent_path", "metadata_path"]:
+                                if path_key in entry:
+                                    file_path = self.latents_dir / entry[path_key]
+                                    if file_path.exists():
+                                        file_path.unlink()
+                        except Exception as e:
+                            logger.warning(f"Failed to remove files for {key}: {e}")
+                        
+                        # Remove from index
+                        self.cache_index["entries"].pop(key, None)
+                
+                self._save_index()
+            
+            if missing_entries:
+                logger.info(f"Found {len(missing_entries)} uncached entries")
+            
+            if not invalid_entries and not missing_entries:
+                logger.info("Cache verification complete - all entries valid")
+                
+        except Exception as e:
+            logger.error(f"Cache verification failed: {e}")
+            raise CacheError("Failed to verify cache", context={"error": str(e)})
 
     def _verify_rebuild_success(self) -> Tuple[bool, Optional[str]]:
         """Verify that cache rebuild was successful."""
@@ -799,35 +885,6 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Failed to load bucket info: {e}")
             return None
-
-    def load_cache_index(self) -> Dict[str, Any]:
-        """Load main cache index from disk or create new if not exists."""
-        try:
-            if self.index_path.exists():
-                with open(self.index_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to load cache index: {e}")
-        
-        # Return new cache index if loading fails or file doesn't exist
-        return {
-            "version": "1.0",
-            "created_at": time.time(),
-            "last_updated": time.time(),
-            "entries": {},
-            "stats": {
-                "total_entries": 0,
-                "total_size": 0,
-                "latents_size": 0,
-                "metadata_size": 0
-            },
-            "bucket_stats": defaultdict(int),
-            "tag_metadata": {
-                "statistics": {},
-                "metadata": {},
-                "last_updated": time.time()
-            }
-        }
 
     def initialize_tag_metadata(self) -> Dict[str, Any]:
         """Initialize empty tag metadata structure."""
@@ -958,4 +1015,34 @@ class CacheManager:
                 
         except Exception as e:
             logger.error(f"Tag cache verification failed: {e}", exc_info=True)
+            return False
+
+    def load_cache_index(self) -> Dict[str, Any]:
+        """Public method to load cache index."""
+        return self._load_cache_index()
+
+    def is_cached(self, image_path: Union[str, Path]) -> bool:
+        """Check if an image is properly cached with valid latents.
+        
+        Args:
+            image_path: Path to the image to check
+            
+        Returns:
+            bool: True if the image is cached and valid, False otherwise
+        """
+        try:
+            cache_key = self.get_cache_key(image_path)
+            entry = self.cache_index["entries"].get(cache_key)
+            
+            if not entry or not entry.get("is_valid", False):
+                return False
+                
+            # Verify file existence
+            vae_path = self.latents_dir / entry["vae_latent_path"]
+            clip_path = self.latents_dir / entry["clip_latent_path"]
+            metadata_path = self.latents_dir / entry["metadata_path"]
+            
+            return all(p.exists() for p in [vae_path, clip_path, metadata_path])
+            
+        except Exception:
             return False
