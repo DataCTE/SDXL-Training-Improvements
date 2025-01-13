@@ -142,6 +142,14 @@ class DDPMTrainer:
                         if batch is None:
                             logger.warning(f"Skipping invalid batch at step {step}")
                             continue
+                        
+                        # Validate batch contents
+                        required_keys = {"vae_latents", "prompt_embeds", "pooled_prompt_embeds", 
+                                       "time_ids", "metadata"}
+                        if not all(k in batch for k in required_keys):
+                            missing = required_keys - set(batch.keys())
+                            logger.warning(f"Batch missing required keys: {missing}")
+                            continue
                             
                         step_start_time = time.time()
                         
@@ -237,7 +245,8 @@ class DDPMTrainer:
             logger.error(f"Training loop failed: {str(e)}", exc_info=True)
             raise
         finally:
-            progress.close()
+            if progress is not None:
+                progress.close()
             
             # Save final checkpoint through parent trainer
             if is_main_process():

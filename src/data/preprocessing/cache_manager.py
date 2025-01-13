@@ -390,70 +390,213 @@ class CacheManager:
             logger.error(f"Failed to save to cache: {e}")
             return False
 
-    def load_tensors(self, cache_key: str) -> Optional[Dict[str, Any]]:
+    def load_tensors(self, cache_key: str) -> Dict[str, Any]:
         """Load cached tensors optimized for training."""
-        entry = self.cache_index["entries"].get(cache_key)
-        if not entry or not self._validate_cache_entry(entry):
-            return None
-        
+        entry = None
         try:
-            # Load VAE latents and time_ids
-            vae_path = self.latents_dir / entry["vae_latent_path"]
-            vae_data = torch.load(vae_path, map_location=self.device)
+            # Get cache entry with proper locking
+            with self._lock:
+                entry = self.cache_index["entries"].get(cache_key)
+                if not entry:
+                    raise RuntimeError(f"Cache entry not found for key: {cache_key}")
             
-            # Load CLIP embeddings
-            clip_path = self.latents_dir / entry["clip_latent_path"]
-            clip_data = torch.load(clip_path, map_location=self.device)
-            
-            # Load metadata
-            metadata_path = self.latents_dir / entry["metadata_path"]
-            with open(metadata_path) as f:
-                metadata = json.loads(f.read())
-            
-            return {
-                "vae_latents": vae_data["vae_latents"],
-                "prompt_embeds": clip_data["prompt_embeds"],
-                "pooled_prompt_embeds": clip_data["pooled_prompt_embeds"],
-                "time_ids": vae_data["time_ids"],
-                "metadata": {
-                    "vae_latent_path": entry["vae_latent_path"],
-                    "clip_latent_path": entry["clip_latent_path"],
-                    "text": metadata["text"],
-                    "bucket_info": entry["bucket_info"],
-                    "tag_info": entry.get("tag_info", {
-                        "tags": {
-                            "subject": [],
-                            "style": [],
-                            "quality": [],
-                            "technical": [],
-                            "meta": []
-                        }
-                    })
-                }
+            # Map path keys to entry keys
+            path_mapping = {
+                "vae": "vae_latent_path",
+                "clip": "clip_latent_path",
+                "metadata": "metadata_path"
             }
             
+            # Convert and check paths
+            paths = {}
+            for key, entry_key in path_mapping.items():
+                try:
+                    relative_path = entry[entry_key]
+                    full_path = self.latents_dir / relative_path
+                    logger.debug(f"Processing path for {key}:\n  Relative: {relative_path}\n  Full: {full_path}")
+                    
+                    converted_path = convert_path_to_pathlib(full_path, make_absolute=True)
+                    logger.debug(f"Converted path for {key}: {converted_path}")
+                    
+                    if not os.path.exists(converted_path):
+                        raise RuntimeError(
+                            f"File does not exist: {converted_path}\n"
+                            f"Original relative path: {relative_path}\n"
+                            f"Full path before conversion: {full_path}"
+                        )
+                    if os.path.getsize(converted_path) == 0:
+                        raise RuntimeError(f"File is empty: {converted_path}")
+                        
+                    paths[key] = converted_path
+                    
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to process path for {key}:\n"
+                        f"Original path: {entry[entry_key]}\n"
+                        f"Latents dir: {self.latents_dir}\n"
+                        f"Error: {str(e)}"
+                    ) from e
+            
+            # Load files with detailed error reporting
+            try:
+                # Check VAE file
+                vae_data = torch.load(paths["vae"], map_location=self.device)
+                required_vae_keys = ["vae_latents", "time_ids"]
+                if not all(k in vae_data for k in required_vae_keys):
+                    raise RuntimeError(f"Invalid VAE data structure. Missing keys: {[k for k in required_vae_keys if k not in vae_data]}")
+                
+                # Check CLIP file    
+                clip_data = torch.load(paths["clip"], map_location=self.device)
+                required_clip_keys = ["prompt_embeds", "pooled_prompt_embeds"]
+                if not all(k in clip_data for k in required_clip_keys):
+                    raise RuntimeError(f"Invalid CLIP data structure. Missing keys: {[k for k in required_clip_keys if k not in clip_data]}")
+                
+                # Check metadata file
+                with open(paths["metadata"], 'r', encoding='utf-8') as f:
+                    metadata = json.loads(f.read())
+                required_metadata_keys = ["text", "bucket_info"]
+                if not all(k in metadata for k in required_metadata_keys):
+                    raise RuntimeError(f"Invalid metadata structure. Missing keys: {[k for k in required_metadata_keys if k not in metadata]}")
+                
+                # Return the loaded and validated data
+                return {
+                    "vae_latents": vae_data["vae_latents"],
+                    "prompt_embeds": clip_data["prompt_embeds"],
+                    "pooled_prompt_embeds": clip_data["pooled_prompt_embeds"],
+                    "time_ids": vae_data["time_ids"],
+                    "metadata": {
+                        "text": metadata.get("text"),
+                        "bucket_info": entry["bucket_info"],
+                        "tag_info": entry.get("tag_info", {
+                            "tags": {
+                                "subject": [],
+                                "style": [],
+                                "quality": [],
+                                "technical": [],
+                                "meta": []
+                            }
+                        })
+                    }
+                }
+                
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load tensor files:\n"
+                    f"VAE path: {paths.get('vae')}\n"
+                    f"CLIP path: {paths.get('clip')}\n"
+                    f"Metadata path: {paths.get('metadata')}\n"
+                    f"Error: {str(e)}"
+                ) from e
+            
         except Exception as e:
-            logger.error(f"Failed to load cache entry: {e}")
-            return None
+            logger.error(
+                f"Failed to load tensors for cache key {cache_key}:\n"
+                f"Cache entry: {entry}\n"
+                f"Latents dir: {self.latents_dir}\n"
+                f"Error: {str(e)}",
+                exc_info=True
+            )
+            raise
 
     def _validate_cache_entry(self, entry: Dict[str, Any]) -> bool:
-        """Validate cache entry files exist and are valid."""
+        """Validate cache entry files exist and can be loaded."""
         try:
-            # Quick validation of entry structure
-            if not entry or not entry.get("is_valid", False):
+            # Validate entry structure
+            required_fields = ["vae_latent_path", "clip_latent_path", "metadata_path", "is_valid"]
+            if not all(field in entry for field in required_fields):
+                logger.error(f"Missing required fields in cache entry: {[f for f in required_fields if f not in entry]}")
                 return False
+            
+            if not entry["is_valid"]:
+                logger.error("Cache entry marked as invalid")
+                return False
+            
+            # Map path keys to entry keys
+            path_mapping = {
+                "vae": "vae_latent_path",
+                "clip": "clip_latent_path",
+                "metadata": "metadata_path"
+            }
+            
+            # Convert and check paths
+            paths = {}
+            for key, entry_key in path_mapping.items():
+                try:
+                    relative_path = entry[entry_key]
+                    full_path = self.latents_dir / relative_path
+                    logger.debug(f"Processing path for {key}:\n  Relative: {relative_path}\n  Full: {full_path}")
+                    
+                    converted_path = convert_path_to_pathlib(full_path, make_absolute=True)
+                    logger.debug(f"Converted path for {key}: {converted_path}")
+                    
+                    if not os.path.exists(converted_path):
+                        logger.error(
+                            f"Missing {key} file:\n"
+                            f"Converted path: {converted_path}\n"
+                            f"Original path: {relative_path}\n"
+                            f"Full path: {full_path}"
+                        )
+                        return False
+                        
+                    if os.path.getsize(converted_path) == 0:
+                        logger.error(f"Empty {key} file: {converted_path}")
+                        return False
+                        
+                    paths[key] = converted_path
+                    
+                except Exception as e:
+                    logger.error(
+                        f"Failed to process path for {key}:\n"
+                        f"Original path: {entry[entry_key]}\n"
+                        f"Latents dir: {self.latents_dir}\n"
+                        f"Error: {str(e)}"
+                    )
+                    return False
+            
+            # Try loading each file to verify contents
+            try:
+                # Check VAE file
+                vae_data = torch.load(paths["vae"], map_location=self.device)
+                required_vae_keys = ["vae_latents", "time_ids"]
+                if not all(k in vae_data for k in required_vae_keys):
+                    logger.error(f"Invalid VAE data structure. Missing keys: {[k for k in required_vae_keys if k not in vae_data]}")
+                    return False
                 
-            # Get all required paths at once
-            required_paths = [
-                self.latents_dir / entry["vae_latent_path"],
-                self.latents_dir / entry["clip_latent_path"],
-                self.latents_dir / entry["metadata_path"]
-            ]
+                # Check CLIP file    
+                clip_data = torch.load(paths["clip"], map_location=self.device)
+                required_clip_keys = ["prompt_embeds", "pooled_prompt_embeds"]
+                if not all(k in clip_data for k in required_clip_keys):
+                    logger.error(f"Invalid CLIP data structure. Missing keys: {[k for k in required_clip_keys if k not in clip_data]}")
+                    return False
+                
+                # Check metadata file
+                with open(paths["metadata"], 'r', encoding='utf-8') as f:
+                    metadata = json.loads(f.read())
+                required_metadata_keys = ["text", "bucket_info"]
+                if not all(k in metadata for k in required_metadata_keys):
+                    logger.error(f"Invalid metadata structure. Missing keys: {[k for k in required_metadata_keys if k not in metadata]}")
+                    return False
+                
+            except Exception as e:
+                logger.error(
+                    f"Failed to load and validate file contents:\n"
+                    f"VAE path: {paths.get('vae')}\n"
+                    f"CLIP path: {paths.get('clip')}\n"
+                    f"Metadata path: {paths.get('metadata')}\n"
+                    f"Error: {str(e)}"
+                )
+                return False
             
-            # Use a single list comprehension for existence check
-            return all(path.exists() for path in required_paths)
+            return True
             
-        except Exception:
+        except Exception as e:
+            logger.error(
+                f"Error validating cache entry:\n"
+                f"Error: {str(e)}\n"
+                f"Entry: {entry}\n"
+                f"Latents dir: {self.latents_dir}",
+                exc_info=True
+            )
             return False
 
     def _save_index(self) -> None:

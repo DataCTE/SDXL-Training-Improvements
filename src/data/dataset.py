@@ -25,10 +25,11 @@ from src.data.preprocessing import (
 )
 from src.models.encoders import CLIPEncoder
 import torch.nn.functional as F
-from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, group_images_by_bucket, log_bucket_statistics
+from src.data.preprocessing.bucket_utils import generate_buckets, compute_bucket_dims, group_images_by_bucket, log_bucket_statistics, verify_bucket_assignment
 from src.data.preprocessing.bucket_types import BucketInfo, BucketDimensions
 from src.data.preprocessing.exceptions import CacheError, DataLoadError, TagProcessingError
 from src.core.logging import UnifiedLogger, LogConfig
+from src.data.preprocessing.samplers import BucketBatchSampler
 
 logger = UnifiedLogger(LogConfig(name=__name__))
 
@@ -64,36 +65,14 @@ class AspectBucketDataset(Dataset):
             device=self.device
         )
         
-        # Filter for only valid cached images
-        valid_paths = []
-        valid_captions = []
+        self.image_paths = image_paths
+        self.captions = captions
         
-        logger.info("Validating cached data...")
-        for path, caption in zip(image_paths, captions):
-            cache_key = self.cache_manager.get_cache_key(path)
-            if self.cache_manager.is_cached(path):
-                # Verify the cached data is complete
-                cached_data = self.cache_manager.load_tensors(cache_key)
-                if cached_data is not None:
-                    valid_paths.append(path)
-                    valid_captions.append(caption)
+        # Generate buckets from config
+        self.buckets = generate_buckets(self.config)
         
-        if len(valid_paths) == 0:
-            raise RuntimeError("No valid cached data found. Please preprocess the dataset first.")
-        
-        if len(valid_paths) < len(image_paths):
-            logger.warning(f"Filtered out {len(image_paths) - len(valid_paths)} uncached/invalid images")
-        
-        self.image_paths = valid_paths
-        self.captions = valid_captions
-        
-        # Generate buckets
-        self.buckets = generate_buckets(config)
-        if not self.buckets:
-            raise DataLoadError("No valid buckets generated")
-        
-        # Initialize bucket indices with only valid images
-        self.bucket_indices = self._load_bucket_indices_from_cache()
+        # Initialize bucket assignments using bucket_utils
+        self.bucket_indices = group_images_by_bucket(self.image_paths, self.cache_manager)
         
         # Store model components as weak references
         self._model = None
@@ -177,60 +156,96 @@ class AspectBucketDataset(Dataset):
         """Return total number of samples across all buckets."""
         return sum(len(indices) for indices in self.bucket_indices.values())
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """Get a single item with proper tensor formatting."""
-        image_path = self.image_paths[idx]
-        cache_key = self.cache_manager.get_cache_key(image_path)
-        
-        # Load cached tensors
-        cached_data = self.cache_manager.load_tensors(cache_key)
-        if cached_data is None:
-            raise RuntimeError(f"Failed to load cached data for {image_path}")
-        
-        # Verify tensor shapes and types
-        for key in ["vae_latents", "prompt_embeds", "pooled_prompt_embeds", "time_ids"]:
-            tensor = cached_data[key]
-            if not isinstance(tensor, torch.Tensor):
-                raise RuntimeError(f"Invalid tensor type for {key}: {type(tensor)}")
-            
-            # Move to device and ensure float32
-            cached_data[key] = tensor.to(self.device, dtype=torch.float32)
-        
-        # Verify metadata
-        if "metadata" not in cached_data:
-            raise RuntimeError(f"Missing metadata for {image_path}")
-        
-        return cached_data
-
-    def collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        """Collate batch items for training with shape verification."""
+    def __getitem__(self, index: int) -> Optional[Dict[str, Any]]:
+        """Get a single item from the dataset with proper error handling."""
         try:
-            # Verify all items have same latent shape
-            first_shape = batch[0]["vae_latents"].shape
-            if not all(b["vae_latents"].shape == first_shape for b in batch):
-                shapes = [b["vae_latents"].shape for b in batch]
-                raise RuntimeError(f"Inconsistent shapes in batch: {shapes}")
+            # Get cache key for this index
+            cache_key = self.image_paths[index]
             
-            # Stack tensors with shape verification
-            collated = {
-                "vae_latents": torch.stack([b["vae_latents"] for b in batch]),
-                "prompt_embeds": torch.stack([b["prompt_embeds"] for b in batch]),
-                "pooled_prompt_embeds": torch.stack([b["pooled_prompt_embeds"] for b in batch]),
-                "time_ids": torch.stack([b["time_ids"] for b in batch]),
-                "metadata": [b["metadata"] for b in batch]
+            # Load tensors with error handling
+            try:
+                tensors = self.cache_manager.load_tensors(cache_key)
+                if tensors is None:
+                    logger.warning(f"Failed to load tensors for index {index}, cache_key: {cache_key}")
+                    return None
+                    
+                # Validate required keys
+                required_keys = {
+                    "vae_latents", "prompt_embeds", "pooled_prompt_embeds",
+                    "time_ids", "metadata"
+                }
+                if not all(k in tensors for k in required_keys):
+                    missing = required_keys - set(tensors.keys())
+                    logger.warning(f"Missing required keys for index {index}: {missing}")
+                    return None
+                    
+                return tensors
+                
+            except Exception as e:
+                logger.warning(
+                    f"Error loading tensors for index {index}:\n"
+                    f"Cache key: {cache_key}\n"
+                    f"Error: {str(e)}"
+                )
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in __getitem__ for index {index}: {str(e)}", exc_info=True)
+            return None
+
+    def collate_fn(self, batch: List[Dict[str, Any]]) -> Optional[Dict[str, torch.Tensor]]:
+        """Collate batch items for training with proper error handling."""
+        try:
+            # Filter out None values
+            valid_batch = [b for b in batch if b is not None]
+            
+            # Return None if no valid items
+            if not valid_batch:
+                logger.warning("No valid items in batch")
+                return None
+                
+            # Ensure all required keys are present
+            required_keys = {
+                "vae_latents", "prompt_embeds", "pooled_prompt_embeds",
+                "time_ids", "metadata"
             }
             
-            # Log shapes for debugging
-            logger.debug("Collated batch shapes:", {
-                k: v.shape if isinstance(v, torch.Tensor) else len(v) 
-                for k, v in collated.items()
-            })
-            
-            return collated
-            
+            # Validate each item
+            for item in valid_batch:
+                if not all(k in item for k in required_keys):
+                    missing = required_keys - set(item.keys())
+                    logger.warning(f"Item missing required keys: {missing}")
+                    return None
+                    
+            # Collate tensors
+            try:
+                collated = {
+                    "vae_latents": torch.stack([b["vae_latents"] for b in valid_batch]),
+                    "prompt_embeds": torch.stack([b["prompt_embeds"] for b in valid_batch]),
+                    "pooled_prompt_embeds": torch.stack([b["pooled_prompt_embeds"] for b in valid_batch]),
+                    "time_ids": torch.stack([b["time_ids"] for b in valid_batch]),
+                    "metadata": [b["metadata"] for b in valid_batch]
+                }
+                
+                # Validate tensor shapes
+                expected_batch_size = len(valid_batch)
+                for key, tensor in collated.items():
+                    if key != "metadata" and tensor.shape[0] != expected_batch_size:
+                        logger.warning(
+                            f"Invalid batch size for {key}: "
+                            f"got {tensor.shape[0]}, expected {expected_batch_size}"
+                        )
+                        return None
+                        
+                return collated
+                
+            except Exception as e:
+                logger.warning(f"Error collating tensors: {str(e)}")
+                return None
+                
         except Exception as e:
-            logger.error(f"Collate failed: {str(e)}")
-            raise
+            logger.error(f"Error in collate_fn: {str(e)}", exc_info=True)
+            return None
 
     # Setup Methods
     def _setup_device(self, device: Optional[torch.device], device_id: Optional[int]):
@@ -510,122 +525,6 @@ class AspectBucketDataset(Dataset):
         
         return img_tensor
 
-    def _process_single_image(self, image_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
-        """Process a single image with enhanced bucket handling."""
-        try:
-            # Load image
-            img = Image.open(image_path).convert('RGB')
-            original_size = img.size
-            
-            # Get bucket info with validation
-            bucket_info = compute_bucket_dims(original_size, self.buckets)
-            if bucket_info is None:
-                logger.warning(f"No suitable bucket found for image {image_path} with size {original_size}")
-                return None
-            
-            # Prepare image tensor
-            img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
-            
-            # VAE encode
-            with torch.no_grad():
-                vae_latents = self.vae.encode(
-                    img_tensor.unsqueeze(0)
-                ).latent_dist.sample()
-                vae_latents = vae_latents * self.vae.config.scaling_factor
-            
-            # Validate VAE latents shape
-            expected_shape = (4, bucket_info.latent_dims[1], bucket_info.latent_dims[0])
-            if vae_latents.shape[1:] != expected_shape[1:]:
-                logger.warning(f"VAE latent shape mismatch for {image_path}")
-                return None
-            
-            return {
-                "vae_latents": vae_latents.squeeze(0),
-                "time_ids": self._compute_time_ids(
-                    original_size=original_size,
-                    target_size=bucket_info.pixel_dims,
-                    crop_coords=(0, 0)
-                ),
-                "original_size": original_size,
-                "crop_coords": (0, 0),
-                "target_size": bucket_info.pixel_dims,
-                "bucket_info": bucket_info
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to process image {image_path}: {e}")
-            return None
-
-    def get_aspect_buckets(self) -> List[BucketInfo]:
-        """Return cached buckets."""
-        return self.buckets
-
-    def _group_images_by_bucket(self) -> Dict[Tuple[int, int], List[int]]:
-        """Group images by bucket dimensions."""
-        return group_images_by_bucket(
-            image_paths=self.image_paths,
-            cache_manager=self.cache_manager
-        )
-
-    def _log_bucket_statistics(self):
-        """Log statistics about bucket distribution using bucket_utils."""
-        log_bucket_statistics(
-            bucket_indices=self.bucket_indices,
-            total_images=len(self.image_paths)
-        )
-
-    def _load_bucket_indices_from_cache(self) -> Dict[Tuple[int, ...], List[int]]:
-        """Load bucket assignments from cache with enhanced bucket info."""
-        bucket_indices = defaultdict(list)
-        invalid_paths = []
-        
-        logger.info("Loading bucket indices from cache...")
-        
-        for idx, path in enumerate(self.image_paths):
-            try:
-                cache_key = self.cache_manager.get_cache_key(path)
-                cached_data = self.cache_manager.load_tensors(cache_key)
-                
-                if cached_data and "vae_latents" in cached_data:
-                    # Get latent shape and validate
-                    vae_latents = cached_data["vae_latents"]
-                    if not isinstance(vae_latents, torch.Tensor):
-                        invalid_paths.append(path)
-                        continue
-                        
-                    # Use actual latent dimensions as bucket key
-                    latent_shape = tuple(vae_latents.shape)  # Full shape including channels
-                    bucket_indices[latent_shape].append(idx)
-                else:
-                    invalid_paths.append(path)
-                    
-            except Exception as e:
-                logger.warning(f"Error loading bucket info for {path}: {e}")
-                invalid_paths.append(path)
-                continue
-        
-        # Remove invalid paths
-        if invalid_paths:
-            logger.warning(f"Found {len(invalid_paths)} invalid paths")
-            valid_indices = set(range(len(self.image_paths))) - set(idx for idx, path in enumerate(self.image_paths) if path in invalid_paths)
-            self.image_paths = [path for idx, path in enumerate(self.image_paths) if idx in valid_indices]
-            self.captions = [cap for idx, cap in enumerate(self.captions) if idx in valid_indices]
-        
-        # Log bucket distribution
-        logger.info("Final bucket distribution:")
-        total_samples = 0
-        for shape, indices in bucket_indices.items():
-            num_samples = len(indices)
-            total_samples += num_samples
-            logger.info(f"  Shape {shape}: {num_samples} images")
-        
-        logger.info(f"Total valid samples: {total_samples}")
-        
-        if not bucket_indices:
-            raise RuntimeError("No valid buckets found after filtering")
-        
-        return dict(bucket_indices)
-
     def __getstate__(self):
         """Get picklable state, excluding model components."""
         state = self.__dict__.copy()
@@ -697,152 +596,47 @@ class AspectBucketDataset(Dataset):
             logger.error(f"Error ensuring model components: {str(e)}", exc_info=True)
             raise
 
-class BucketBatchSampler:
-    """Samples batches ensuring all items in a batch are from the same bucket."""
+    def _group_images_by_bucket(self) -> Dict[Tuple[int, ...], List[int]]:
+        """Group images by their bucket dimensions using bucket utils."""
+        return group_images_by_bucket(self.image_paths, self.cache_manager)
     
-    def __init__(self, bucket_indices, batch_size, drop_last=True, shuffle=True):
-        self.bucket_indices = bucket_indices
-        self.batch_size = batch_size
-        self.drop_last = drop_last
-        self.shuffle = shuffle
-        
-        # Create batches for each bucket
-        self.batches = []
-        for indices in bucket_indices.values():
-            # Skip buckets with too few samples if dropping last
-            if len(indices) < batch_size and drop_last:
-                continue
-                
-            # Create batches for this bucket
-            bucket_batches = [
-                indices[i:i + batch_size] 
-                for i in range(0, len(indices), batch_size)
-            ]
-            
-            # Drop last incomplete batch if needed
-            if drop_last and len(bucket_batches[-1]) < batch_size:
-                bucket_batches = bucket_batches[:-1]
-                
-            self.batches.extend(bucket_batches)
-    
-    def __iter__(self):
-        if self.shuffle:
-            random.shuffle(self.batches)
-        return iter(self.batches)
-    
-    def __len__(self):
-        return len(self.batches)
+    def _log_bucket_statistics(self):
+        """Log bucket statistics using bucket utils."""
+        log_bucket_statistics(self.bucket_indices, len(self.image_paths))
+
+    def create_bucket_sampler(self, batch_size: int, drop_last: bool = True, shuffle: bool = True) -> BucketBatchSampler:
+        """Create a bucket-aware batch sampler."""
+        return BucketBatchSampler(
+            bucket_indices=self.bucket_indices,
+            batch_size=batch_size,
+            drop_last=drop_last,
+            shuffle=shuffle
+        )
 
 def create_dataset(
     config: Config,
     model: Optional[StableDiffusionXL] = None,
     verify_cache: bool = True
 ) -> AspectBucketDataset:
-    """Create dataset using config values with proper fallbacks."""
-    logger.info("Creating dataset...")
+    """Create dataset using config values."""
+    # Initialize cache manager with config
+    cache_manager = CacheManager(
+        cache_dir=config.global_config.cache.cache_dir,
+        config=config,
+        max_cache_size=config.global_config.cache.max_cache_size
+    )
     
-    try:
-        # Initialize cache manager with config
-        cache_manager = CacheManager(
-            cache_dir=config.global_config.cache.cache_dir,
-            config=config,
-            max_cache_size=config.global_config.cache.max_cache_size
-        )
-        
-        # Load data paths from config
-        logger.info(f"Loading data from: {config.data.train_data_dir}")
-        image_paths, captions = load_data_from_directory(config.data.train_data_dir)
-        if not image_paths:
-            raise DataLoadError("No images found in data directory", context={
-                'data_dir': config.data.train_data_dir
-            })
-            
-        # First verify cache integrity if requested
-        if verify_cache:
-            logger.info("Verifying cache and tag metadata...")
-            # Only verify entries that don't exist or are invalid
-            cache_manager.verify_and_rebuild_cache(image_paths, verify_existing=False)
-            # Update paths to only include valid images
-            valid_paths = [p for p in image_paths if cache_manager.is_cached(p)]
-            if len(valid_paths) < len(image_paths):
-                logger.info(f"Removed {len(image_paths) - len(valid_paths)} invalid images after cache verification")
-                image_paths = valid_paths
-                # Update captions to match valid paths
-                captions = [captions[image_paths.index(p)] for p in valid_paths]
-            
-        # Initialize tag weighting system
-        tag_weighter = None
-        if config.tag_weighting.enable_tag_weighting:
-            try:
-                # Check for existing tag cache after verification
-                tag_stats_path = cache_manager.get_tag_statistics_path()
-                tag_images_path = cache_manager.get_image_tags_path()
-
-                if (tag_stats_path.exists() and 
-                    tag_images_path.exists() and 
-                    config.tag_weighting.use_cache):
-                    logger.info("Loading tag weights from verified cache...")
-                    tag_weighter = TagWeighter(config, model)
-                    if tag_weighter.initialize_tag_system():
-                        logger.info("Successfully loaded tag weights from cache")
-                    else:
-                        if config.tag_weighting.required:
-                            raise ValueError("Failed to load required tag cache")
-                        logger.warning("Failed to load tag cache, computing new weights...")
-                        tag_weighter = create_tag_weighter_with_index(
-                            config=config,
-                            captions=captions,
-                            model=model
-                        )
-                else:
-                    logger.info("Computing tag weights and creating new index...")
-                    tag_weighter = create_tag_weighter_with_index(
-                        config=config,
-                        captions=captions,
-                        model=model
-                    )
-                    
-            except Exception as e:
-                logger.error(f"Failed to initialize tag weighting: {e}")
-                if config.tag_weighting.required:
-                    raise RuntimeError(f"Required tag weighting failed: {str(e)}") from e
-                logger.warning("Continuing without tag weighting")
-                tag_weighter = None
-        
-        # Create dataset instance with tag weighter
-        dataset = AspectBucketDataset(
-            config=config,
-            image_paths=image_paths,
-            captions=captions,
-            model=model,
-            tag_weighter=tag_weighter,
-            cache_manager=cache_manager
-        )
-        
-        # Only compute latents for uncached images
-        if verify_cache:
-            logger.info("Checking for uncached images...")
-            uncached_paths = cache_manager.get_uncached_paths(image_paths)
-            if uncached_paths:
-                logger.info(f"Found {len(uncached_paths)} uncached images. Starting precomputation...")
-                dataset._precompute_latents()
-            else:
-                logger.info("All images are cached")
-        
-        # Rebuild buckets after any cache updates
-        dataset.bucket_indices = dataset._group_images_by_bucket()
-        dataset._log_bucket_statistics()
-        
-        logger.info(
-            f"Dataset created successfully with {len(dataset)} samples "
-            f"in {len(dataset.buckets)} buckets"
-        )
-        
-        return dataset
-        
-    except Exception as e:
-        if isinstance(e, (CacheError, DataLoadError)):
-            logger.error(str(e))
-            raise
-        logger.error(f"Failed to create dataset: {str(e)}", exc_info=True)
-        raise RuntimeError(f"Dataset creation failed: {str(e)}") from e
+    # Load data paths from config
+    image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+    
+    # Create dataset instance
+    dataset = AspectBucketDataset(
+        config=config,
+        image_paths=image_paths,
+        captions=captions,
+        model=model,
+        tag_weighter=None,
+        cache_manager=cache_manager
+    )
+    
+    return dataset

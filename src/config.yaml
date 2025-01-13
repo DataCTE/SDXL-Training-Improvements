@@ -60,9 +60,9 @@ global_config:
   cache:
     cache_dir: "cache"
     max_cache_size: 10000
-    use_cache: true
-    cache_latents: true
-    cache_text_embeddings: true
+    use_cache: false
+    cache_latents: false
+    cache_text_embeddings: false
 
   # Logging configuration
   logging:
