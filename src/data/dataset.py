@@ -619,15 +619,17 @@ def create_dataset(
     verify_cache: bool = True
 ) -> AspectBucketDataset:
     """Create dataset using config values."""
-    # Initialize cache manager with config
+    try:
+        image_paths, captions = load_data_from_directory(config.data.train_data_dir)
+    except ValueError as e:
+        logger.warning(f"No valid images found in {config.data.train_data_dir}, returning empty dataset. Details: {e}")
+        image_paths, captions = [], []
+    
     cache_manager = CacheManager(
         cache_dir=config.global_config.cache.cache_dir,
         config=config,
         max_cache_size=config.global_config.cache.max_cache_size
     )
-    
-    # Load data paths from config
-    image_paths, captions = load_data_from_directory(config.data.train_data_dir)
     
     # Create dataset instance
     dataset = AspectBucketDataset(
