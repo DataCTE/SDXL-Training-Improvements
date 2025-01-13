@@ -91,6 +91,8 @@ class AspectBucketDataset(Dataset):
         if self.config.global_config.cache.cache_latents:
             logger.info("cache_latents=True -> Precomputing latents now...")
             self._precompute_latents()
+        else:
+            logger.info("cache_latents=False -> skipping precomputation. Latents will be computed on demand.")
     
     @staticmethod
     def _in_worker_process() -> bool:
@@ -162,38 +164,32 @@ class AspectBucketDataset(Dataset):
         return sum(len(indices) for indices in self.bucket_indices.values())
 
     def __getitem__(self, index: int) -> Optional[Dict[str, Any]]:
-        """Get a single item from the dataset with proper error handling."""
+        """
+        Get a single item from the dataset with proper error handling.
+        - If cache_latents=false, compute on demand every time (skip cache).
+        - If cache_latents=true, load from cache; if that fails, return None.
+        """
         try:
-            # Get cache key for this index
             cache_key = self.image_paths[index]
-            
-            # Load tensors with error handling
-            try:
-                tensors = self.cache_manager.load_tensors(cache_key)
-                if tensors is None:
-                    logger.warning(f"Failed to load tensors for index {index}, cache_key: {cache_key}")
-                    return None
-                    
-                # Validate required keys
-                required_keys = {
-                    "vae_latents", "prompt_embeds", "pooled_prompt_embeds",
-                    "time_ids", "metadata"
-                }
-                if not all(k in tensors for k in required_keys):
-                    missing = required_keys - set(tensors.keys())
-                    logger.warning(f"Missing required keys for index {index}: {missing}")
-                    return None
-                    
-                return tensors
-                
-            except Exception as e:
-                logger.warning(
-                    f"Error loading tensors for index {index}:\n"
-                    f"Cache key: {cache_key}\n"
-                    f"Error: {str(e)}"
-                )
+
+            if not self.config.global_config.cache.cache_latents:
+                # cache_latents=false => always compute on demand
+                return self._process_single_image(cache_key, self.captions[index])
+
+            # Otherwise, cache_latents=true => always load from cache; never fall back
+            tensors = self.cache_manager.load_tensors(cache_key)
+            if tensors is None:
+                logger.warning(f"Failed to load tensors for index {index}, returning None.")
                 return None
-                
+
+            # Validate required keys
+            required_keys = {"vae_latents", "prompt_embeds", "pooled_prompt_embeds", "time_ids", "metadata"}
+            if not all(k in tensors for k in required_keys):
+                missing = required_keys - set(tensors.keys())
+                logger.warning(f"Missing required keys for index {index}: {missing}")
+                return None
+
+            return tensors
         except Exception as e:
             logger.error(f"Error in __getitem__ for index {index}: {str(e)}", exc_info=True)
             return None
@@ -615,6 +611,44 @@ class AspectBucketDataset(Dataset):
             drop_last=drop_last,
             shuffle=shuffle
         )
+
+    def _process_single_image(self, path: str, caption: str) -> Optional[Dict[str, Any]]:
+        """
+        Compute latents for a single image on demand, similar to how _precompute_latents() does it.
+        Returns the dictionary of tensors/metadata, or None if something goes wrong.
+        """
+        try:
+            img = Image.open(path).convert('RGB')
+            # Determine appropriate bucket
+            bucket_info = compute_bucket_dims(img.size, self.buckets)
+            
+            # Prepare for VAE
+            img_tensor = self._prepare_image_tensor(img, bucket_info.pixel_dims)
+            vae_latents = self.vae.encode(
+                img_tensor.unsqueeze(0).to(self.device, dtype=self.vae.dtype)
+            ).latent_dist.sample() * self.vae.config.scaling_factor
+            
+            text_output = CLIPEncoder.encode_prompt(
+                batch={"text": [caption]},
+                text_encoders=self.text_encoders,
+                tokenizers=self.tokenizers,
+                is_train=self.is_train
+            )
+            
+            return {
+                "vae_latents": vae_latents.squeeze(0),
+                "prompt_embeds": text_output["prompt_embeds"][0],
+                "pooled_prompt_embeds": text_output["pooled_prompt_embeds"][0],
+                "time_ids": self._compute_time_ids(
+                    original_size=img.size,
+                    target_size=bucket_info.pixel_dims,
+                    crop_coords=(0, 0)
+                ),
+                "metadata": {"text": caption}
+            }
+        except Exception as e:
+            logger.warning(f"Failed on-demand latent computation for {path}, error: {e}")
+            return None
 
 def create_dataset(
     config: Config,
