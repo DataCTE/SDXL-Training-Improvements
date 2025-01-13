@@ -84,6 +84,13 @@ class CacheManager:
         self.index_path = self.cache_dir / "cache_index.json"
         self._lock = threading.Lock()
         self.cache_index = self._load_cache_index()
+        
+        # Determine if cache should be used:
+        self.use_cache = True
+        if self.config and hasattr(self.config, "global_config"):
+            if not self.config.global_config.cache.use_cache:
+                logger.info("Cache usage is disabled in config. The cache won't be used or validated.")
+                self.use_cache = False
 
     def __getstate__(self):
         """Customize pickling behavior."""
@@ -102,6 +109,10 @@ class CacheManager:
 
     def rebuild_cache_index(self) -> None:
         """Rebuild cache index from disk as source of truth."""
+        if not self.use_cache:
+            logger.debug("Skipping rebuild_cache_index because use_cache=False")
+            return
+        
         logger.info("Starting rebuild_cache_index")
         
         new_index = {
@@ -834,6 +845,10 @@ class CacheManager:
             image_paths: List of image paths to verify
             verify_existing: If False, only verify entries that don't exist or are invalid
         """
+        if not self.use_cache:
+            logger.info("Skipping cache verification because 'use_cache' is disabled.")
+            return
+        
         try:
             logger.info("Starting cache verification...")
             invalid_entries = []
