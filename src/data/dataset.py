@@ -86,6 +86,11 @@ class AspectBucketDataset(Dataset):
         
         if tag_weighter is not None and not self._in_worker_process():
             self._tag_weighter = tag_weighter
+        
+        # If enabled, precompute latents here using same code that would be used on demand
+        if self.config.global_config.cache.cache_latents:
+            logger.info("cache_latents=True -> Precomputing latents now...")
+            self._precompute_latents()
     
     @staticmethod
     def _in_worker_process() -> bool:
@@ -403,8 +408,6 @@ class AspectBucketDataset(Dataset):
         """Precompute and cache latents for both trainers."""
         try:
             logger.info("Starting latent precomputation...")
-            
-            # Log start of uncached path check
             logger.info("Checking for uncached paths...")
             start_time = time.time()
             uncached_paths = self.cache_manager.get_uncached_paths(self.image_paths)

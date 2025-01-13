@@ -47,7 +47,7 @@ training:
 # Dataset configuration
 data:
   train_data_dir: 
-    - "D:\\Datasets\\High-quality-photo10k"  # Can be single path or list of paths
+    - "D:\\work\\trainngsdxl\\High-quality-photo10k"  # Can be single path or list of paths
   validation_data_dir: null  # Optional validation data directory
   image_size: 1024
   center_crop: true
