@@ -635,6 +635,20 @@ class AspectBucketDataset(Dataset):
                 is_train=self.is_train
             )
             
+            # If tag weighting is enabled, embed tag_info in metadata
+            tag_info = None
+            if self.config.tag_weighting.enable_tag_weighting and self.tag_weighter:
+                extracted_tags = self.tag_weighter._extract_tags(caption)
+                tag_info = {
+                    "tags": {
+                        tag_type: [
+                            {"tag": t, "weight": self.tag_weighter.tag_weights[tag_type][t]}
+                            for t in extracted_tags[tag_type]
+                        ]
+                        for tag_type in extracted_tags
+                    }
+                }
+
             return {
                 "vae_latents": vae_latents.squeeze(0),
                 "prompt_embeds": text_output["prompt_embeds"][0],
@@ -644,7 +658,10 @@ class AspectBucketDataset(Dataset):
                     target_size=bucket_info.pixel_dims,
                     crop_coords=(0, 0)
                 ),
-                "metadata": {"text": caption}
+                "metadata": {
+                    "text": caption,
+                    **({"tag_info": tag_info} if tag_info else {})
+                }
             }
         except Exception as e:
             logger.warning(f"Failed on-demand latent computation for {path}, error: {e}")

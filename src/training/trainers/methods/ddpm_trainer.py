@@ -346,7 +346,7 @@ class DDPMTrainer:
 
             # Apply tag weights from metadata if present
             if "tag_info" in batch["metadata"]:
-                # Extract all tag weights from each image's tag info
+                # Collect weights from each sample's tag_info
                 batch_weights = []
                 for m in batch["metadata"]:
                     tag_info = m["tag_info"]
