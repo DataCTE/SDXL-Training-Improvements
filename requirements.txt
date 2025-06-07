@@ -1,5 +1,32 @@
+# Core dependencies
 torch>=2.0.0
-diffusers>=0.21.0
+torchvision>=0.15.0
+diffusers>=0.24.0
 transformers>=4.30.0
-accelerate>=0.21.0
-omegaconf
+accelerate>=0.24.0
+safetensors>=0.4.0
+
+# Training utilities
+wandb>=0.15.0
+omegaconf>=2.3.0
+einops>=0.7.0
+xformers>=0.0.22
+
+# Data processing
+Pillow>=10.0.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+
+# Optimization
+bitsandbytes>=0.41.0
+
+# Progress and logging
+tqdm>=4.65.0
+rich>=13.5.0
+
+# Configuration
+pyyaml>=6.0.1
+
+# Optional but recommended
+tensorboard>=2.14.0
+matplotlib>=3.7.0

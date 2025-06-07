@@ -1,186 +1,203 @@
-# SDXL Training Framework with Novel Research Methods
+# SDXL Training Framework
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A streamlined and optimized framework for fine-tuning Stable Diffusion XL models with state-of-the-art techniques.
 
-A research-focused SDXL training framework implementing cutting-edge advances in diffusion model training, with emphasis on image quality and training stability.
+## Quick Start
 
-## Adding New Training Methods
-
-The framework provides a template for easily implementing new training methods:
-
-```python
-# src/training/trainers/methods/example_method.py
-class ExampleMethodTrainer(SDXLTrainer):
-    name = "example_method"  # Your method's name
-
-    def compute_loss(self, batch: Dict[str, Tensor]) -> Dict[str, Any]:
-        """Implement your method's loss computation here."""
-        raise NotImplementedError()
-```
-
-To add a new method:
-1. Copy `example_method.py` template
-2. Implement the `compute_loss()` method with your training logic
-3. Register method in config.yaml:
-```yaml
-training:
-  method: "your_method_name"
-```
-
-The template handles all boilerplate code including:
-- Memory optimizations
-- Mixed precision training
-- Gradient accumulation
-- Progress tracking
-- Metric logging
-
-## Training Methods
-
-### Flow Matching with Logit-Normal Sampling [[4]](#references)
-
-Advanced training method that eliminates noise scheduling:
-
-```python
-# Configure Flow Matching training
-training:
-  method: "flow_matching"
-  batch_size: 4
-  learning_rate: 1.0e-6
-```
-
-Key benefits:
-- 30% faster convergence via optimal transport paths
-- Direct velocity field learning reduces instability
-- No noise schedule dependencies
-- Logit-normal time sampling for better coverage
-
-### NovelAI V3 UNet Architecture [[7]](#references)
-
-State-of-the-art model improvements:
-
-```python
-# Enable NovelAI V3 features
-training:
-  prediction_type: "v_prediction"
-  zero_terminal_snr: true
-  sigma_max: 20000.0
-```
-
-Improvements:
-- Zero Terminal SNR training
-  - Infinite noise approximation (σ_max ≈ 20000)
-  - Better artifact handling
-  - Enhanced detail preservation
-- V-prediction parameterization
-  - Stable high-frequency gradients
-  - Reduced color shifting
-- Dynamic Karras schedule
-  - Adaptive noise spacing
-  - Improved texture quality
-
-## Training Monitoring
-
-Training progress is monitored using Weights & Biases (wandb):
-- Real-time loss tracking
-- Generated sample visualization
-- Hyperparameter logging
-- Custom metric tracking
-- Experiment comparison
-
-Enable monitoring in config.yaml:
-```yaml
-training:
-  use_wandb: true
-```
-
-## Image Quality Improvements
-
-- Enhanced Detail Preservation
-  - Fine-grained texture generation
-  - Improved handling of complex patterns
-  - Better preservation of small objects and features
-
-- Color and Lighting
-  - More accurate color reproduction
-  - Enhanced dynamic range in highlights and shadows
-  - Better handling of complex lighting conditions
-
-- Composition and Structure
-  - Improved spatial coherence
-  - Better handling of perspective and depth
-  - More consistent object proportions
-
-
-## Requirements
-
-| Component | Version |
-|-----------|---------|
-| Python    | 3.8+ |
-| CUDA      | 11.7+ |
-| VRAM      | 24GB+ |
-
-## Installation
+### 1. Installation
 
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/DataCTE/SDXL-Training-Improvements.git
 cd SDXL-Training-Improvements
 
-# Install in development mode with all extras
-pip install -e ".[dev,docs]"
-
-# Verify installation
-python -c "import src; print(src.__version__)"
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-## Configuration
+### 2. Prepare Your Dataset
 
-The training framework is configured through a YAML file. Key configuration sections:
+Organize your dataset with the following structure:
+```
+data/train/
+├── image1.jpg
+├── image1.txt  # Caption for image1
+├── image2.png
+├── image2.txt  # Caption for image2
+└── ...
+```
+
+### 3. Configure Training
+
+Edit `config.yaml` to customize your training:
 
 ```yaml
-# Model configuration
 model:
-  pretrained_model_name: "stabilityai/stable-diffusion-xl-base-1.0"
-  num_timesteps: 1000
-  sigma_min: 0.002
-  sigma_max: 80.0
+  name: "stabilityai/stable-diffusion-xl-base-1.0"
+  dtype: "bf16"  # Use bf16 for better stability
 
-# Training parameters  
 training:
-  batch_size: 4
-  learning_rate: 4.0e-7
-  method: "ddpm"  # or "flow_matching"
-  zero_terminal_snr: true
+  batch_size: 1  # Adjust based on your GPU memory
+  gradient_accumulation_steps: 4
+  learning_rate: 1e-6
+  num_epochs: 100
   
-# Dataset configuration
-data:
-  train_data_dir: 
-    - "path/to/dataset1"
-    - "path/to/dataset2"
+dataset:
+  train_dir: "./data/train"  # Path to your dataset
 ```
 
-See [config.yaml](src/config.yaml) for full configuration options.
+### 4. Start Training
 
-## Usage Examples
-
-Basic training:
 ```bash
-# Train with default config
-python src/main.py --config config.yaml
+# Basic training
+python train.py
 
-# Train with custom config
-python src/main.py --config my_config.yaml
+# With custom config
+python train.py --config my_config.yaml
 
-# Distributed training
-torchrun --nproc_per_node=2 src/main.py --config config.yaml
+# Resume from checkpoint
+python train.py --resume checkpoints/checkpoint-500
 ```
 
-## References
+## Key Features
 
-4. nyanko7, "nyaflow-xl-alpha: SDXL finetuning with Flow Matching", https://huggingface.co/nyanko7/nyaflow-xl-alpha, 2024
-7. Ossa et al., "Improvements to SDXL in NovelAI Diffusion V3", arXiv:2409.15997, 2024
+### 🚀 Performance Optimizations
+- **Mixed Precision Training**: Automatic bf16/fp16 support for faster training
+- **Gradient Checkpointing**: Reduce memory usage by up to 60%
+- **xFormers Integration**: Efficient attention mechanisms
+- **Multi-GPU Support**: Built-in distributed training with Accelerate
+
+### 🎯 Training Improvements
+- **V-Prediction**: Better color accuracy and reduced artifacts
+- **Zero Terminal SNR**: Improved detail preservation
+- **Aspect Ratio Bucketing**: Train on multiple resolutions efficiently
+- **Advanced Schedulers**: Cosine annealing with warmup
+
+### 📊 Monitoring
+- **Weights & Biases Integration**: Real-time metrics tracking
+- **Automatic Checkpointing**: Never lose progress
+- **Rich Console Output**: Beautiful progress bars and status updates
+
+## Configuration Options
+
+### Model Settings
+```yaml
+model:
+  name: "model_id_or_path"  # HuggingFace model ID or local path
+  dtype: "bf16"             # fp32, fp16, or bf16
+```
+
+### Training Parameters
+```yaml
+training:
+  batch_size: 1                    # Images per GPU
+  gradient_accumulation_steps: 4   # Effective batch = batch_size * grad_accum * num_gpus
+  learning_rate: 1e-6              # Starting learning rate
+  num_epochs: 100                  # Total training epochs
+  
+  # Checkpointing
+  save_every_n_steps: 500          # Save frequency
+  checkpoint_dir: "./checkpoints"   # Save location
+  
+  # Memory optimization
+  gradient_checkpointing: true     # Trade compute for memory
+  use_xformers: true               # Efficient attention
+  
+  # Advanced options
+  method: "ddpm"                   # or "flow_matching" (experimental)
+```
+
+### Dataset Configuration
+```yaml
+dataset:
+  train_dir: "./data/train"        # Training data location
+  image_size: 1024                 # Base resolution
+  center_crop: true                # Center crop images
+  random_flip: true                # Horizontal flip augmentation
+  
+  # Multi-aspect training
+  use_aspect_ratio_bucketing: true # Group by aspect ratio
+  min_size: 512                    # Minimum dimension
+  max_size: 1536                   # Maximum dimension
+```
+
+### Advanced Settings (NovelAI V3)
+```yaml
+advanced:
+  v_prediction: true               # V-parameterization
+  zero_terminal_snr: true          # Zero SNR at t=T
+  sigma_max: 20000.0               # Maximum noise level
+  min_snr_gamma: 5.0               # SNR loss weighting
+```
+
+## Multi-GPU Training
+
+For distributed training across multiple GPUs:
+
+```bash
+# Single node, multiple GPUs
+accelerate launch train.py
+
+# Custom configuration
+accelerate config  # Follow the prompts
+accelerate launch train.py
+```
+
+## Memory Requirements
+
+| Resolution | Batch Size | VRAM Usage (bf16) | Recommended GPU |
+|------------|-----------|-------------------|-----------------|
+| 512x512    | 4         | ~8GB              | RTX 3070        |
+| 768x768    | 2         | ~12GB             | RTX 3080        |
+| 1024x1024  | 1         | ~16GB             | RTX 4080        |
+| 1024x1024  | 4         | ~24GB             | RTX 4090        |
+
+## Tips for Best Results
+
+1. **Dataset Quality**: 
+   - Use high-quality images (at least 1024x1024)
+   - Write detailed, accurate captions
+   - Aim for at least 100-1000 images for good results
+
+2. **Learning Rate**:
+   - Start with 1e-6 for fine-tuning
+   - Use 5e-7 for smaller datasets
+   - Monitor loss curves and adjust accordingly
+
+3. **Training Duration**:
+   - Most models converge within 50-200 epochs
+   - Save checkpoints frequently to find the best version
+   - Watch for overfitting on small datasets
+
+4. **Memory Optimization**:
+   - Enable gradient checkpointing for larger batch sizes
+   - Use bf16 instead of fp32 for 2x memory savings
+   - Reduce batch size and increase gradient accumulation
+
+## Troubleshooting
+
+### Out of Memory
+```yaml
+# Reduce memory usage
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  gradient_checkpointing: true
+  mixed_precision: "bf16"
+```
+
+### Slow Training
+- Enable xformers: `use_xformers: true`
+- Use bf16: `mixed_precision: "bf16"`
+- Reduce image size temporarily
+- Check GPU utilization with `nvidia-smi`
+
+### Poor Quality Results
+- Increase dataset size and quality
+- Lower learning rate
+- Train for more epochs
+- Try v-prediction mode
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file.
+MIT License - see [LICENSE](LICENSE) file for details.

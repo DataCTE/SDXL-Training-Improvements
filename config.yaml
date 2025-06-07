@@ -1,0 +1,57 @@
+# SDXL Training Configuration
+
+model:
+  name: "stabilityai/stable-diffusion-xl-base-1.0"
+  dtype: "bf16"  # Options: fp32, fp16, bf16
+  
+training:
+  # Core settings
+  batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 1e-6
+  num_epochs: 100
+  
+  # Method selection
+  method: "ddpm"  # Options: ddpm, flow_matching
+  
+  # Optimizer
+  optimizer: "adamw"  # Options: adamw, adamw_bf16, soap
+  weight_decay: 0.01
+  
+  # Learning rate schedule
+  warmup_steps: 100
+  lr_scheduler: "cosine"
+  
+  # Checkpointing
+  save_every_n_steps: 500
+  checkpoint_dir: "./checkpoints"
+  
+  # Mixed precision
+  mixed_precision: "bf16"
+  
+  # Memory optimization
+  gradient_checkpointing: true
+  use_xformers: true
+  
+dataset:
+  train_dir: "./data/train"
+  image_size: 1024
+  center_crop: true
+  random_flip: true
+  
+  # Multi-aspect ratio support
+  use_aspect_ratio_bucketing: true
+  min_size: 512
+  max_size: 1536
+  
+logging:
+  use_wandb: false
+  wandb_project: "sdxl-training"
+  log_every_n_steps: 10
+  
+# Advanced settings (NovelAI V3 improvements)
+advanced:
+  v_prediction: true
+  zero_terminal_snr: true
+  sigma_max: 20000.0
+  min_snr_gamma: 5.0

@@ -6,45 +6,80 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
 venv/
 env/
 ENV/
-CONVENTIONS.md
+.venv
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
 
 # IDE
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
 
-# Project specific
+# Training outputs
+checkpoints/
+output/
 outputs/
-cache/
 logs/
 wandb/
+tensorboard/
+
+# Data
+data/
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.bmp
+*.tiff
+
+# Model files
 *.pt
 *.pth
 *.ckpt
 *.safetensors
+*.bin
 
-# System
+# Cache
+.cache/
+cache/
+*.cache
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Config overrides
+config_*.yaml
+my_config.yaml
+local_config.yaml
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Documentation
+docs/_build/
+site/
 
